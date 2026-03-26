@@ -1,0 +1,19 @@
+[package]
+name = "nexus-api"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.7.4"
+tokio = { version = "1.36", features = ["full"] }
+sqlx = { version = "0.7.3", features = ["runtime-tokio", "mysql", "chrono"] }
+bcrypt = "0.15.0"
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0.114"
+chrono = "0.4.35"
+dotenvy = "0.15.7"
+tower-http = { version = "0.5.2", features = ["cors", "fs", "trace"] }
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+redis = { version = "0.24.0", features = ["tokio-comp"] }
+reqwest = { version = "0.11.25", features = ["json", "stream"] }
