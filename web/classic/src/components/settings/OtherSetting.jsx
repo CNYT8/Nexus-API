@@ -395,10 +395,10 @@ const OtherSetting = () => {
                 <Col span={16}>
                   <Space>
                     <Text>
-                      {t('当前版本')}：
+                      {t('Nexus-API当前版本')}：
                       {statusState?.status?.version || t('未知')}
                     </Text>
-                    <Text type='tertiary' size='small'>
+                    <Text type='tertiary'>
                       {t('基于 new-api')}{' '}
                       {versionLoading ? (
                         t('加载中')

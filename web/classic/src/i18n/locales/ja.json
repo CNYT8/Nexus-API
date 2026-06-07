@@ -1,5 +1,6 @@
 {
   "Nexus-API 暂时不支持新版前端，敬请期待": "Nexus-API は新フロントエンドに未対応です。お楽しみに。",
+  "Nexus-API当前版本": "Nexus-API 現在のバージョン",
   "Nexus-API项目仓库地址：": "Nexus-API Project Repository:",
   "translation": {
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + Web検索 {{count}}回 / 1K回 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one",

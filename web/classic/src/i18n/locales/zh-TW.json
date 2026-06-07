@@ -1,5 +1,6 @@
 {
   "Nexus-API 暂时不支持新版前端，敬请期待": "Nexus-API 暫時不支援新版前端，敬請期待",
+  "Nexus-API当前版本": "Nexus-API 目前版本",
   "Nexus-API项目仓库地址：": "Nexus-API 项目仓库地址：",
   "translation": {
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_other": " + Web搜尋 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",

@@ -1,5 +1,6 @@
 {
   "Nexus-API 暂时不支持新版前端，敬请期待": "Nexus-API hiện chưa hỗ trợ giao diện mới. Vui lòng chờ đợi.",
+  "Nexus-API当前版本": "Phiên bản Nexus-API hiện tại",
   "Nexus-API项目仓库地址：": "Nexus-API Project Repository:",
   "translation": {
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + Tìm kiếm Web {{count}} lần / 1K lần * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",

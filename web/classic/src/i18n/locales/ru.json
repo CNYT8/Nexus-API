@@ -1,5 +1,6 @@
 {
   "Nexus-API 暂时不支持新版前端，敬请期待": "Новый интерфейс пока не поддерживается Nexus-API. Следите за обновлениями.",
+  "Nexus-API当前版本": "Текущая версия Nexus-API",
   "Nexus-API项目仓库地址：": "Nexus-API Project Repository:",
   "translation": {
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + Web-поиск {{count}} раз / 1K раз * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
