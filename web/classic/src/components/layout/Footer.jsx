@@ -209,15 +209,7 @@ const FooterBar = () => {
             </a>
             <span className='!text-semi-color-text-3 ml-2 text-xs'>
               {' '}|{' '}
-              <a
-                href='https://github.com/QuantumNous/new-api'
-                target='_blank'
-                rel='noopener noreferrer'
-                className='!text-semi-color-primary'
-              >
-                New API
-              </a>{' '}
-              {t('contributed frontend design')}
+              {t('基于 new-api 二改')}
             </span>
           </div>
         </div>

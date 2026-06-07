@@ -1,7 +1,6 @@
 {
   "Nexus-API 暂时不支持新版前端，敬请期待": "Nexus-API 暂时不支持新版前端，敬请期待",
   "Nexus-API项目仓库地址：": "Nexus-API 项目仓库地址：",
-  "contributed frontend design": "贡献前端设计",
   "translation": {
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_other": " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
     " + 图片生成调用 {{symbol}}{{price}} / 1次 * {{ratioType}} {{ratio}}": " + 图片生成调用 {{symbol}}{{price}} / 1次 * {{ratioType}} {{ratio}}",
@@ -2633,6 +2632,7 @@
   "加载中": "加载中",
   "原版 new-api 最新版本": "原版 new-api 最新版本",
   "基于 new-api": "基于 new-api",
+  "基于 new-api 二改": "基于 new-api 二改",
   "已是最新版本": "已是最新版本",
   "当前 Nexus-API 版本": "当前 Nexus-API 版本",
   "我知道了": "我知道了",
