@@ -107,22 +107,20 @@ export function UpdateCheckerSection({
           <div className='grid gap-4 md:grid-cols-2'>
             <div className='rounded-lg border p-4'>
               <div className='text-muted-foreground text-sm'>
-                {t('Current Nexus-API Version')}
+                {t('Current version')}
               </div>
               <div className='text-lg font-semibold'>{version}</div>
-            </div>
-            <div className='rounded-lg border p-4'>
-              <div className='text-muted-foreground text-sm'>
-                {t('Latest Original new-api Version')}
+              <div className='text-muted-foreground mt-1 text-xs'>
+                {t('Based on new-api')}{' '}
+                <a
+                  href={latestNewApiRelease?.html_url ?? NEW_API_RELEASES_URL}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='hover:text-foreground underline-offset-2 hover:underline'
+                >
+                  {latestNewApiRelease?.tag_name ?? t('Unknown')}
+                </a>
               </div>
-              <a
-                href={latestNewApiRelease?.html_url ?? NEW_API_RELEASES_URL}
-                target='_blank'
-                rel='noopener noreferrer'
-                className='text-lg font-semibold hover:underline'
-              >
-                {latestNewApiRelease?.tag_name ?? t('Unknown')}
-              </a>
             </div>
             <div className='rounded-lg border p-4'>
               <div className='text-muted-foreground text-sm'>

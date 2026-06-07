@@ -1,4 +1,6 @@
 {
+  "Based on new-api": "На основе new-api",
+  "Frontend design and development by New API contributors.": "Дизайн и разработка интерфейса — контрибьюторы New API.",
   "Nexus-API": "Nexus-API",
   "Nexus-API Project Repository:": "Репозиторий проекта Nexus-API:",
   "footer.nexus.projectAttribution": "— изменённый downstream-проект на основе",

@@ -1,4 +1,6 @@
 {
+  "Based on new-api": "new-api ベース",
+  "Frontend design and development by New API contributors.": "フロントエンドのデザインと開発：New API コントリビューター",
   "Nexus-API": "Nexus-API",
   "Nexus-API Project Repository:": "Nexus-API プロジェクトリポジトリ:",
   "footer.nexus.projectAttribution": "は次のプロジェクトを基にした下流の改修プロジェクトです:",

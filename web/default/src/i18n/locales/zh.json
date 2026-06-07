@@ -1,4 +1,6 @@
 {
+  "Based on new-api": "基于 new-api",
+  "Frontend design and development by New API contributors.": "前端设计与开发由 New API 贡献者提供。",
   "Nexus-API": "Nexus-API",
   "Nexus-API Project Repository:": "Nexus-API 项目仓库：",
   "footer.nexus.projectAttribution": "是基于以下项目的下游修改项目：",

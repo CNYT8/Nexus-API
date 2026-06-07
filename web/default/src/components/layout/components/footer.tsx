@@ -144,6 +144,8 @@ function ProjectAttribution(props: { currentYear: number; inline?: boolean }) {
       >
         {t('New API')}
       </a>
+      <br />
+      {t('Frontend design and development by New API contributors.')}
     </span>
   )
   if (props.inline) {

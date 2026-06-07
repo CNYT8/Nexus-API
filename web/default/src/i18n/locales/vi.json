@@ -1,4 +1,6 @@
 {
+  "Based on new-api": "Dựa trên new-api",
+  "Frontend design and development by New API contributors.": "Thiết kế và phát triển giao diện bởi các đóng góp viên của New API.",
   "Nexus-API": "Nexus-API",
   "Nexus-API Project Repository:": "Kho dự án Nexus-API:",
   "footer.nexus.projectAttribution": "là dự án downstream đã chỉnh sửa dựa trên",

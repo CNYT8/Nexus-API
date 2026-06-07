@@ -1,4 +1,5 @@
 {
+  "Nexus-API 暂时不支持新版前端，敬请期待": "Nexus-API hiện chưa hỗ trợ giao diện mới. Vui lòng chờ đợi.",
   "Nexus-API项目仓库地址：": "Nexus-API Project Repository:",
   "translation": {
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + Tìm kiếm Web {{count}} lần / 1K lần * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
@@ -4218,8 +4219,10 @@
   },
   "加载中": "Đang tải",
   "原版 new-api 最新版本": "Phiên bản new-api gốc mới nhất",
+  "基于 new-api": "Dựa trên new-api",
   "已是最新版本": "Bạn đang dùng phiên bản mới nhất",
   "当前 Nexus-API 版本": "Phiên bản Nexus-API hiện tại",
+  "我知道了": "Đã hiểu",
   "是基于": "is a modified downstream project based on",
   "暂无更新说明": "Không có ghi chú phát hành",
   "的下游修改项目。": "."

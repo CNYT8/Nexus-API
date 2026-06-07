@@ -42,6 +42,7 @@ const NEXUS_API_LATEST_RELEASE_API =
 const NEW_API_RELEASES_URL = 'https://github.com/QuantumNous/new-api/releases';
 const NEW_API_LATEST_RELEASE_API =
   'https://api.github.com/repos/QuantumNous/new-api/releases/latest';
+const NEXUS_DEFAULT_FRONTEND_ENABLED = false;
 
 const OtherSetting = () => {
   const { t } = useTranslation();
@@ -298,6 +299,14 @@ const OtherSetting = () => {
   };
 
   const switchToDefaultFrontend = () => {
+    if (!NEXUS_DEFAULT_FRONTEND_ENABLED) {
+      Modal.info({
+        title: t('切换到新版前端'),
+        content: t('Nexus-API 暂时不支持新版前端，敬请期待'),
+        okText: t('我知道了'),
+      });
+      return;
+    }
     Modal.confirm({
       title: t('切换到新版前端'),
       content: t('切换后页面会自动刷新，并进入新版前端。是否继续？'),
@@ -384,13 +393,13 @@ const OtherSetting = () => {
             <Form.Section text={t('系统信息')}>
               <Row>
                 <Col span={16}>
-                  <Space vertical align='start'>
+                  <Space>
                     <Text>
-                      {t('当前 Nexus-API 版本')}：
+                      {t('当前版本')}：
                       {statusState?.status?.version || t('未知')}
                     </Text>
-                    <Text>
-                      {t('原版 new-api 最新版本')}：
+                    <Text type='tertiary' size='small'>
+                      {t('基于 new-api')}{' '}
                       {versionLoading ? (
                         t('加载中')
                       ) : latestNewApiRelease?.html_url ? (
@@ -405,21 +414,19 @@ const OtherSetting = () => {
                         latestNewApiRelease.tag_name || t('未知')
                       )}
                     </Text>
-                    <Space>
-                      <Button
-                        type='primary'
-                        onClick={checkUpdate}
-                        loading={loadingInput['CheckUpdate']}
-                      >
-                        {t('检查更新')}
-                      </Button>
-                      <Button
-                        onClick={switchToDefaultFrontend}
-                        loading={loadingInput['FrontendTheme']}
-                      >
-                        {t('切换到新版前端')}
-                      </Button>
-                    </Space>
+                    <Button
+                      type='primary'
+                      onClick={checkUpdate}
+                      loading={loadingInput['CheckUpdate']}
+                    >
+                      {t('检查更新')}
+                    </Button>
+                    <Button
+                      onClick={switchToDefaultFrontend}
+                      loading={loadingInput['FrontendTheme']}
+                    >
+                      {t('切换到新版前端')}
+                    </Button>
                   </Space>
                 </Col>
               </Row>

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Image tag to build, for example v1.0.4'
+        description: 'Image tag to build, for example v1.0.0'
         required: true
         type: string
 
