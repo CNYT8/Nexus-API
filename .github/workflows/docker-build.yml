@@ -48,8 +48,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/nexus-api:${{ github.event.inputs.image_tag }}
-            ghcr.io/${{ github.repository_owner }}/nexus-api:latest
+            ghcr.io/cnyt8/nexus-api:${{ github.event.inputs.image_tag }}
+            ghcr.io/cnyt8/nexus-api:latest
           labels: |
             org.opencontainers.image.title=Nexus-API
             org.opencontainers.image.description=An AGPLv3 downstream project based on new-api.
@@ -64,6 +64,6 @@ jobs:
         run: |
           echo "### Nexus-API Docker image" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "ghcr.io/${{ github.repository_owner }}/nexus-api:${{ github.event.inputs.image_tag }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "ghcr.io/${{ github.repository_owner }}/nexus-api:latest" >> "$GITHUB_STEP_SUMMARY"
+          echo "ghcr.io/cnyt8/nexus-api:${{ github.event.inputs.image_tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "ghcr.io/cnyt8/nexus-api:latest" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
