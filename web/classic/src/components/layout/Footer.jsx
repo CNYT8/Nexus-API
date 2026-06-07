@@ -200,13 +200,25 @@ const FooterBar = () => {
               {t('设计与开发由')}{' '}
             </span>
             <a
-              href='https://github.com/QuantumNous/new-api'
+              href='https://github.com/CNYT8/Nexus-API'
               target='_blank'
               rel='noopener noreferrer'
               className='!text-semi-color-primary font-medium'
             >
-              New API
+              Nexus-API
             </a>
+            <span className='!text-semi-color-text-3 ml-2 text-xs'>
+              {' '}|{' '}
+              <a
+                href='https://github.com/QuantumNous/new-api'
+                target='_blank'
+                rel='noopener noreferrer'
+                className='!text-semi-color-primary'
+              >
+                New API
+              </a>{' '}
+              {t('contributed frontend design')}
+            </span>
           </div>
         </div>
       </footer>
@@ -232,13 +244,25 @@ const FooterBar = () => {
                 {t('设计与开发由')}{' '}
               </span>
               <a
-                href='https://github.com/QuantumNous/new-api'
+                href='https://github.com/CNYT8/Nexus-API'
                 target='_blank'
                 rel='noopener noreferrer'
                 className='!text-semi-color-primary font-medium'
               >
-                New API
+                Nexus-API
               </a>
+              <span className='!text-semi-color-text-3 ml-2 text-xs'>
+                {' '}|{' '}
+                <a
+                  href='https://github.com/QuantumNous/new-api'
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='!text-semi-color-primary'
+                >
+                  New API
+                </a>{' '}
+                {t('contributed frontend design')}
+              </span>
             </div>
           </div>
         </footer>
