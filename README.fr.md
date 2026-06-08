@@ -1,7 +1,5 @@
 <div align="center">
 
-![Nexus-API](/web/default/public/logo.png)
-
 # Nexus-API
 
 🍥 **A downstream AI API gateway build based on upstream new-api**
@@ -24,13 +22,6 @@ Nexus-API is an AGPLv3 downstream modification based on [new-api](https://github
 - Do not misuse upstream trademarks, partner claims, sponsor claims, or deployment claims
 - Keep UI and code style native to upstream implementation
 - Wire all visible UI text through the existing i18n system
-
-## Key downstream features
-
-- Request/original upstream model information in usage logs is visible only to administrators and super administrators
-- Normal user log responses remove management fields such as `admin_info`, `is_model_mapped`, `upstream_model_name`, and `stream_status`
-- Nexus release information is displayed separately from the latest original new-api version
-- Docker/GitHub Actions configuration must use Nexus-API identity when publishing Nexus artifacts and must not present upstream images as Nexus images
 
 ## Installation and deployment
 

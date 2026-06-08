@@ -2,6 +2,7 @@
   "Nexus-API 暂时不支持新版前端，敬请期待": "Le nouveau frontend n'est pas encore pris en charge par Nexus-API. Restez à l'écoute.",
   "Nexus-API当前版本": "Version actuelle de Nexus-API",
   "Nexus-API项目仓库地址：": "Nexus-API Project Repository:",
+  "contributed frontend design": "a contribué au design frontend",
   "translation": {
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + Recherche Web {{count}} fois / 1K fois * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_many": " + Recherche Web {{count}} fois / 1K fois * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",

@@ -1,7 +1,5 @@
 <div align="center">
 
-![Nexus-API](/web/default/public/logo.png)
-
 # Nexus-API
 
 🍥 **基于 upstream new-api 的下游修改版 AI API 网关**
@@ -24,13 +22,6 @@ Nexus-API 是基于 [new-api](https://github.com/QuantumNous/new-api) 的 AGPLv3
 - 避免冒用 upstream 商标、合作伙伴、赞助或部署声明
 - 保持页面和代码风格贴近 upstream 原生实现
 - 可见 UI 文案必须完整接入 i18n
-
-## 关键下游功能
-
-- 使用日志中的请求原模型/实际上游模型仅管理员和超级管理员可见
-- 普通用户日志响应会移除 `admin_info`、`is_model_mapped`、`upstream_model_name`、`stream_status` 等管理字段
-- Nexus 发行信息与 upstream new-api 最新版本信息分开展示
-- Docker/GitHub Actions 配置使用 Nexus-API 自身发行身份时不得指向 upstream 镜像作为 Nexus 镜像
 
 ## 安装与部署
 
