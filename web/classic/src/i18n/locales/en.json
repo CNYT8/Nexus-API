@@ -1,8 +1,4 @@
 {
-  "Nexus-API 暂时不支持新版前端，敬请期待": "The new frontend is not yet supported by Nexus-API. Stay tuned.",
-  "Nexus-API当前版本": "Nexus-API Current Version",
-  "Nexus-API项目仓库地址：": "Nexus-API Project Repository:",
-  "contributed frontend design": "contributed frontend design",
   "translation": {
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + Web search {{count}} time / 1K times * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_other": " + Web search {{count}} times / 1K times * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
@@ -3829,16 +3825,19 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
-  },
-  "加载中": "Loading",
-  "原版 new-api 最新版本": "Latest Original new-api Version",
-  "基于 new-api": "Based on new-api",
-  "基于 new-api 二改": "Based on new-api",
-  "已是最新版本": "You are running the latest version",
-  "当前 Nexus-API 版本": "Current Nexus-API Version",
-  "我知道了": "Got it",
-  "是基于": "is a modified downstream project based on",
-  "暂无更新说明": "No release notes provided",
-  "的下游修改项目。": "."
+    "、": ", ",
+    "已是最新版本": "Already the latest version",
+    "暂无更新说明": "No release notes available",
+    "Nexus-API 暂时不支持新版前端，敬请期待": "Nexus-API does not support the new frontend yet. Stay tuned.",
+    "我知道了": "Got it",
+    "基于 new-api": "Based on new-api",
+    "加载中": "Loading",
+    "Nexus-API项目仓库地址：": "Nexus-API project repository:",
+    "是基于": "is based on",
+    "的下游修改项目。": "downstream modified project.",
+    "Nexus-API当前版本": "Nexus-API current version",
+    "基于": "Based on",
+    "二次开发": "with secondary development",
+    "设计与开发": "Design & development"
+  }
 }

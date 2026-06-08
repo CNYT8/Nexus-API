@@ -1,11 +1,4 @@
 {
-  "Based on new-api": "new-api ベース",
-  "Frontend design and development by New API contributors.": "フロントエンドのデザインと開発：New API コントリビューター",
-  "Nexus-API": "Nexus-API",
-  "Nexus-API Project Repository:": "Nexus-API プロジェクトリポジトリ:",
-  "footer.nexus.projectAttribution": "は次のプロジェクトを基にした下流の改修プロジェクトです:",
-  "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
-  "is a modified downstream project based on": "は次のプロジェクトを基にした下流の改修プロジェクトです:",
   "translation": {
     "360": "360",
     "1000": "1000",
@@ -4529,6 +4522,12 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Nexus-API": "Nexus-API",
+    "Frontend design and development by New API contributors.": "フロントエンドの設計と開発は New API のコントリビューターによるものです。",
+    "Based on new-api": "new-api ベース",
+    "Nexus-API Project Repository:": "Nexus-API プロジェクトリポジトリ：",
+    "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
+    "is a modified downstream project based on": "は次のプロジェクトをベースとした下流の改変版です："
   }
 }

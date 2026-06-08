@@ -1,11 +1,4 @@
 {
-  "Based on new-api": "基于 new-api",
-  "Frontend design and development by New API contributors.": "前端设计与开发由 New API 贡献者提供。",
-  "Nexus-API": "Nexus-API",
-  "Nexus-API Project Repository:": "Nexus-API 项目仓库：",
-  "footer.nexus.projectAttribution": "是基于以下项目的下游修改项目：",
-  "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
-  "is a modified downstream project based on": "是基于以下项目的下游修改项目：",
   "translation": {
     "360": "360",
     "1000": "1000",
@@ -4529,6 +4522,12 @@
     "Zero retention": "零数据保留",
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
-    "Zoom": "缩放"
+    "Zoom": "缩放",
+    "Nexus-API": "Nexus-API",
+    "Frontend design and development by New API contributors.": "前端设计与开发由 New API 贡献者完成。",
+    "Based on new-api": "基于 new-api",
+    "Nexus-API Project Repository:": "Nexus-API 项目仓库：",
+    "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
+    "is a modified downstream project based on": "是基于下游修改的项目，上游为"
   }
 }

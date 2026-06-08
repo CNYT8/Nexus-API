@@ -1,11 +1,4 @@
 {
-  "Based on new-api": "Dựa trên new-api",
-  "Frontend design and development by New API contributors.": "Thiết kế và phát triển giao diện bởi các đóng góp viên của New API.",
-  "Nexus-API": "Nexus-API",
-  "Nexus-API Project Repository:": "Kho dự án Nexus-API:",
-  "footer.nexus.projectAttribution": "là dự án downstream đã chỉnh sửa dựa trên",
-  "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
-  "is a modified downstream project based on": "là dự án downstream đã chỉnh sửa dựa trên",
   "translation": {
     "360": "360",
     "1000": "1000",
@@ -4529,6 +4522,12 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Nexus-API": "Nexus-API",
+    "Frontend design and development by New API contributors.": "Thiết kế và phát triển giao diện bởi những người đóng góp New API.",
+    "Based on new-api": "Dựa trên new-api",
+    "Nexus-API Project Repository:": "Kho dự án Nexus-API:",
+    "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
+    "is a modified downstream project based on": "là dự án downstream được sửa đổi dựa trên"
   }
 }

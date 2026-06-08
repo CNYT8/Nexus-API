@@ -1,8 +1,4 @@
 {
-  "Nexus-API 暂时不支持新版前端，敬请期待": "Nexus-API hiện chưa hỗ trợ giao diện mới. Vui lòng chờ đợi.",
-  "Nexus-API当前版本": "Phiên bản Nexus-API hiện tại",
-  "Nexus-API项目仓库地址：": "Nexus-API Project Repository:",
-  "contributed frontend design": "đóng góp thiết kế giao diện",
   "translation": {
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + Tìm kiếm Web {{count}} lần / 1K lần * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_other": " + Tìm kiếm Web {{count}} lần / 1K lần * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
@@ -4217,16 +4213,19 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
-  },
-  "加载中": "Đang tải",
-  "原版 new-api 最新版本": "Phiên bản new-api gốc mới nhất",
-  "基于 new-api": "Dựa trên new-api",
-  "基于 new-api 二改": "Dựa trên new-api",
-  "已是最新版本": "Bạn đang dùng phiên bản mới nhất",
-  "当前 Nexus-API 版本": "Phiên bản Nexus-API hiện tại",
-  "我知道了": "Đã hiểu",
-  "是基于": "is a modified downstream project based on",
-  "暂无更新说明": "Không có ghi chú phát hành",
-  "的下游修改项目。": "."
+    "、": ", ",
+    "已是最新版本": "Đã là phiên bản mới nhất",
+    "暂无更新说明": "Không có ghi chú cập nhật",
+    "Nexus-API 暂时不支持新版前端，敬请期待": "Nexus-API chưa hỗ trợ giao diện mới. Vui lòng chờ đợi.",
+    "我知道了": "Đã hiểu",
+    "基于 new-api": "Dựa trên new-api",
+    "加载中": "Đang tải",
+    "Nexus-API项目仓库地址：": "Kho dự án Nexus-API:",
+    "是基于": "dựa trên",
+    "的下游修改项目。": "dự án phái sinh được sửa đổi.",
+    "Nexus-API当前版本": "Phiên bản Nexus-API hiện tại",
+    "基于": "Dựa trên",
+    "二次开发": "phát triển thứ cấp",
+    "设计与开发": "Thiết kế & phát triển"
+  }
 }

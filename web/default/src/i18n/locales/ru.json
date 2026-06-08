@@ -1,11 +1,4 @@
 {
-  "Based on new-api": "На основе new-api",
-  "Frontend design and development by New API contributors.": "Дизайн и разработка интерфейса — контрибьюторы New API.",
-  "Nexus-API": "Nexus-API",
-  "Nexus-API Project Repository:": "Репозиторий проекта Nexus-API:",
-  "footer.nexus.projectAttribution": "— изменённый downstream-проект на основе",
-  "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
-  "is a modified downstream project based on": "— изменённый downstream-проект на основе",
   "translation": {
     "360": "360",
     "1000": "1000",
@@ -4529,6 +4522,12 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Nexus-API": "Nexus-API",
+    "Frontend design and development by New API contributors.": "Дизайн и разработка интерфейса — участники New API.",
+    "Based on new-api": "На основе new-api",
+    "Nexus-API Project Repository:": "Репозиторий проекта Nexus-API:",
+    "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
+    "is a modified downstream project based on": "— модифицированный downstream-проект на основе"
   }
 }

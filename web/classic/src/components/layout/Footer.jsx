@@ -197,18 +197,20 @@ const FooterBar = () => {
 
           <div className='text-sm'>
             <span className='!text-semi-color-text-1'>
-              {t('设计与开发由')}{' '}
+              {t('基于')}{' '}
+              <a
+                href='https://github.com/QuantumNous/new-api'
+                target='_blank'
+                rel='noopener noreferrer'
+                className='!text-semi-color-primary font-medium'
+              >
+                New API
+              </a>{' '}
+              {t('二次开发')}
             </span>
-            <a
-              href='https://github.com/CNYT8/Nexus-API'
-              target='_blank'
-              rel='noopener noreferrer'
-              className='!text-semi-color-primary font-medium'
-            >
-              Nexus-API
-            </a>
             <span className='!text-semi-color-text-3 ml-2 text-xs'>
               {' '}|{' '}
+              {t('设计与开发')}{' '}
               <a
                 href='https://github.com/QuantumNous/new-api'
                 target='_blank'
@@ -216,8 +218,16 @@ const FooterBar = () => {
                 className='!text-semi-color-primary'
               >
                 New API
-              </a>{' '}
-              {t('contributed frontend design')}
+              </a>
+              {' & '}
+              <a
+                href='https://github.com/CNYT8/Nexus-API'
+                target='_blank'
+                rel='noopener noreferrer'
+                className='!text-semi-color-primary'
+              >
+                Nexus-API
+              </a>
             </span>
           </div>
         </div>
@@ -241,18 +251,20 @@ const FooterBar = () => {
             ></div>
             <div className='text-sm flex-shrink-0'>
               <span className='!text-semi-color-text-1'>
-                {t('设计与开发由')}{' '}
+                {t('基于')}{' '}
+                <a
+                  href='https://github.com/QuantumNous/new-api'
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='!text-semi-color-primary font-medium'
+                >
+                  New API
+                </a>{' '}
+                {t('二次开发')}
               </span>
-              <a
-                href='https://github.com/CNYT8/Nexus-API'
-                target='_blank'
-                rel='noopener noreferrer'
-                className='!text-semi-color-primary font-medium'
-              >
-                Nexus-API
-              </a>
               <span className='!text-semi-color-text-3 ml-2 text-xs'>
                 {' '}|{' '}
+                {t('设计与开发')}{' '}
                 <a
                   href='https://github.com/QuantumNous/new-api'
                   target='_blank'
@@ -260,8 +272,16 @@ const FooterBar = () => {
                   className='!text-semi-color-primary'
                 >
                   New API
-                </a>{' '}
-                {t('contributed frontend design')}
+                </a>
+                {' & '}
+                <a
+                  href='https://github.com/CNYT8/Nexus-API'
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='!text-semi-color-primary'
+                >
+                  Nexus-API
+                </a>
               </span>
             </div>
           </div>

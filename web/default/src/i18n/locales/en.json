@@ -1,11 +1,4 @@
 {
-  "Based on new-api": "Based on new-api",
-  "Frontend design and development by New API contributors.": "Frontend design and development by New API contributors.",
-  "Nexus-API": "Nexus-API",
-  "Nexus-API Project Repository:": "Nexus-API Project Repository:",
-  "footer.nexus.projectAttribution": "is a modified downstream project based on",
-  "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
-  "is a modified downstream project based on": "is a modified downstream project based on",
   "translation": {
     "360": "360",
     "1000": "1000",
@@ -4529,6 +4522,12 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Nexus-API": "Nexus-API",
+    "Frontend design and development by New API contributors.": "Frontend design and development by New API contributors.",
+    "Based on new-api": "Based on new-api",
+    "Nexus-API Project Repository:": "Nexus-API Project Repository:",
+    "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
+    "is a modified downstream project based on": "is a modified downstream project based on"
   }
 }

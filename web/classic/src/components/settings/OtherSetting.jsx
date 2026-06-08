@@ -88,6 +88,8 @@ const OtherSetting = () => {
       setVersionLoading(true);
       const newApiRelease = await fetchLatestRelease(NEW_API_LATEST_RELEASE_API);
       setLatestNewApiRelease(newApiRelease || { tag_name: '', html_url: '' });
+    } catch (error) {
+      setLatestNewApiRelease({ tag_name: '', html_url: '' });
     } finally {
       setVersionLoading(false);
     }
@@ -395,10 +397,10 @@ const OtherSetting = () => {
                 <Col span={16}>
                   <Space>
                     <Text>
-                      {t('当前版本')}：
+                      {t('Nexus-API当前版本')}：
                       {statusState?.status?.version || t('未知')}
                     </Text>
-                    <Text type='tertiary' size='small'>
+                    <Text type='tertiary'>
                       {t('基于 new-api')}{' '}
                       {versionLoading ? (
                         t('加载中')

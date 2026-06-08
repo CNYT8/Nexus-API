@@ -1,8 +1,4 @@
 {
-  "Nexus-API 暂时不支持新版前端，敬请期待": "Le nouveau frontend n'est pas encore pris en charge par Nexus-API. Restez à l'écoute.",
-  "Nexus-API当前版本": "Version actuelle de Nexus-API",
-  "Nexus-API项目仓库地址：": "Nexus-API Project Repository:",
-  "contributed frontend design": "a contribué au design frontend",
   "translation": {
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + Recherche Web {{count}} fois / 1K fois * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_many": " + Recherche Web {{count}} fois / 1K fois * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
@@ -3683,16 +3679,19 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
-  },
-  "加载中": "Chargement",
-  "原版 new-api 最新版本": "Dernière version originale de new-api",
-  "基于 new-api": "Basé sur new-api",
-  "基于 new-api 二改": "Basé sur new-api",
-  "已是最新版本": "Vous utilisez la dernière version",
-  "当前 Nexus-API 版本": "Version actuelle de Nexus-API",
-  "我知道了": "J'ai compris",
-  "是基于": "is a modified downstream project based on",
-  "暂无更新说明": "Aucune note de version fournie",
-  "的下游修改项目。": "."
+    "、": ", ",
+    "已是最新版本": "Déjà la dernière version",
+    "暂无更新说明": "Aucune note de version",
+    "Nexus-API 暂时不支持新版前端，敬请期待": "Nexus-API ne prend pas encore en charge le nouveau frontend. Restez à l'écoute.",
+    "我知道了": "J'ai compris",
+    "基于 new-api": "Basé sur new-api",
+    "加载中": "Chargement",
+    "Nexus-API项目仓库地址：": "Dépôt du projet Nexus-API :",
+    "是基于": "est basé sur",
+    "的下游修改项目。": "projet dérivé modifié.",
+    "Nexus-API当前版本": "Version actuelle de Nexus-API",
+    "基于": "Basé sur",
+    "二次开发": "avec développement dérivé",
+    "设计与开发": "Conception et développement"
+  }
 }

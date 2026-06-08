@@ -1,8 +1,4 @@
 {
-  "Nexus-API 暂时不支持新版前端，敬请期待": "Nexus-API は新フロントエンドに未対応です。お楽しみに。",
-  "Nexus-API当前版本": "Nexus-API 現在のバージョン",
-  "Nexus-API项目仓库地址：": "Nexus-API Project Repository:",
-  "contributed frontend design": "フロントエンドデザイン提供",
   "translation": {
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + Web検索 {{count}}回 / 1K回 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one",
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_other": " + Web検索 {{count}}回 / 1K回 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_other",
@@ -3652,16 +3648,19 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
-  },
-  "加载中": "読み込み中",
-  "原版 new-api 最新版本": "オリジナル new-api の最新バージョン",
-  "基于 new-api": "new-api ベース",
-  "基于 new-api 二改": "new-api ベース",
-  "已是最新版本": "最新バージョンです",
-  "当前 Nexus-API 版本": "現在の Nexus-API バージョン",
-  "我知道了": "了解しました",
-  "是基于": "is a modified downstream project based on",
-  "暂无更新说明": "リリースノートはありません",
-  "的下游修改项目。": "."
+    "、": ", ",
+    "已是最新版本": "すでに最新バージョンです",
+    "暂无更新说明": "更新内容はありません",
+    "Nexus-API 暂时不支持新版前端，敬请期待": "Nexus-API は新フロントエンドにまだ対応していません。お楽しみに。",
+    "我知道了": "了解しました",
+    "基于 new-api": "new-api ベース",
+    "加载中": "読み込み中",
+    "Nexus-API项目仓库地址：": "Nexus-API プロジェクトリポジトリ：",
+    "是基于": "は次のプロジェクトをベースにしています：",
+    "的下游修改项目。": "の下流改変プロジェクトです。",
+    "Nexus-API当前版本": "Nexus-API 現在のバージョン",
+    "基于": "ベース：",
+    "二次开发": "の二次開発",
+    "设计与开发": "設計と開発"
+  }
 }

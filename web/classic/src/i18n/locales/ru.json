@@ -1,8 +1,4 @@
 {
-  "Nexus-API 暂时不支持新版前端，敬请期待": "Новый интерфейс пока не поддерживается Nexus-API. Следите за обновлениями.",
-  "Nexus-API当前版本": "Текущая версия Nexus-API",
-  "Nexus-API项目仓库地址：": "Nexus-API Project Repository:",
-  "contributed frontend design": "разработка интерфейса",
   "translation": {
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + Web-поиск {{count}} раз / 1K раз * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
     " + Web搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_few": " + Web-поиск {{count}} раза / 1K раз * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
@@ -3703,16 +3699,19 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
-  },
-  "加载中": "Загрузка",
-  "原版 new-api 最新版本": "Последняя оригинальная версия new-api",
-  "基于 new-api": "На основе new-api",
-  "基于 new-api 二改": "На основе new-api",
-  "已是最新版本": "Установлена последняя версия",
-  "当前 Nexus-API 版本": "Текущая версия Nexus-API",
-  "我知道了": "Понятно",
-  "是基于": "is a modified downstream project based on",
-  "暂无更新说明": "Примечания к выпуску отсутствуют",
-  "的下游修改项目。": "."
+    "、": ", ",
+    "已是最新版本": "Уже последняя версия",
+    "暂无更新说明": "Нет описания обновления",
+    "Nexus-API 暂时不支持新版前端，敬请期待": "Nexus-API пока не поддерживает новый интерфейс. Следите за обновлениями.",
+    "我知道了": "Понятно",
+    "基于 new-api": "На основе new-api",
+    "加载中": "Загрузка",
+    "Nexus-API项目仓库地址：": "Репозиторий проекта Nexus-API:",
+    "是基于": "основан на",
+    "的下游修改项目。": "модифицированный downstream-проект.",
+    "Nexus-API当前版本": "Текущая версия Nexus-API",
+    "基于": "На основе",
+    "二次开发": "со вторичной разработкой",
+    "设计与开发": "Дизайн и разработка"
+  }
 }

@@ -41,12 +41,6 @@ interface FooterProps {
   className?: string
 }
 
-const NEXUS_FOOTER_ATTRIBUTION_KEY = [
-  'footer',
-  'nexus',
-  'projectAttribution',
-].join('.')
-
 function FooterLinkItem(props: { link: FooterLink }) {
   const { t } = useTranslation()
   const isExternal = props.link.href.startsWith('http')
@@ -135,7 +129,7 @@ function ProjectAttribution(props: { currentYear: number; inline?: boolean }) {
       >
         {t('Nexus-API')}
       </a>{' '}
-      {t(NEXUS_FOOTER_ATTRIBUTION_KEY)}{' '}
+      {t('is a modified downstream project based on')}{' '}
       <a
         href='https://github.com/QuantumNous/new-api'
         target='_blank'
