@@ -277,6 +277,17 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "register_setting.default_group":
+		groupName := option.Value.(string)
+		if groupName != "" && groupName != "default" {
+			if _, ok := ratio_setting.GetGroupRatioCopy()[groupName]; !ok {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "分组 " + groupName + " 不存在",
+				})
+				return
+			}
+		}
 	case "AutomaticDisableStatusCodes":
 		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
 		if err != nil {

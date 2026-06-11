@@ -147,6 +147,7 @@ func GitHubOAuth(c *gin.Context) {
 				inviterId, _ = model.GetUserIdByAffCode(affCode.(string))
 			}
 
+			user.RegisterIp = c.ClientIP()
 			if err := user.Insert(inviterId); err != nil {
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,

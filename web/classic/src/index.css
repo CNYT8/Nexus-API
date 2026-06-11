@@ -65,6 +65,12 @@ body {
   flex: 1 0 auto;
 }
 
+/* 自定义首页页脚紧凑间距 */
+body.classic-home-embed .semi-layout-footer footer {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
 .app-sider {
   height: calc(100vh - 64px);
   height: calc(100dvh - 64px);

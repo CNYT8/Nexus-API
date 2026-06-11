@@ -93,6 +93,7 @@ func Login(c *gin.Context) {
 // setup session & cookies and then return user info
 func setupLogin(user *model.User, c *gin.Context) {
 	model.UpdateUserLastLoginAt(user.Id)
+	model.UpdateUserLastLoginIp(user.Id, c.ClientIP())
 	session := sessions.Default(c)
 	session.Set("id", user.Id)
 	session.Set("username", user.Username)
@@ -182,6 +183,7 @@ func Register(c *gin.Context) {
 		DisplayName: user.Username,
 		InviterId:   inviterId,
 		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
+		RegisterIp:  c.ClientIP(),
 	}
 	if common.EmailVerificationEnabled {
 		cleanUser.Email = user.Email

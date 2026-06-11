@@ -55,6 +55,7 @@ import {
   IconLink,
   IconUserGroup,
   IconEdit,
+  IconGlobe,
 } from '@douyinfe/semi-icons';
 import UserBindingManagementModal from './UserBindingManagementModal';
 
@@ -410,6 +411,53 @@ const EditUserModal = (props) => {
                             readonly
                           />
                         </div>
+                      </Col>
+                    </Row>
+                  </Card>
+                )}
+
+                {/* IP 信息 */}
+                {userId && (
+                  <Card className='!rounded-2xl shadow-sm border-0'>
+                    <div className='flex items-center mb-2'>
+                      <Avatar
+                        size='small'
+                        color='blue'
+                        className='mr-2 shadow-md'
+                      >
+                        <IconGlobe size={16} />
+                      </Avatar>
+                      <div>
+                        <Text className='text-lg font-medium'>
+                          {t('IP 信息')}
+                        </Text>
+                        <div className='text-xs text-gray-600'>
+                          {t('用户注册、登录与调用来源 IP')}
+                        </div>
+                      </div>
+                    </div>
+
+                    <Row gutter={12}>
+                      <Col span={24}>
+                        <Form.Slot label={t('注册 IP')}>
+                          <Text type='tertiary'>
+                            {inputs?.register_ip || '-'}
+                          </Text>
+                        </Form.Slot>
+                      </Col>
+                      <Col span={24}>
+                        <Form.Slot label={t('最近一次登录 IP')}>
+                          <Text type='tertiary'>
+                            {inputs?.last_login_ip || '-'}
+                          </Text>
+                        </Form.Slot>
+                      </Col>
+                      <Col span={24}>
+                        <Form.Slot label={t('最近一次调用 API 的 IP')}>
+                          <Text type='tertiary'>
+                            {inputs?.last_api_ip || '-'}
+                          </Text>
+                        </Form.Slot>
                       </Col>
                     </Row>
                   </Card>

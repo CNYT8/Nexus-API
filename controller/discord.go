@@ -151,6 +151,7 @@ func DiscordOAuth(c *gin.Context) {
 			} else {
 				user.DisplayName = "Discord User"
 			}
+			user.RegisterIp = c.ClientIP()
 			err := user.Insert(0)
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{

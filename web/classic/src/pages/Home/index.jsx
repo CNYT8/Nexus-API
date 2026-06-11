@@ -142,6 +142,14 @@ const Home = () => {
   }, []);
 
   useEffect(() => {
+    document.body.classList.toggle(
+      'classic-home-embed',
+      homePageContent !== '',
+    );
+    return () => document.body.classList.remove('classic-home-embed');
+  }, [homePageContent]);
+
+  useEffect(() => {
     const timer = setInterval(() => {
       setEndpointIndex((prev) => (prev + 1) % endpointItems.length);
     }, 3000);

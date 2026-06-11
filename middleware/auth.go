@@ -379,6 +379,8 @@ func TokenAuth() func(c *gin.Context) {
 
 		userCache.WriteContext(c)
 
+		model.RecordUserLastApiIp(token.UserId, c.ClientIP())
+
 		userGroup := userCache.Group
 		tokenGroup := token.Group
 		if tokenGroup != "" {

@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/register_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
@@ -53,6 +55,9 @@ type User struct {
 	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
 	CreatedAt        int64          `json:"created_at" gorm:"autoCreateTime;column:created_at"`
 	LastLoginAt      int64          `json:"last_login_at" gorm:"default:0;column:last_login_at"`
+	RegisterIp       string         `json:"register_ip" gorm:"type:varchar(64);default:'';column:register_ip"`
+	LastLoginIp      string         `json:"last_login_ip" gorm:"type:varchar(64);default:'';column:last_login_ip"`
+	LastApiIp        string         `json:"last_api_ip" gorm:"type:varchar(64);default:'';column:last_api_ip"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -388,6 +393,10 @@ func (user *User) Insert(inviterId int) error {
 	//user.SetAccessToken(common.GetUUID())
 	user.AffCode = common.GetRandomString(4)
 
+	if user.Group == "" {
+		user.Group = register_setting.GetDefaultGroup()
+	}
+
 	// 初始化用户设置，包括默认的边栏配置
 	if user.Setting == "" {
 		defaultSetting := dto.UserSetting{}
@@ -445,6 +454,10 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 	}
 	user.Quota = common.QuotaForNewUser
 	user.AffCode = common.GetRandomString(4)
+
+	if user.Group == "" {
+		user.Group = register_setting.GetDefaultGroup()
+	}
 
 	// 初始化用户设置
 	if user.Setting == "" {
@@ -955,6 +968,40 @@ func UpdateUserLastLoginAt(id int) {
 	if err := DB.Model(&User{}).Where("id = ?", id).Update("last_login_at", common.GetTimestamp()).Error; err != nil {
 		common.SysLog("failed to update user last_login_at: " + err.Error())
 	}
+}
+
+func UpdateUserLastLoginIp(id int, ip string) {
+	if ip == "" {
+		return
+	}
+	if err := DB.Model(&User{}).Where("id = ?", id).Update("last_login_ip", ip).Error; err != nil {
+		common.SysLog("failed to update user last_login_ip: " + err.Error())
+	}
+}
+
+func UpdateUserLastApiIp(id int, ip string) {
+	if ip == "" {
+		return
+	}
+	if err := DB.Model(&User{}).Where("id = ?", id).Update("last_api_ip", ip).Error; err != nil {
+		common.SysLog("failed to update user last_api_ip: " + err.Error())
+	}
+}
+
+var lastApiIpCache sync.Map // userId(int) -> ip(string)
+
+// RecordUserLastApiIp persists the user's most recent API client IP, but only
+// when it differs from the last value seen in-process. This keeps the hot relay
+// path from issuing a DB write on every request.
+func RecordUserLastApiIp(id int, ip string) {
+	if ip == "" {
+		return
+	}
+	if prev, ok := lastApiIpCache.Load(id); ok && prev.(string) == ip {
+		return
+	}
+	lastApiIpCache.Store(id, ip)
+	UpdateUserLastApiIp(id, ip)
 }
 
 func UpdateUserUsedQuotaAndRequestCount(id int, quota int) {
