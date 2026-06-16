@@ -343,11 +343,24 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	}
+	recordIpLogChanged := option.Key == "DefaultRecordIpLogEnabled" &&
+		strconv.FormatBool(common.DefaultRecordIpLogEnabled) != option.Value.(string)
+	if recordIpLogChanged {
+		ts := strconv.FormatInt(common.GetTimestamp(), 10)
+		// 先写时间戳；若失败则中止，避免在陈旧时间戳上翻转全局开关导致 last-writer-wins 判定错误。
+		if err := model.UpdateOption("DefaultRecordIpLogUpdatedAt", ts); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
 	err = model.UpdateOption(option.Key, option.Value.(string))
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	recordManageAudit(c, "option.update", map[string]interface{}{
+		"key": option.Key,
+	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

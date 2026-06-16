@@ -66,9 +66,11 @@ var DisplayTokenStatEnabled = true
 var DrawingEnabled = true
 var TaskEnabled = true
 var DataExportEnabled = true
-var DataExportInterval = 5         // unit: minute
-var DataExportDefaultTime = "hour" // unit: minute
-var DefaultCollapseSidebar = false // default value of collapse sidebar
+var DataExportInterval = 5                // unit: minute
+var DataExportDefaultTime = "hour"        // unit: minute
+var DefaultCollapseSidebar = false        // default value of collapse sidebar
+var DefaultRecordIpLogEnabled = false     // 管理员是否默认为所有用户开启请求与错误日志 IP 记录
+var DefaultRecordIpLogUpdatedAt int64 = 0 // 管理员上次切换 DefaultRecordIpLogEnabled 的时间戳，用于与用户侧时间戳比较的 last-writer-wins 判定
 
 // Any options with "Secret", "Token" in its key won't be return by GetOptions
 
@@ -170,6 +172,7 @@ var BatchUpdateInterval int
 
 var RelayTimeout int // unit is second
 
+var RelayIdleConnTimeout int // unit is second
 var RelayMaxIdleConns int
 var RelayMaxIdleConnsPerHost int
 

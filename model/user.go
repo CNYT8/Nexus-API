@@ -269,7 +269,11 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 		query = query.Where("role = ?", *role)
 	}
 	if status != nil {
-		query = query.Where("status = ?", *status)
+		if *status == -1 {
+			query = query.Where("deleted_at IS NOT NULL")
+		} else {
+			query = query.Where("deleted_at IS NULL").Where("status = ?", *status)
+		}
 	}
 
 	// 获取总数
@@ -1003,6 +1007,10 @@ func RecordUserLastApiIp(id int, ip string) {
 	lastApiIpCache.Store(id, ip)
 	UpdateUserLastApiIp(id, ip)
 }
+
+// UpdateAllUsersRecordIpLog removed: the global record-IP toggle is now resolved
+// at log-write time via timestamp comparison (see model.resolveRecordIpLog), so
+// flipping the admin switch no longer requires rewriting every user row.
 
 func UpdateUserUsedQuotaAndRequestCount(id int, quota int) {
 	if common.BatchUpdateEnabled {

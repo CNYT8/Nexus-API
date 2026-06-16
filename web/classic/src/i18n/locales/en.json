@@ -1,5 +1,11 @@
 {
   "translation": {
+    "操作参数": "Operation params",
+    "登录方式": "Login method",
+    "操作者": "Operator",
+    "密钥信息": "Key Info",
+    "默认所有人开启记录请求与错误日志IP": "Enable request & error log IP recording for all users by default",
+    "开启后将所有用户的该设置一并打开，用户仍可自行关闭": "Turning this on enables the setting for all users; users can still turn it off themselves",
     "错误掩码": "Error Mask",
     "启用错误掩码": "Enable Error Mask",
     "关闭时所有规则不生效，零开销": "When disabled, no rule applies, zero overhead",

@@ -36,6 +36,7 @@ func Playground(c *gin.Context) {
 	}
 
 	userId := c.GetInt("id")
+	model.RecordUserLastApiIp(userId, c.ClientIP())
 
 	// Write user context to ensure acceptUnsetRatio is available
 	userCache, err := model.GetUserCache(userId)

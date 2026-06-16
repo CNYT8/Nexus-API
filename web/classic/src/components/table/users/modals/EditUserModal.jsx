@@ -25,6 +25,7 @@ import {
   showSuccess,
   renderQuota,
   getCurrencyConfig,
+  copy,
 } from '../../../../helpers';
 import {
   quotaToDisplayAmount,
@@ -222,6 +223,23 @@ const EditUserModal = (props) => {
         return '';
     }
   };
+
+  const renderIpValue = (ip) =>
+    ip ? (
+      <Tag
+        shape='circle'
+        className='font-mono cursor-pointer'
+        onClick={async () => {
+          if (await copy(ip)) showSuccess(t('已复制：') + ip);
+        }}
+      >
+        {ip}
+      </Tag>
+    ) : (
+      <Tag color='white' shape='circle'>
+        -
+      </Tag>
+    );
 
   /* --------------------------- UI --------------------------- */
   return (
@@ -438,25 +456,19 @@ const EditUserModal = (props) => {
                     </div>
 
                     <Row gutter={12}>
-                      <Col span={24}>
+                      <Col span={isMobile ? 24 : 8}>
                         <Form.Slot label={t('注册 IP')}>
-                          <Text type='tertiary'>
-                            {inputs?.register_ip || '-'}
-                          </Text>
+                          {renderIpValue(inputs?.register_ip)}
                         </Form.Slot>
                       </Col>
-                      <Col span={24}>
+                      <Col span={isMobile ? 24 : 8}>
                         <Form.Slot label={t('最近一次登录 IP')}>
-                          <Text type='tertiary'>
-                            {inputs?.last_login_ip || '-'}
-                          </Text>
+                          {renderIpValue(inputs?.last_login_ip)}
                         </Form.Slot>
                       </Col>
-                      <Col span={24}>
+                      <Col span={isMobile ? 24 : 8}>
                         <Form.Slot label={t('最近一次调用 API 的 IP')}>
-                          <Text type='tertiary'>
-                            {inputs?.last_api_ip || '-'}
-                          </Text>
+                          {renderIpValue(inputs?.last_api_ip)}
                         </Form.Slot>
                       </Col>
                     </Row>

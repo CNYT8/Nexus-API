@@ -49,6 +49,7 @@ const OperationSetting = () => {
     DefaultCollapseSidebar: false,
     DemoSiteEnabled: false,
     SelfUseModeEnabled: false,
+    DefaultRecordIpLogEnabled: false,
 
     /* 顶栏模块管理 */
     HeaderNavModules: '',

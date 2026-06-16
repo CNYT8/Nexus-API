@@ -1,5 +1,10 @@
 {
   "translation": {
+    "操作参数": "Tham số thao tác",
+    "操作者": "Người thao tác",
+    "密钥信息": "Thông tin khóa",
+    "默认所有人开启记录请求与错误日志IP": "Mặc định bật ghi IP nhật ký yêu cầu và lỗi cho mọi người",
+    "开启后将所有用户的该设置一并打开，用户仍可自行关闭": "Khi bật, cài đặt này được bật cho tất cả người dùng; người dùng vẫn có thể tự tắt",
     "错误掩码": "Mặt nạ lỗi",
     "启用错误掩码": "Bật mặt nạ lỗi",
     "关闭时所有规则不生效，零开销": "Khi tắt, không quy tắc nào áp dụng, không tốn tài nguyên",
