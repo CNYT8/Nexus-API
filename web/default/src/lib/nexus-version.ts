@@ -1,16 +1,17 @@
-export const NEXUS_API_RELEASES_URL = 'https://github.com/CNYT8/Nexus-API/releases'
-export const NEXUS_API_LATEST_RELEASE_API =
-  'https://api.github.com/repos/CNYT8/Nexus-API/releases/latest'
-export const NEW_API_RELEASES_URL = 'https://github.com/QuantumNous/new-api/releases'
-export const NEW_API_LATEST_RELEASE_API =
-  'https://api.github.com/repos/QuantumNous/new-api/releases/latest'
-
 export type ReleaseInfo = {
   tag_name: string
   name?: string
   body?: string
   html_url?: string
   published_at?: string
+}
+
+export const NEXUS_API_RELEASES_URL = 'https://github.com/CNYT8/Nexus-API/releases'
+export const NEXUS_API_LATEST_RELEASE_API =
+  'https://api.github.com/repos/CNYT8/Nexus-API/releases/latest'
+export const NEW_API_BASE_RELEASE: ReleaseInfo = {
+  tag_name: 'v1.0.0-rc.11',
+  html_url: 'https://github.com/QuantumNous/new-api/releases/tag/v1.0.0-rc.11',
 }
 
 export async function fetchLatestRelease(apiUrl: string): Promise<ReleaseInfo> {

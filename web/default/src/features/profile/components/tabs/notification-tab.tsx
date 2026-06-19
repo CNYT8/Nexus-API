@@ -21,6 +21,7 @@ import { Bell, Loader2, Mail, Server, Webhook } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { ROLE } from '@/lib/roles'
+import { useStatus } from '@/hooks/use-status'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -53,6 +54,7 @@ interface NotificationTabProps {
 
 export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
   const { t } = useTranslation()
+  const { status } = useStatus()
   const isAdmin = (profile?.role ?? 0) >= ROLE.ADMIN
   const [loading, setLoading] = useState(false)
   const [settings, setSettings] = useState<UserSettings>({
@@ -101,10 +103,18 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
     }
   }, [profile])
 
+  const recordIpLogForced = status?.default_record_ip_log_forced === true
+  const effectiveRecordIpLog = recordIpLogForced
+    ? status?.default_record_ip_log_enabled === true
+    : settings.record_ip_log
+
   const handleSave = async () => {
     try {
       setLoading(true)
-      const response = await updateUserSettings(settings)
+      const response = await updateUserSettings({
+        ...settings,
+        record_ip_log: effectiveRecordIpLog,
+      })
 
       if (response.success) {
         toast.success(t('Settings updated successfully'))
@@ -370,13 +380,18 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
           <div className='space-y-0.5'>
             <Label htmlFor='recordIp'>{t('Record IP Address')}</Label>
             <p className='text-muted-foreground text-xs sm:text-sm'>
-              {t('Log IP address for usage and error logs')}
+              {recordIpLogForced
+                ? t(
+                    'Admin has disabled user changes to the request and error log IP switch'
+                  )
+                : t('Log IP address for usage and error logs')}
             </p>
           </div>
           <Switch
             id='recordIp'
             className='shrink-0'
-            checked={settings.record_ip_log}
+            checked={effectiveRecordIpLog}
+            disabled={recordIpLogForced}
             onCheckedChange={(checked) => updateField('record_ip_log', checked)}
           />
         </div>

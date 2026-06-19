@@ -45,6 +45,8 @@ import { safeNumberFieldProps } from '../utils/numeric-field'
 const behaviorSchema = z.object({
   RetryTimes: z.coerce.number().min(0).max(10),
   DefaultCollapseSidebar: z.boolean(),
+  DefaultRecordIpLogEnabled: z.boolean(),
+  DefaultRecordIpLogForced: z.boolean(),
   DemoSiteEnabled: z.boolean(),
   SelfUseModeEnabled: z.boolean(),
 })
@@ -117,6 +119,56 @@ export function SystemBehaviorSection({
                   <FormLabel>{t('Default Collapse Sidebar')}</FormLabel>
                   <FormDescription>
                     {t('Sidebar collapsed by default for new users')}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='DefaultRecordIpLogEnabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>
+                    {t('Default Record Request and Error Log IP')}
+                  </FormLabel>
+                  <FormDescription>
+                    {t('Use this setting as the default for all users')}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='DefaultRecordIpLogForced'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>
+                    {t(
+                      'Force Users to Use Default Record Request and Error Log IP Setting'
+                    )}
+                  </FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Users cannot change the request and error log IP switch when enabled'
+                    )}
                   </FormDescription>
                 </SettingsSwitchContent>
                 <FormControl>

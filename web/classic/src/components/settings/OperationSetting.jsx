@@ -50,6 +50,7 @@ const OperationSetting = () => {
     DemoSiteEnabled: false,
     SelfUseModeEnabled: false,
     DefaultRecordIpLogEnabled: false,
+    DefaultRecordIpLogForced: false,
 
     /* 顶栏模块管理 */
     HeaderNavModules: '',

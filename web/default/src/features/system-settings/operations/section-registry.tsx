@@ -35,6 +35,8 @@ const OPERATIONS_SECTIONS = [
         defaultValues={{
           RetryTimes: settings.RetryTimes,
           DefaultCollapseSidebar: settings.DefaultCollapseSidebar,
+          DefaultRecordIpLogEnabled: settings.DefaultRecordIpLogEnabled,
+          DefaultRecordIpLogForced: settings.DefaultRecordIpLogForced,
           DemoSiteEnabled: settings.DemoSiteEnabled,
           SelfUseModeEnabled: settings.SelfUseModeEnabled,
         }}

@@ -234,10 +234,13 @@ func RecordTopupLog(userId int, content string, callerIp string, paymentMethod s
 }
 
 // resolveRecordIpLog 在请求与错误日志写入处判断是否需要记录 IP。
-// 采用 last-writer-wins：用户自调时间戳不早于管理员全局开关时间戳（且用户确实设置过）时以用户值为准，
+// 管理员强制使用默认值时直接返回全局默认；否则采用 last-writer-wins：
+// 用户自调时间戳不早于管理员全局开关时间戳（且用户确实设置过）时以用户值为准，
 // 否则使用全局默认值。同秒并发时优先用户选择（偏向隐私）；新用户时间戳为 0，自然跟随全局默认。
-// 这样管理员一次保存可立即覆盖全员，事后用户仍可单独关/开。
 func resolveRecordIpLog(userId int) bool {
+	if common.DefaultRecordIpLogForced {
+		return common.DefaultRecordIpLogEnabled
+	}
 	settingMap, err := GetUserSetting(userId, false)
 	if err != nil {
 		return common.DefaultRecordIpLogEnabled

@@ -28,6 +28,8 @@ import {
 const defaultOperationsSettings: OperationsSettings = {
   RetryTimes: 0,
   DefaultCollapseSidebar: false,
+  DefaultRecordIpLogEnabled: false,
+  DefaultRecordIpLogForced: false,
   DemoSiteEnabled: false,
   SelfUseModeEnabled: false,
   ChannelDisableThreshold: '',

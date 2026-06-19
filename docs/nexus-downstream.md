@@ -1,6 +1,6 @@
 # Nexus-API downstream overlay
 
-Nexus-API is maintained as a downstream overlay on top of upstream new-api. For large upstream rewrites, rebuild from the latest upstream base and reapply the overlay described here instead of relying on memory or broad file copies.
+Nexus-API is maintained as a downstream overlay on top of upstream new-api. For large upstream rewrites, rebuild from the fixed upstream `v1.0.0-rc.11` base and reapply the overlay described here instead of relying on memory, broad file copies, or the latest upstream release.
 
 ## Preservation checklist
 
@@ -26,7 +26,7 @@ Nexus-API is maintained as a downstream overlay on top of upstream new-api. For 
 ### System/version information
 
 - Nexus release checks should use the Nexus-API release endpoint.
-- The UI may also show the latest original new-api release separately.
+- The UI shows the fixed original new-api base `v1.0.0-rc.11`; do not fetch the latest upstream release for this field.
 - Version UI must follow the current upstream settings style in both default and classic frontends.
 
 ### User IP recording
@@ -34,7 +34,7 @@ Nexus-API is maintained as a downstream overlay on top of upstream new-api. For 
 - The User model carries `register_ip`, `last_login_ip`, `last_api_ip` columns (GORM auto-migrates them; no manual migration).
 - Register IP is captured at the registration funnel; login IP via `setupLogin`; API IP via `model.RecordUserLastApiIp` (throttled with an in-process `sync.Map`) from `TokenAuth` and from the playground handler (`controller/playground.go`), since the playground bypasses `TokenAuth`.
 - Admin EditUserModal shows the three IPs in an admin-only "IP 信息" card, values rendered as click-to-copy `Tag shape='circle'` (the codebase IP idiom).
-- Operation setting `DefaultRecordIpLogEnabled` uses read-path last-writer-wins, not bulk overwrite: `common.DefaultRecordIpLogUpdatedAt` is bumped whenever the admin toggle's value changes, and each user's `setting.record_ip_log_updated_at` is bumped whenever they change their own switch. `model.resolveRecordIpLog` (called from both write sites in `model/log.go`) uses the user's value when their timestamp is newer, otherwise the global default. New users keep `record_ip_log_updated_at = 0` so they naturally follow the global — `model/user.go`'s `Insert`/`InsertWithTx` stay byte-identical with upstream, and there is no full-table write.
+- Operation setting `DefaultRecordIpLogEnabled` uses read-path last-writer-wins, not bulk overwrite: `common.DefaultRecordIpLogUpdatedAt` is bumped whenever the admin default toggle's value changes, and each user's `setting.record_ip_log_updated_at` is bumped whenever they change their own switch. `DefaultRecordIpLogForced` is a separate admin option that makes `model.resolveRecordIpLog` ignore per-user values and use the admin default directly. New users keep `record_ip_log_updated_at = 0` so they naturally follow the global — `model/user.go`'s `Insert`/`InsertWithTx` stay byte-identical with upstream, and there is no full-table write.
 
 ### i18n
 
@@ -76,7 +76,7 @@ Skipped (high-cost / low-ROI for Nexus):
 ## Sync process
 
 1. Record current Nexus state and downstream overlay status.
-2. Use the latest upstream new-api as the clean base for large upstream rewrites.
+2. Use upstream new-api `v1.0.0-rc.11` as the fixed clean base for large upstream rewrites; do not fetch the latest upstream version.
 3. Reapply the documented Nexus overlay in small modules.
 4. Validate backend privacy, frontend admin/user behavior, i18n, docs/legal wording, and build/test checks.
 5. Do not push, tag, or release unless explicitly requested.

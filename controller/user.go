@@ -1305,9 +1305,13 @@ func UpdateUserSetting(c *gin.Context) {
 		upstreamModelUpdateNotifyEnabled = *req.UpstreamModelUpdateNotifyEnabled
 	}
 
-	// 用户每次提交个人设置都刷新该时间戳，使其在 last-writer-wins 判定中胜过全局开关。
-	// 仅在值变化时刷新会导致全局变更后用户无法通过"再次确认相同值"重新夺回控制权。
+	// 非强制时刷新用户时间戳参与 last-writer-wins；强制时保留原用户值，防止直接 API 绕过管理员默认值。
+	recordIpLog := req.RecordIpLog
 	recordIpLogUpdatedAt := common.GetTimestamp()
+	if common.DefaultRecordIpLogForced {
+		recordIpLog = existingSettings.RecordIpLog
+		recordIpLogUpdatedAt = existingSettings.RecordIpLogUpdatedAt
+	}
 
 	// 构建设置
 	settings := dto.UserSetting{
@@ -1315,7 +1319,7 @@ func UpdateUserSetting(c *gin.Context) {
 		QuotaWarningThreshold:            req.QuotaWarningThreshold,
 		UpstreamModelUpdateNotifyEnabled: upstreamModelUpdateNotifyEnabled,
 		AcceptUnsetRatioModel:            req.AcceptUnsetModelRatioModel,
-		RecordIpLog:                      req.RecordIpLog,
+		RecordIpLog:                      recordIpLog,
 		RecordIpLogUpdatedAt:             recordIpLogUpdatedAt,
 	}
 

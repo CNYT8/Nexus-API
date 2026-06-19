@@ -17,7 +17,7 @@ Nexus-API is an AGPLv3 downstream modification based on [new-api](https://github
 
 ## Nexus maintenance principles
 
-- Use the latest upstream new-api as the clean base
+- Use upstream new-api `v1.0.0-rc.11` as the fixed clean base; do not fetch the latest version
 - Maintain Nexus changes as a modular downstream overlay
 - Do not misuse upstream trademarks, partner claims, sponsor claims, or deployment claims
 - Keep UI and code style native to upstream implementation

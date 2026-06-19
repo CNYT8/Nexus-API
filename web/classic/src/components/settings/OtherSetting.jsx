@@ -39,9 +39,10 @@ const LEGAL_PRIVACY_POLICY_KEY = 'legal.privacy_policy';
 const NEXUS_API_RELEASES_URL = 'https://github.com/CNYT8/Nexus-API/releases';
 const NEXUS_API_LATEST_RELEASE_API =
   'https://api.github.com/repos/CNYT8/Nexus-API/releases/latest';
-const NEW_API_RELEASES_URL = 'https://github.com/QuantumNous/new-api/releases';
-const NEW_API_LATEST_RELEASE_API =
-  'https://api.github.com/repos/QuantumNous/new-api/releases/latest';
+const NEW_API_BASE_RELEASE = {
+  tag_name: 'v1.0.0-rc.11',
+  html_url: 'https://github.com/QuantumNous/new-api/releases/tag/v1.0.0-rc.11',
+};
 const NEXUS_DEFAULT_FRONTEND_ENABLED = false;
 
 const OtherSetting = () => {
@@ -84,15 +85,9 @@ const OtherSetting = () => {
   };
 
   const fetchVersionInfo = async () => {
-    try {
-      setVersionLoading(true);
-      const newApiRelease = await fetchLatestRelease(NEW_API_LATEST_RELEASE_API);
-      setLatestNewApiRelease(newApiRelease || { tag_name: '', html_url: '' });
-    } catch (error) {
-      setLatestNewApiRelease({ tag_name: '', html_url: '' });
-    } finally {
-      setVersionLoading(false);
-    }
+    setVersionLoading(true);
+    setLatestNewApiRelease(NEW_API_BASE_RELEASE);
+    setVersionLoading(false);
   };
 
   const updateOption = async (key, value) => {

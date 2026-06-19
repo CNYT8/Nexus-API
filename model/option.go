@@ -157,6 +157,7 @@ func InitOptionMap() {
 	common.OptionMap["DataExportDefaultTime"] = common.DataExportDefaultTime
 	common.OptionMap["DefaultCollapseSidebar"] = strconv.FormatBool(common.DefaultCollapseSidebar)
 	common.OptionMap["DefaultRecordIpLogEnabled"] = strconv.FormatBool(common.DefaultRecordIpLogEnabled)
+	common.OptionMap["DefaultRecordIpLogForced"] = strconv.FormatBool(common.DefaultRecordIpLogForced)
 	common.OptionMap["DefaultRecordIpLogUpdatedAt"] = strconv.FormatInt(common.DefaultRecordIpLogUpdatedAt, 10)
 	common.OptionMap["MjNotifyEnabled"] = strconv.FormatBool(setting.MjNotifyEnabled)
 	common.OptionMap["MjAccountFilterEnabled"] = strconv.FormatBool(setting.MjAccountFilterEnabled)
@@ -277,7 +278,12 @@ func updateOptionMap(key string, value string) (err error) {
 			common.ImageDownloadPermission = intValue
 		}
 	}
-	if strings.HasSuffix(key, "Enabled") || key == "DefaultCollapseSidebar" || key == "DefaultUseAutoGroup" || key == "SMTPForceAuthLogin" {
+	isBoolOption := strings.HasSuffix(key, "Enabled") ||
+		key == "DefaultCollapseSidebar" ||
+		key == "DefaultUseAutoGroup" ||
+		key == "SMTPForceAuthLogin" ||
+		key == "DefaultRecordIpLogForced"
+	if isBoolOption {
 		boolValue := value == "true"
 		switch key {
 		case "PasswordRegisterEnabled":
@@ -330,6 +336,8 @@ func updateOptionMap(key string, value string) (err error) {
 			common.DefaultCollapseSidebar = boolValue
 		case "DefaultRecordIpLogEnabled":
 			common.DefaultRecordIpLogEnabled = boolValue
+		case "DefaultRecordIpLogForced":
+			common.DefaultRecordIpLogForced = boolValue
 		case "MjNotifyEnabled":
 			setting.MjNotifyEnabled = boolValue
 		case "MjAccountFilterEnabled":

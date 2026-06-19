@@ -271,6 +271,8 @@ export type BillingSettings = {
 export type OperationsSettings = {
   RetryTimes: number
   DefaultCollapseSidebar: boolean
+  DefaultRecordIpLogEnabled: boolean
+  DefaultRecordIpLogForced: boolean
   DemoSiteEnabled: boolean
   SelfUseModeEnabled: boolean
   ChannelDisableThreshold: string

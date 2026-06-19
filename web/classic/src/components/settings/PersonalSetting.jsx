@@ -508,6 +508,9 @@ const PersonalSetting = () => {
 
   const saveNotificationSettings = async () => {
     try {
+      const recordIpLog = status?.default_record_ip_log_forced
+        ? status?.default_record_ip_log_enabled === true
+        : notificationSettings.recordIpLog;
       const res = await API.put('/api/user/setting', {
         notify_type: notificationSettings.warningType,
         quota_warning_threshold: parseFloat(
@@ -527,7 +530,7 @@ const PersonalSetting = () => {
           notificationSettings.upstreamModelUpdateNotifyEnabled === true,
         accept_unset_model_ratio_model:
           notificationSettings.acceptUnsetModelRatioModel,
-        record_ip_log: notificationSettings.recordIpLog,
+        record_ip_log: recordIpLog,
       });
 
       if (res.data.success) {
@@ -590,7 +593,16 @@ const PersonalSetting = () => {
             {/* 右侧：其他设置 */}
             <NotificationSettings
               t={t}
-              notificationSettings={notificationSettings}
+              notificationSettings={
+                status?.default_record_ip_log_forced
+                  ? {
+                      ...notificationSettings,
+                      recordIpLog:
+                        status?.default_record_ip_log_enabled === true,
+                    }
+                  : notificationSettings
+              }
+              recordIpLogForced={status?.default_record_ip_log_forced === true}
               handleNotificationSettingChange={handleNotificationSettingChange}
               saveNotificationSettings={saveNotificationSettings}
             />

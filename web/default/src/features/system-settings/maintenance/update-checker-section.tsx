@@ -23,8 +23,7 @@ import { toast } from 'sonner'
 import { formatTimestamp, formatTimestampToDate } from '@/lib/format'
 import {
   fetchLatestRelease,
-  NEW_API_LATEST_RELEASE_API,
-  NEW_API_RELEASES_URL,
+  NEW_API_BASE_RELEASE,
   NEXUS_API_LATEST_RELEASE_API,
   NEXUS_API_RELEASES_URL,
   type ReleaseInfo,
@@ -61,18 +60,14 @@ export function UpdateCheckerSection({
   const version = currentVersion || t('Unknown')
 
   useEffect(() => {
-    fetchLatestRelease(NEW_API_LATEST_RELEASE_API)
-      .then(setLatestNewApiRelease)
-      .catch(() => setLatestNewApiRelease(null))
+    setLatestNewApiRelease(NEW_API_BASE_RELEASE)
   }, [])
 
   const handleCheckUpdates = async () => {
     setChecking(true)
     try {
       const data = await fetchLatestRelease(NEXUS_API_LATEST_RELEASE_API)
-      fetchLatestRelease(NEW_API_LATEST_RELEASE_API)
-        .then(setLatestNewApiRelease)
-        .catch(() => setLatestNewApiRelease(null))
+      setLatestNewApiRelease(NEW_API_BASE_RELEASE)
 
       if (currentVersion && data.tag_name === currentVersion) {
         toast.success(
@@ -113,7 +108,7 @@ export function UpdateCheckerSection({
               <div className='text-muted-foreground mt-1 text-xs'>
                 {t('Based on new-api')}{' '}
                 <a
-                  href={latestNewApiRelease?.html_url ?? NEW_API_RELEASES_URL}
+                  href={latestNewApiRelease?.html_url}
                   target='_blank'
                   rel='noopener noreferrer'
                   className='hover:text-foreground underline-offset-2 hover:underline'
