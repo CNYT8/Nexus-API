@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -24,6 +25,8 @@ type AdminPermissionModule struct {
 }
 
 type AdminPermissionConfig map[string]bool
+
+var ErrAdminPermissionEmpty = errors.New("at least one admin permission must remain enabled")
 
 var adminPermissionModules = []AdminPermissionModule{
 	{
@@ -82,6 +85,24 @@ func NormalizeAdminPermissionConfig(config AdminPermissionConfig) AdminPermissio
 	return normalized
 }
 
+func CountEnabledAdminPermissions(config AdminPermissionConfig) int {
+	enabled := 0
+	normalized := NormalizeAdminPermissionConfig(config)
+	for _, module := range adminPermissionModules {
+		if normalized[module.Key] {
+			enabled++
+		}
+	}
+	return enabled
+}
+
+func ValidateAdminPermissionConfig(config AdminPermissionConfig) error {
+	if CountEnabledAdminPermissions(config) == 0 {
+		return ErrAdminPermissionEmpty
+	}
+	return nil
+}
+
 func GetAdminPermissionConfigFromSetting(setting dto.UserSetting) AdminPermissionConfig {
 	return NormalizeAdminPermissionConfig(parseAdminPermissionConfig(setting.AdminPermissions))
 }
@@ -104,6 +125,9 @@ func GetAdminPermissionConfigByUserId(userId int) (AdminPermissionConfig, error)
 func SetAdminPermissionConfig(user *User, config AdminPermissionConfig) error {
 	if user == nil {
 		return nil
+	}
+	if err := ValidateAdminPermissionConfig(config); err != nil {
+		return err
 	}
 
 	setting := user.GetSetting()

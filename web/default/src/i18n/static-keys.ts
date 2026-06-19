@@ -51,6 +51,8 @@ export const STATIC_I18N_KEYS = [
   'Create and review invite or credit codes.',
   'Manage subscription plans and user subscriptions.',
   'Only regular administrators are listed here.',
+  'Manage permissions',
+  'At least one admin permission must remain enabled',
 
   // Pricing constants
   'Name',

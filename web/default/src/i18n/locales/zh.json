@@ -4538,6 +4538,8 @@
     "Based on new-api": "基于 new-api",
     "Nexus-API Project Repository:": "Nexus-API 项目仓库：",
     "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
-    "is a modified downstream project based on": "是基于下游修改的项目，上游为"
+    "is a modified downstream project based on": "是基于下游修改的项目，上游为",
+    "Manage permissions": "管理权限",
+    "At least one admin permission must remain enabled": "至少需要保留一个管理员权限"
   }
 }

@@ -4256,6 +4256,9 @@
     "Manage catalog visibility, pricing, groups, vendors, and deployments.": "Quản lý hiển thị danh mục, giá cả, nhóm, nhà cung cấp và triển khai.",
     "Administer user accounts and roles.": "Quản trị tài khoản người dùng và vai trò.",
     "Create and review invite or credit codes.": "Tạo và xem lại mã mời hoặc mã tín dụng.",
-    "Manage subscription plans and user subscriptions.": "Quản lý gói đăng ký và đăng ký của người dùng."
+    "Manage subscription plans and user subscriptions.": "Quản lý gói đăng ký và đăng ký của người dùng.",
+    "权限数量": "Số lượng quyền",
+    "管理权限": "Quản lý quyền",
+    "至少需要保留一个管理员权限": "Phải giữ bật ít nhất một quyền quản trị viên"
   }
 }

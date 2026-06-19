@@ -3692,6 +3692,9 @@
     "Manage catalog visibility, pricing, groups, vendors, and deployments.": "カタログの表示、価格設定、グループ、ベンダー、デプロイを管理。",
     "Administer user accounts and roles.": "ユーザーアカウントとロールを管理。",
     "Create and review invite or credit codes.": "招待コードまたはクレジットコードを作成・確認。",
-    "Manage subscription plans and user subscriptions.": "サブスクリプションプランとユーザーサブスクリプションを管理。"
+    "Manage subscription plans and user subscriptions.": "サブスクリプションプランとユーザーサブスクリプションを管理。",
+    "权限数量": "権限数",
+    "管理权限": "権限を管理",
+    "至少需要保留一个管理员权限": "少なくとも1つの管理者権限を有効にしておく必要があります"
   }
 }

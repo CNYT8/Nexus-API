@@ -4538,6 +4538,8 @@
     "Based on new-api": "new-api ベース",
     "Nexus-API Project Repository:": "Nexus-API プロジェクトリポジトリ：",
     "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
-    "is a modified downstream project based on": "は次のプロジェクトをベースとした下流の改変版です："
+    "is a modified downstream project based on": "は次のプロジェクトをベースとした下流の改変版です：",
+    "Manage permissions": "権限を管理",
+    "At least one admin permission must remain enabled": "少なくとも1つの管理者権限を有効にしておく必要があります"
   }
 }

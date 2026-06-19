@@ -4538,6 +4538,8 @@
     "Based on new-api": "Dựa trên new-api",
     "Nexus-API Project Repository:": "Kho dự án Nexus-API:",
     "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
-    "is a modified downstream project based on": "là dự án downstream được sửa đổi dựa trên"
+    "is a modified downstream project based on": "là dự án downstream được sửa đổi dựa trên",
+    "Manage permissions": "Quản lý quyền",
+    "At least one admin permission must remain enabled": "Phải giữ bật ít nhất một quyền quản trị viên"
   }
 }

@@ -4538,6 +4538,8 @@
     "Based on new-api": "Based on new-api",
     "Nexus-API Project Repository:": "Nexus-API Project Repository:",
     "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
-    "is a modified downstream project based on": "is a modified downstream project based on"
+    "is a modified downstream project based on": "is a modified downstream project based on",
+    "Manage permissions": "Manage permissions",
+    "At least one admin permission must remain enabled": "At least one admin permission must remain enabled"
   }
 }

@@ -33,6 +33,9 @@ auth.user_id_mismatch: "Unauthorized, New-Api-User does not match logged in user
 auth.user_banned: "User has been banned"
 auth.insufficient_privilege: "Unauthorized, insufficient privileges"
 
+# Admin permission messages
+admin_permission.empty: "At least one admin permission must remain enabled"
+
 # Token messages
 token.name_too_long: "Token name is too long"
 token.quota_negative: "Quota value cannot be negative"

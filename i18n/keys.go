@@ -40,6 +40,11 @@ const (
 	MsgAuthInsufficientPrivilege = "auth.insufficient_privilege"
 )
 
+// Admin permission messages
+const (
+	MsgAdminPermissionEmpty = "admin_permission.empty"
+)
+
 // Token related messages
 const (
 	MsgTokenNameTooLong          = "token.name_too_long"

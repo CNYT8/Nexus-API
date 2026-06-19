@@ -3723,6 +3723,9 @@
     "Manage catalog visibility, pricing, groups, vendors, and deployments.": "Gérer la visibilité du catalogue, les prix, les groupes, les fournisseurs et les déploiements.",
     "Administer user accounts and roles.": "Administrer les comptes utilisateurs et les rôles.",
     "Create and review invite or credit codes.": "Créer et examiner les codes d'invitation ou de crédit.",
-    "Manage subscription plans and user subscriptions.": "Gérer les offres d'abonnement et les abonnements utilisateurs."
+    "Manage subscription plans and user subscriptions.": "Gérer les offres d'abonnement et les abonnements utilisateurs.",
+    "权限数量": "Nombre d'autorisations",
+    "管理权限": "Gérer les autorisations",
+    "至少需要保留一个管理员权限": "Au moins une autorisation administrateur doit rester activée"
   }
 }

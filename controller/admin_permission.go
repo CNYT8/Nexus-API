@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -75,7 +76,10 @@ func UpdateAdminPermissions(c *gin.Context) {
 		return
 	}
 
-	if err := model.SetAdminPermissionConfig(user, request.Permissions); err != nil {
+	if err := model.SetAdminPermissionConfig(user, request.Permissions); errors.Is(err, model.ErrAdminPermissionEmpty) {
+		common.ApiErrorI18n(c, i18n.MsgAdminPermissionEmpty)
+		return
+	} else if err != nil {
 		common.ApiError(c, err)
 		return
 	}

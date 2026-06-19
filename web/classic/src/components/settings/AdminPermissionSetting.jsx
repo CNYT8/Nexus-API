@@ -21,12 +21,15 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Badge,
+  Button,
   Card,
   Col,
   Empty,
+  Modal,
   Row,
   Skeleton,
   Switch,
+  Table,
   Typography,
 } from '@douyinfe/semi-ui';
 import { API, showError, showSuccess } from '../../helpers';
@@ -50,6 +53,13 @@ const AdminPermissionSetting = () => {
   const [saving, setSaving] = useState(false);
   const [modules, setModules] = useState([]);
   const [admins, setAdmins] = useState([]);
+  const [selectedAdminId, setSelectedAdminId] = useState(null);
+
+  const selectedAdmin =
+    admins.find((admin) => admin.id === selectedAdminId) || null;
+
+  const getEnabledCount = (admin, nextPermissions = admin.permissions) =>
+    modules.filter((module) => nextPermissions?.[module.key] !== false).length;
 
   const loadPermissions = async () => {
     setLoading(true);
@@ -74,6 +84,11 @@ const AdminPermissionSetting = () => {
       ...admin.permissions,
       [moduleKey]: checked,
     };
+
+    if (!checked && getEnabledCount(admin, permissions) === 0) {
+      showError(t('至少需要保留一个管理员权限'));
+      return;
+    }
 
     setSaving(true);
     try {
@@ -102,6 +117,53 @@ const AdminPermissionSetting = () => {
     loadPermissions();
   }, []);
 
+  const columns = [
+    {
+      title: t('管理员'),
+      dataIndex: 'username',
+      render: (_, admin, index) => (
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              fontWeight: 600,
+            }}
+          >
+            <span>
+              {index + 1}. {getAdminDisplayName(admin)}
+            </span>
+            <Badge theme='solid' type='primary'>
+              {t('管理员')}
+            </Badge>
+          </div>
+          <Text type='tertiary' size='small'>
+            {admin.email || admin.username}
+          </Text>
+        </div>
+      ),
+    },
+    {
+      title: t('权限数量'),
+      width: 120,
+      render: (_, admin) => `${getEnabledCount(admin)}/${modules.length}`,
+    },
+    {
+      title: t('操作'),
+      width: 140,
+      render: (_, admin) => (
+        <Button
+          theme='solid'
+          type='primary'
+          onClick={() => setSelectedAdminId(admin.id)}
+        >
+          {t('管理权限')}
+        </Button>
+      ),
+    },
+  ];
+
   return (
     <Card>
       <Card.Meta
@@ -115,89 +177,102 @@ const AdminPermissionSetting = () => {
         ) : admins.length === 0 ? (
           <Empty title={t('暂无存在管理员')} />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {admins.map((admin, index) => (
-              <Card
-                key={admin.id}
-                bodyStyle={{ padding: 16 }}
-                style={{ border: '1px solid var(--semi-color-border)' }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: 12,
-                    marginBottom: 16,
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        fontWeight: 600,
-                      }}
-                    >
-                      <span>
-                        {index + 1}. {getAdminDisplayName(admin)}
-                      </span>
-                      <Badge theme='solid' type='primary'>
-                        {t('管理员')}
-                      </Badge>
-                    </div>
-                    <Text type='tertiary' size='small'>
-                      {admin.email || admin.username}
-                    </Text>
-                  </div>
-                </div>
-
-                <Row gutter={[16, 16]}>
-                  {modules.map((module) => (
-                    <Col key={module.key} xs={24} sm={12} md={8}>
-                      <Card
-                        bodyStyle={{ padding: 14 }}
-                        style={{
-                          height: '100%',
-                          background: 'var(--semi-color-fill-0)',
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            gap: 12,
-                          }}
-                        >
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                              {t(
-                                MODULE_TITLE_KEYS[module.title_key] ||
-                                  module.title_key,
-                              )}
-                            </div>
-                            <Text type='tertiary' size='small'>
-                              {t(module.description)}
-                            </Text>
-                          </div>
-                          <Switch
-                            checked={admin.permissions?.[module.key] !== false}
-                            disabled={saving}
-                            onChange={(checked) =>
-                              updatePermission(admin, module.key, checked)
-                            }
-                          />
-                        </div>
-                      </Card>
-                    </Col>
-                  ))}
-                </Row>
-              </Card>
-            ))}
-          </div>
+          <Table
+            columns={columns}
+            dataSource={admins}
+            rowKey='id'
+            pagination={false}
+            size='small'
+          />
         )}
       </div>
+
+      <Modal
+        title={t('管理员权限设置')}
+        visible={!!selectedAdmin}
+        footer={null}
+        size='full-width'
+        bodyStyle={{ maxHeight: 'calc(100vh - 120px)', overflowY: 'auto' }}
+        onCancel={() => setSelectedAdminId(null)}
+      >
+        {selectedAdmin && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 600 }}>
+                  {getAdminDisplayName(selectedAdmin)}
+                </div>
+                <Text type='tertiary' size='small'>
+                  {selectedAdmin.email || selectedAdmin.username}
+                </Text>
+              </div>
+              <Badge theme='light' type='primary'>
+                {getEnabledCount(selectedAdmin)}/{modules.length}
+              </Badge>
+            </div>
+
+            <Row gutter={[12, 12]}>
+              {modules.map((module) => {
+                const checked =
+                  selectedAdmin.permissions?.[module.key] !== false;
+                const enabledCount = getEnabledCount(selectedAdmin);
+                return (
+                  <Col key={module.key} xs={24} sm={12} lg={8}>
+                    <div
+                      style={{
+                        height: '100%',
+                        padding: 12,
+                        border: '1px solid var(--semi-color-border)',
+                        borderRadius: 8,
+                        background: 'var(--semi-color-fill-0)',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'flex-start',
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                            {t(
+                              MODULE_TITLE_KEYS[module.title_key] ||
+                                module.title_key,
+                            )}
+                          </div>
+                          <Text type='tertiary' size='small'>
+                            {t(module.description)}
+                          </Text>
+                        </div>
+                        <Switch
+                          checked={checked}
+                          disabled={saving || (checked && enabledCount <= 1)}
+                          onChange={(nextChecked) =>
+                            updatePermission(
+                              selectedAdmin,
+                              module.key,
+                              nextChecked,
+                            )
+                          }
+                        />
+                      </div>
+                    </div>
+                  </Col>
+                );
+              })}
+            </Row>
+          </div>
+        )}
+      </Modal>
     </Card>
   );
 };

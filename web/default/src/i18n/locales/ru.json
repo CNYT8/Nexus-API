@@ -4538,6 +4538,8 @@
     "Based on new-api": "На основе new-api",
     "Nexus-API Project Repository:": "Репозиторий проекта Nexus-API:",
     "https://github.com/CNYT8/Nexus-API": "https://github.com/CNYT8/Nexus-API",
-    "is a modified downstream project based on": "— модифицированный downstream-проект на основе"
+    "is a modified downstream project based on": "— модифицированный downstream-проект на основе",
+    "Manage permissions": "Управлять правами",
+    "At least one admin permission must remain enabled": "Должно остаться включенным хотя бы одно право администратора"
   }
 }

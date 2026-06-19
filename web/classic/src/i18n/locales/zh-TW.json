@@ -3716,6 +3716,9 @@
     "Manage catalog visibility, pricing, groups, vendors, and deployments.": "管理目錄可見性、定價、分組、供應商和部署。",
     "Administer user accounts and roles.": "管理使用者帳號和角色。",
     "Create and review invite or credit codes.": "建立和查看邀請碼或額度兌換碼。",
-    "Manage subscription plans and user subscriptions.": "管理訂閱方案和使用者訂閱。"
+    "Manage subscription plans and user subscriptions.": "管理訂閱方案和使用者訂閱。",
+    "权限数量": "權限數量",
+    "管理权限": "管理權限",
+    "至少需要保留一个管理员权限": "至少需要保留一個管理員權限"
   }
 }

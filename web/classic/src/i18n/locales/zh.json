@@ -2670,6 +2670,9 @@
     "Manage catalog visibility, pricing, groups, vendors, and deployments.": "管理目录可见性、定价、分组、供应商和部署。",
     "Administer user accounts and roles.": "管理用户账户和角色。",
     "Create and review invite or credit codes.": "创建和查看邀请码或额度兑换码。",
-    "Manage subscription plans and user subscriptions.": "管理订阅套餐和用户订阅。"
+    "Manage subscription plans and user subscriptions.": "管理订阅套餐和用户订阅。",
+    "权限数量": "权限数量",
+    "管理权限": "管理权限",
+    "至少需要保留一个管理员权限": "至少需要保留一个管理员权限"
   }
 }

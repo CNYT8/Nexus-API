@@ -23,6 +23,20 @@ func TestAdminPermissionConfigFromSettingDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestValidateAdminPermissionConfigRequiresEnabledPermission(t *testing.T) {
+	config := AdminPermissionConfig{
+		AdminPermissionChannel:      false,
+		AdminPermissionModels:       false,
+		AdminPermissionUser:         false,
+		AdminPermissionRedemption:   false,
+		AdminPermissionSubscription: false,
+	}
+
+	if err := ValidateAdminPermissionConfig(config); err != ErrAdminPermissionEmpty {
+		t.Fatalf("expected ErrAdminPermissionEmpty, got %v", err)
+	}
+}
+
 func TestApplyAdminPermissionsToSidebarModules(t *testing.T) {
 	sidebar := `{"chat":{"enabled":true,"chat":false},"admin":{"enabled":true,"channel":true}}`
 	config := AdminPermissionConfig{

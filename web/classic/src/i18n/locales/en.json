@@ -3869,6 +3869,9 @@
     "Manage catalog visibility, pricing, groups, vendors, and deployments.": "Manage catalog visibility, pricing, groups, vendors, and deployments.",
     "Administer user accounts and roles.": "Administer user accounts and roles.",
     "Create and review invite or credit codes.": "Create and review invite or credit codes.",
-    "Manage subscription plans and user subscriptions.": "Manage subscription plans and user subscriptions."
+    "Manage subscription plans and user subscriptions.": "Manage subscription plans and user subscriptions.",
+    "权限数量": "Permission count",
+    "管理权限": "Manage permissions",
+    "至少需要保留一个管理员权限": "At least one admin permission must remain enabled"
   }
 }

@@ -3743,6 +3743,9 @@
     "Manage catalog visibility, pricing, groups, vendors, and deployments.": "Управление видимостью каталога, ценами, группами, поставщиками и развертываниями.",
     "Administer user accounts and roles.": "Администрирование учетных записей и ролей пользователей.",
     "Create and review invite or credit codes.": "Создание и проверка пригласительных или кредитных кодов.",
-    "Manage subscription plans and user subscriptions.": "Управление тарифами подписки и подписками пользователей."
+    "Manage subscription plans and user subscriptions.": "Управление тарифами подписки и подписками пользователей.",
+    "权限数量": "Количество прав",
+    "管理权限": "Управлять правами",
+    "至少需要保留一个管理员权限": "Должно остаться включенным хотя бы одно право администратора"
   }
 }
