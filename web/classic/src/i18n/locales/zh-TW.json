@@ -3708,6 +3708,14 @@
     "Nexus-API当前版本": "Nexus-API 目前版本",
     "基于": "基於",
     "二次开发": "二次開發",
-    "设计与开发": "設計與開發"
+    "设计与开发": "設計與開發",
+    "管理员权限设置": "管理員權限設定",
+    "暂无存在管理员": "暫無存在管理員",
+    "只列出普通管理员，超级管理员不受这些开关限制": "只列出普通管理員，超級管理員不受這些開關限制",
+    "Configure upstream providers and routing.": "設定上游供應商和路由。",
+    "Manage catalog visibility, pricing, groups, vendors, and deployments.": "管理目錄可見性、定價、分組、供應商和部署。",
+    "Administer user accounts and roles.": "管理使用者帳號和角色。",
+    "Create and review invite or credit codes.": "建立和查看邀請碼或額度兌換碼。",
+    "Manage subscription plans and user subscriptions.": "管理訂閱方案和使用者訂閱。"
   }
 }

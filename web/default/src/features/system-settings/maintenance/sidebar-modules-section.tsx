@@ -73,10 +73,6 @@ export function SidebarModulesSection({
       title: t('Personal area'),
       description: t('Wallet management and personal preferences.'),
     },
-    admin: {
-      title: t('Admin area'),
-      description: t('Global configuration and administrative tools.'),
-    },
   }
 
   const moduleMeta: Record<
@@ -123,32 +119,6 @@ export function SidebarModulesSection({
       personal: {
         title: t('Profile'),
         description: t('Personal settings and profile management.'),
-      },
-    },
-    admin: {
-      channel: {
-        title: t('Channels'),
-        description: t('Configure upstream providers and routing.'),
-      },
-      models: {
-        title: t('Models'),
-        description: t('Manage catalog visibility and pricing.'),
-      },
-      redemption: {
-        title: t('Redeem codes'),
-        description: t('Create and review invite or credit codes.'),
-      },
-      user: {
-        title: t('Users'),
-        description: t('Administer user accounts and roles.'),
-      },
-      setting: {
-        title: t('System settings'),
-        description: t('Advanced platform configuration.'),
-      },
-      subscription: {
-        title: t('Subscription Management'),
-        description: t('Manage subscription plans and pricing.'),
       },
     },
   }

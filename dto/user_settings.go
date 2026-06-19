@@ -15,6 +15,7 @@ type UserSetting struct {
 	RecordIpLog                      bool    `json:"record_ip_log,omitempty"`                        // 是否记录请求和错误日志IP
 	RecordIpLogUpdatedAt             int64   `json:"record_ip_log_updated_at,omitempty"`             // 用户上次自行修改 RecordIpLog 的时间戳；与全局 DefaultRecordIpLogUpdatedAt 比较以决定生效值
 	SidebarModules                   string  `json:"sidebar_modules,omitempty"`                      // SidebarModules 左侧边栏模块配置
+	AdminPermissions                 string  `json:"admin_permissions,omitempty"`                    // AdminPermissions 超级管理员分配给管理员的管理权限
 	BillingPreference                string  `json:"billing_preference,omitempty"`                   // BillingPreference 扣费策略（订阅/钱包）
 	Language                         string  `json:"language,omitempty"`                             // Language 用户语言偏好 (zh, en)
 }

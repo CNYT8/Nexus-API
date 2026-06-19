@@ -4248,6 +4248,14 @@
     "Nexus-API当前版本": "Phiên bản Nexus-API hiện tại",
     "基于": "Dựa trên",
     "二次开发": "phát triển thứ cấp",
-    "设计与开发": "Thiết kế & phát triển"
+    "设计与开发": "Thiết kế & phát triển",
+    "管理员权限设置": "Cài đặt quyền quản trị viên",
+    "暂无存在管理员": "Không có quản trị viên nào",
+    "只列出普通管理员，超级管理员不受这些开关限制": "Chỉ liệt kê quản trị viên thông thường. Siêu quản trị viên không bị giới hạn bởi các công tắc này.",
+    "Configure upstream providers and routing.": "Cấu hình nhà cung cấp upstream và định tuyến.",
+    "Manage catalog visibility, pricing, groups, vendors, and deployments.": "Quản lý hiển thị danh mục, giá cả, nhóm, nhà cung cấp và triển khai.",
+    "Administer user accounts and roles.": "Quản trị tài khoản người dùng và vai trò.",
+    "Create and review invite or credit codes.": "Tạo và xem lại mã mời hoặc mã tín dụng.",
+    "Manage subscription plans and user subscriptions.": "Quản lý gói đăng ký và đăng ký của người dùng."
   }
 }

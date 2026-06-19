@@ -3684,6 +3684,14 @@
     "Nexus-API当前版本": "Nexus-API 現在のバージョン",
     "基于": "ベース：",
     "二次开发": "の二次開発",
-    "设计与开发": "設計と開発"
+    "设计与开发": "設計と開発",
+    "管理员权限设置": "管理者権限設定",
+    "暂无存在管理员": "管理者は存在しません",
+    "只列出普通管理员，超级管理员不受这些开关限制": "通常の管理者のみを表示します。スーパー管理者はこれらのスイッチの制限を受けません。",
+    "Configure upstream providers and routing.": "上流プロバイダーとルーティングを設定。",
+    "Manage catalog visibility, pricing, groups, vendors, and deployments.": "カタログの表示、価格設定、グループ、ベンダー、デプロイを管理。",
+    "Administer user accounts and roles.": "ユーザーアカウントとロールを管理。",
+    "Create and review invite or credit codes.": "招待コードまたはクレジットコードを作成・確認。",
+    "Manage subscription plans and user subscriptions.": "サブスクリプションプランとユーザーサブスクリプションを管理。"
   }
 }

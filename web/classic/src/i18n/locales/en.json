@@ -3861,6 +3861,14 @@
     "Nexus-API当前版本": "Nexus-API current version",
     "基于": "Based on",
     "二次开发": "with secondary development",
-    "设计与开发": "Design & development"
+    "设计与开发": "Design & development",
+    "管理员权限设置": "Admin Permission Settings",
+    "暂无存在管理员": "No administrators exist",
+    "只列出普通管理员，超级管理员不受这些开关限制": "Only regular administrators are listed. Super administrators are not limited by these switches.",
+    "Configure upstream providers and routing.": "Configure upstream providers and routing.",
+    "Manage catalog visibility, pricing, groups, vendors, and deployments.": "Manage catalog visibility, pricing, groups, vendors, and deployments.",
+    "Administer user accounts and roles.": "Administer user accounts and roles.",
+    "Create and review invite or credit codes.": "Create and review invite or credit codes.",
+    "Manage subscription plans and user subscriptions.": "Manage subscription plans and user subscriptions."
   }
 }

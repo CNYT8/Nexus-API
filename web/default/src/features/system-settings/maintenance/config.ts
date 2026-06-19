@@ -72,15 +72,6 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     topup: true,
     personal: true,
   },
-  admin: {
-    enabled: true,
-    channel: true,
-    models: true,
-    redemption: true,
-    user: true,
-    setting: true,
-    subscription: true,
-  },
 }
 
 const toBoolean = (value: unknown, fallback: boolean): boolean => {

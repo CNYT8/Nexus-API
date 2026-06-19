@@ -167,6 +167,22 @@ func resolveWaffoPancakeAdminCreds(bodyMerchantID, bodyPrivateKey string) (strin
 	return m, k
 }
 
+func bindWaffoPancakeCreds(c *gin.Context) (waffoPancakeCredsRequest, bool) {
+	var req waffoPancakeCredsRequest
+	if c.Request.Method == http.MethodGet {
+		req.MerchantID = c.Query("merchant_id")
+		req.PrivateKey = c.Query("private_key")
+		return req, true
+	}
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusOK, gin.H{"message": "error", "data": "参数错误"})
+			return req, false
+		}
+	}
+	return req, true
+}
+
 // CreateWaffoPancakePair mints a Store + OnetimeProduct pair in one round-
 // trip. Surfaces an orphan-store flag when the product half fails so the
 // frontend can preselect / retry without losing context.
@@ -221,13 +237,9 @@ func CreateWaffoPancakePair(c *gin.Context) {
 // Doubles as a credential probe (a successful 200 proves the resolved creds
 // authenticate). See resolveWaffoPancakeAdminCreds for credential resolution.
 func ListWaffoPancakeCatalog(c *gin.Context) {
-	var req waffoPancakeCredsRequest
-	// An empty body means "use persisted creds"; only fail on malformed JSON.
-	if c.Request.ContentLength > 0 {
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusOK, gin.H{"message": "error", "data": "参数错误"})
-			return
-		}
+	req, ok := bindWaffoPancakeCreds(c)
+	if !ok {
+		return
 	}
 	merchantID, privateKey := resolveWaffoPancakeAdminCreds(req.MerchantID, req.PrivateKey)
 	if merchantID == "" || privateKey == "" {

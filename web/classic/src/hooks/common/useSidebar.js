@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect, useMemo, useContext, useRef } from 'react';
 import { StatusContext } from '../../context/Status';
-import { API } from '../../helpers';
+import { API, isAdmin, isRoot } from '../../helpers';
 
 // 创建一个全局事件系统来同步所有useSidebar实例
 const sidebarEventTarget = new EventTarget();
@@ -44,16 +44,17 @@ export const DEFAULT_ADMIN_CONFIG = {
     topup: true,
     personal: true,
   },
-  admin: {
-    enabled: true,
-    channel: true,
-    models: true,
-    deployment: true,
-    redemption: true,
-    user: true,
-    subscription: true,
-    setting: true,
-  },
+};
+
+const ROOT_ADMIN_CONFIG = {
+  enabled: true,
+  channel: true,
+  models: true,
+  deployment: true,
+  redemption: true,
+  user: true,
+  subscription: true,
+  setting: true,
 };
 
 const deepClone = (value) => JSON.parse(JSON.stringify(value));
@@ -64,6 +65,7 @@ export const mergeAdminConfig = (savedConfig) => {
 
   for (const [sectionKey, sectionConfig] of Object.entries(savedConfig)) {
     if (!sectionConfig || typeof sectionConfig !== 'object') continue;
+    if (sectionKey === 'admin') continue;
 
     if (!merged[sectionKey]) {
       merged[sectionKey] = { ...sectionConfig };
@@ -255,6 +257,26 @@ export const useSidebar = () => {
           adminAllowed && userAllowed && sectionEnabled;
       });
     });
+
+    if (isRoot()) {
+      result.admin = { ...ROOT_ADMIN_CONFIG };
+    } else if (isAdmin()) {
+      const adminSection = userConfig.admin;
+      if (adminSection?.enabled) {
+        result.admin = {
+          enabled: true,
+          channel: adminSection.channel === true,
+          models: adminSection.models === true,
+          deployment: adminSection.models === true,
+          redemption: adminSection.redemption === true,
+          user: adminSection.user === true,
+          subscription: adminSection.subscription === true,
+          setting: false,
+        };
+      } else {
+        result.admin = { enabled: false };
+      }
+    }
 
     return result;
   }, [adminConfig, userConfig]);

@@ -30,6 +30,8 @@ export const STATIC_I18N_KEYS = [
   // Sidebar views (drill-in workspaces)
   'System Settings',
   'Back to Dashboard',
+  '管理员权限设置',
+  '暂无存在管理员',
 
   // System settings sidebar
   'System Administration',
@@ -40,6 +42,15 @@ export const STATIC_I18N_KEYS = [
   'Integrations',
   'Models',
   'Maintenance',
+  'Channels',
+  'Redeem codes',
+  'Subscription Management',
+  'Configure upstream providers and routing.',
+  'Manage catalog visibility, pricing, groups, vendors, and deployments.',
+  'Administer user accounts and roles.',
+  'Create and review invite or credit codes.',
+  'Manage subscription plans and user subscriptions.',
+  'Only regular administrators are listed here.',
 
   // Pricing constants
   'Name',
@@ -360,6 +371,7 @@ export const STATIC_I18N_KEYS = [
   'Plan Subtitle',
   'e.g. Suitable for light usage',
   'Actual Amount',
+  'Amount the user pays to purchase this plan; the actual currency depends on the payment gateway.',
   'Total Quota',
   '0 means unlimited',
   'Sort Order',

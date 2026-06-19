@@ -3715,6 +3715,14 @@
     "Nexus-API当前版本": "Version actuelle de Nexus-API",
     "基于": "Basé sur",
     "二次开发": "avec développement dérivé",
-    "设计与开发": "Conception et développement"
+    "设计与开发": "Conception et développement",
+    "管理员权限设置": "Paramètres des autorisations administrateur",
+    "暂无存在管理员": "Aucun administrateur n'existe",
+    "只列出普通管理员，超级管理员不受这些开关限制": "Seuls les administrateurs standards sont listés. Les super administrateurs ne sont pas limités par ces interrupteurs.",
+    "Configure upstream providers and routing.": "Configurer les fournisseurs upstream et le routage.",
+    "Manage catalog visibility, pricing, groups, vendors, and deployments.": "Gérer la visibilité du catalogue, les prix, les groupes, les fournisseurs et les déploiements.",
+    "Administer user accounts and roles.": "Administrer les comptes utilisateurs et les rôles.",
+    "Create and review invite or credit codes.": "Créer et examiner les codes d'invitation ou de crédit.",
+    "Manage subscription plans and user subscriptions.": "Gérer les offres d'abonnement et les abonnements utilisateurs."
   }
 }

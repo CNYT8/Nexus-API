@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo } from 'react'
 import { useAuthStore } from '@/stores/auth-store'
 import { useStatus } from '@/hooks/use-status'
+import { ROLE } from '@/lib/roles'
 import type { NavGroup, NavItem } from '@/components/layout/types'
 
 type SidebarSectionConfig = {
@@ -31,6 +32,7 @@ type SidebarModulesAdminConfig = Record<string, SidebarSectionConfig>
 // User-layer config is shape-identical to admin, but may be null
 // to signal "no narrowing" (empty/invalid/legacy users).
 type SidebarModulesUserConfig = SidebarModulesAdminConfig | null
+type UserRole = number | undefined
 
 /**
  * Default sidebar modules configuration
@@ -53,15 +55,6 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     enabled: true,
     topup: true,
     personal: true,
-  },
-  admin: {
-    enabled: true,
-    channel: true,
-    models: true,
-    redemption: true,
-    user: true,
-    setting: true,
-    subscription: true,
   },
 }
 
@@ -130,6 +123,7 @@ function parseSidebarConfig(
 
   try {
     const parsed = JSON.parse(value) as SidebarModulesAdminConfig
+    delete parsed.admin
     return mergeWithDefaultSidebarModules(parsed)
   } catch {
     // eslint-disable-next-line no-console
@@ -167,7 +161,8 @@ function parseUserSidebarConfig(
 function isModuleEnabled(
   url: string,
   adminConfig: SidebarModulesAdminConfig,
-  userConfig: SidebarModulesUserConfig
+  userConfig: SidebarModulesUserConfig,
+  userRole: UserRole
 ): boolean {
   const mapping = URL_TO_CONFIG_MAP[url]
   if (!mapping) {
@@ -176,6 +171,19 @@ function isModuleEnabled(
   }
 
   const { section, module } = mapping
+  if (section === 'admin' && (userRole ?? 0) < ROLE.ADMIN) {
+    return false
+  }
+  if (section === 'admin' && (userRole ?? 0) >= ROLE.SUPER_ADMIN) {
+    return true
+  }
+  if (section === 'admin') {
+    const userSection = userConfig?.admin
+    return Boolean(
+      userSection && userSection.enabled && userSection[module] === true
+    )
+  }
+
   const adminSection = adminConfig[section]
   const adminAllowed = Boolean(
     adminSection && adminSection.enabled && adminSection[module] === true
@@ -185,7 +193,9 @@ function isModuleEnabled(
   if (!userConfig) return true
 
   const userSection = userConfig[section]
-  if (!userSection) return true
+  if (!userSection) {
+    return section !== 'admin'
+  }
   if (userSection.enabled === false) return false
   return userSection[module] !== false
 }
@@ -196,7 +206,8 @@ function isModuleEnabled(
 function isNavItemVisible(
   item: NavItem,
   adminConfig: SidebarModulesAdminConfig,
-  userConfig: SidebarModulesUserConfig
+  userConfig: SidebarModulesUserConfig,
+  userRole: UserRole
 ): boolean {
   // Handle dynamic chat presets type — also runs the admin × user AND gate
   if ('type' in item && item.type === 'chat-presets') {
@@ -214,7 +225,7 @@ function isNavItemVisible(
   if ('url' in item && item.url) {
     const configUrls = item.configUrls ?? [item.url]
     return configUrls.some((url) =>
-      isModuleEnabled(url as string, adminConfig, userConfig)
+      isModuleEnabled(url as string, adminConfig, userConfig, userRole)
     )
   }
 
@@ -222,7 +233,7 @@ function isNavItemVisible(
   if ('items' in item && item.items) {
     // If has sub-items, show this collapsible item if at least one sub-item is visible
     return item.items.some((subItem) =>
-      isModuleEnabled(subItem.url as string, adminConfig, userConfig)
+      isModuleEnabled(subItem.url as string, adminConfig, userConfig, userRole)
     )
   }
 
@@ -235,14 +246,20 @@ function isNavItemVisible(
 function filterNavItems(
   items: NavItem[],
   adminConfig: SidebarModulesAdminConfig,
-  userConfig: SidebarModulesUserConfig
+  userConfig: SidebarModulesUserConfig,
+  userRole: UserRole
 ): NavItem[] {
   return items
     .map((item) => {
       // If collapsible item, also filter its sub-items
       if ('items' in item && item.items) {
         const filteredSubItems = item.items.filter((subItem) =>
-          isModuleEnabled(subItem.url as string, adminConfig, userConfig)
+          isModuleEnabled(
+            subItem.url as string,
+            adminConfig,
+            userConfig,
+            userRole
+          )
         )
 
         return {
@@ -252,7 +269,9 @@ function filterNavItems(
       }
       return item
     })
-    .filter((item) => isNavItemVisible(item, adminConfig, userConfig))
+    .filter((item) =>
+      isNavItemVisible(item, adminConfig, userConfig, userRole)
+    )
 }
 
 /**
@@ -300,10 +319,15 @@ export function useSidebarConfig(navGroups: NavGroup[]): NavGroup[] {
       navGroups
         .map((group) => ({
           ...group,
-          items: filterNavItems(group.items, adminConfig, userConfig),
+          items: filterNavItems(
+            group.items,
+            adminConfig,
+            userConfig,
+            auth?.user?.role
+          ),
         }))
         .filter((group) => group.items.length > 0), // Only show navigation groups with visible items
-    [navGroups, adminConfig, userConfig]
+    [navGroups, adminConfig, userConfig, auth?.user?.role]
   )
 
   return filteredNavGroups

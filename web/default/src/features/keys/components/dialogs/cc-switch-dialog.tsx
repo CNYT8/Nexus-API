@@ -157,7 +157,13 @@ export function CCSwitchDialog(props: Props) {
           <DialogTitle>{t('Import to CC Switch')}</DialogTitle>
         </DialogHeader>
 
-        <div className='space-y-4'>
+        <div
+          className={
+            currentConfig.modelFields.length === 1
+              ? 'space-y-4 pb-52'
+              : 'space-y-4'
+          }
+        >
           <div className='space-y-2'>
             <Label>{t('Application')}</Label>
             <RadioGroup

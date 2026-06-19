@@ -35,6 +35,7 @@ import {
   Server,
   Activity,
   ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react';
 
 import SystemSetting from '../../components/settings/SystemSetting';
@@ -51,6 +52,7 @@ import PaymentSetting from '../../components/settings/PaymentSetting';
 import ModelDeploymentSetting from '../../components/settings/ModelDeploymentSetting';
 import PerformanceSetting from '../../components/settings/PerformanceSetting';
 import ErrorMaskSetting from '../../components/settings/ErrorMaskSetting';
+import AdminPermissionSetting from '../../components/settings/AdminPermissionSetting';
 
 const Setting = () => {
   const { t } = useTranslation();
@@ -69,6 +71,16 @@ const Setting = () => {
       ),
       content: <OperationSetting />,
       itemKey: 'operation',
+    });
+    panes.push({
+      tab: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <ShieldCheck size={18} />
+          {t('管理员权限设置')}
+        </span>
+      ),
+      content: <AdminPermissionSetting />,
+      itemKey: 'admin-permissions',
     });
     panes.push({
       tab: (

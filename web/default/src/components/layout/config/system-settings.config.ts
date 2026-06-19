@@ -24,6 +24,7 @@ import {
   Settings,
   Shield,
   ShieldAlert,
+  ShieldCheck,
   Wrench,
 } from 'lucide-react'
 import { getAuthSectionNavItems } from '@/features/system-settings/auth/section-registry.tsx'
@@ -74,14 +75,19 @@ function getSystemSettingsNavGroups(t: TFunction): NavGroup[] {
           items: getSecuritySectionNavItems(t),
         },
         {
-          title: t('Console Content'),
-          icon: Layout,
-          items: getContentSectionNavItems(t),
-        },
-        {
           title: t('Operations'),
           icon: Wrench,
           items: getOperationsSectionNavItems(t),
+        },
+        {
+          title: t('管理员权限设置'),
+          icon: ShieldCheck,
+          url: '/system-settings/admin-permissions',
+        },
+        {
+          title: t('Console Content'),
+          icon: Layout,
+          items: getContentSectionNavItems(t),
         },
       ],
     },
