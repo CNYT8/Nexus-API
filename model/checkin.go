@@ -25,6 +25,18 @@ type CheckinRecord struct {
 	QuotaAwarded int    `json:"quota_awarded"`
 }
 
+type CheckinConditionStatus struct {
+	Enabled          bool   `json:"enabled"`
+	Eligible         bool   `json:"eligible"`
+	Reason           string `json:"reason,omitempty"`
+	Message          string `json:"message,omitempty"`
+	Date             string `json:"date"`
+	RequestThreshold int    `json:"request_threshold"`
+	TokenThreshold   int    `json:"token_threshold"`
+	RequestCount     int64  `json:"request_count"`
+	TokenCount       int64  `json:"token_count"`
+}
+
 func (Checkin) TableName() string {
 	return "checkins"
 }
@@ -49,6 +61,51 @@ func HasCheckedInToday(userId int) (bool, error) {
 	return count > 0, err
 }
 
+func GetCheckinConditionStatus(userId int, setting *operation_setting.CheckinSetting) (*CheckinConditionStatus, error) {
+	yesterday := time.Now().AddDate(0, 0, -1)
+	status := &CheckinConditionStatus{
+		Enabled:          setting.ConditionEnabled,
+		Eligible:         true,
+		Date:             yesterday.Format("2006-01-02"),
+		RequestThreshold: setting.RequestThreshold,
+		TokenThreshold:   setting.TokenThreshold,
+	}
+
+	if !setting.ConditionEnabled {
+		return status, nil
+	}
+
+	startAt := time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 0, 0, 0, 0, time.Local)
+	endAt := startAt.AddDate(0, 0, 1)
+	var usage struct {
+		RequestCount int64
+		TokenCount   int64
+	}
+	if err := LOG_DB.Model(&Log{}).
+		Select("COUNT(*) AS request_count, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS token_count").
+		Where("user_id = ? AND type = ? AND created_at >= ? AND created_at < ?", userId, LogTypeConsume, startAt.Unix(), endAt.Unix()).
+		Scan(&usage).Error; err != nil {
+		return nil, err
+	}
+
+	status.RequestCount = usage.RequestCount
+	status.TokenCount = usage.TokenCount
+	if setting.RequestThreshold > 0 && usage.RequestCount <= int64(setting.RequestThreshold) {
+		status.Eligible = false
+		status.Reason = "request_count"
+		status.Message = "前一天调用量未超过签到要求"
+		return status, nil
+	}
+	if setting.TokenThreshold > 0 && usage.TokenCount <= int64(setting.TokenThreshold) {
+		status.Eligible = false
+		status.Reason = "token_count"
+		status.Message = "前一天用量未超过签到要求"
+		return status, nil
+	}
+
+	return status, nil
+}
+
 // UserCheckin 执行用户签到
 // MySQL 和 PostgreSQL 使用事务保证原子性
 // SQLite 不支持嵌套事务，使用顺序操作 + 手动回滚
@@ -65,6 +122,14 @@ func UserCheckin(userId int) (*Checkin, error) {
 	}
 	if hasChecked {
 		return nil, errors.New("今日已签到")
+	}
+
+	condition, err := GetCheckinConditionStatus(userId, setting)
+	if err != nil {
+		return nil, err
+	}
+	if !condition.Eligible {
+		return nil, errors.New(condition.Message)
 	}
 
 	// 计算随机额度奖励
@@ -162,6 +227,10 @@ func GetUserCheckinStats(userId int, month string) (map[string]interface{}, erro
 
 	// 检查今天是否已签到
 	hasCheckedToday, _ := HasCheckedInToday(userId)
+	condition, err := GetCheckinConditionStatus(userId, operation_setting.GetCheckinSetting())
+	if err != nil {
+		return nil, err
+	}
 
 	// 获取用户所有时间的签到统计
 	var totalCheckins int64
@@ -174,6 +243,7 @@ func GetUserCheckinStats(userId int, month string) (map[string]interface{}, erro
 		"total_checkins":   totalCheckins,   // 所有时间累计签到次数
 		"checkin_count":    len(records),    // 本月签到次数
 		"checked_in_today": hasCheckedToday, // 今天是否已签到
+		"condition":        condition,       // 条件签到状态
 		"records":          checkinRecords,  // 本月签到记录详情（不含id和user_id）
 	}, nil
 }

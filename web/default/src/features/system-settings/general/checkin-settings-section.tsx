@@ -43,6 +43,9 @@ import { useUpdateOption } from '../hooks/use-update-option'
 
 const schema = z.object({
   enabled: z.boolean(),
+  conditionEnabled: z.boolean(),
+  requestThreshold: z.coerce.number().int().min(0),
+  tokenThreshold: z.coerce.number().int().min(0),
   minQuota: z.coerce.number().int().min(0),
   maxQuota: z.coerce.number().int().min(0),
 })
@@ -54,6 +57,9 @@ export function CheckinSettingsSection({
 }: {
   defaultValues: {
     enabled: boolean
+    conditionEnabled: boolean
+    requestThreshold: number
+    tokenThreshold: number
     minQuota: number
     maxQuota: number
   }
@@ -65,6 +71,9 @@ export function CheckinSettingsSection({
     resolver: zodResolver(schema) as unknown as Resolver<Values>,
     defaultValues: {
       enabled: defaultValues.enabled,
+      conditionEnabled: defaultValues.conditionEnabled,
+      requestThreshold: defaultValues.requestThreshold,
+      tokenThreshold: defaultValues.tokenThreshold,
       minQuota: defaultValues.minQuota,
       maxQuota: defaultValues.maxQuota,
     },
@@ -72,6 +81,7 @@ export function CheckinSettingsSection({
 
   const { isDirty, isSubmitting } = form.formState
   const enabled = form.watch('enabled')
+  const conditionEnabled = form.watch('conditionEnabled')
 
   async function onSubmit(values: Values) {
     const updates: Array<{ key: string; value: string }> = []
@@ -80,6 +90,27 @@ export function CheckinSettingsSection({
       updates.push({
         key: 'checkin_setting.enabled',
         value: String(values.enabled),
+      })
+    }
+
+    if (values.conditionEnabled !== defaultValues.conditionEnabled) {
+      updates.push({
+        key: 'checkin_setting.condition_enabled',
+        value: String(values.conditionEnabled),
+      })
+    }
+
+    if (values.requestThreshold !== defaultValues.requestThreshold) {
+      updates.push({
+        key: 'checkin_setting.request_threshold',
+        value: String(values.requestThreshold),
+      })
+    }
+
+    if (values.tokenThreshold !== defaultValues.tokenThreshold) {
+      updates.push({
+        key: 'checkin_setting.token_threshold',
+        value: String(values.tokenThreshold),
       })
     }
 
@@ -145,6 +176,80 @@ export function CheckinSettingsSection({
 
           {enabled && (
             <div className='grid gap-6 sm:grid-cols-2'>
+              <FormField
+                control={form.control}
+                name='conditionEnabled'
+                render={({ field }) => (
+                  <SettingsSwitchItem className='sm:col-span-2'>
+                    <SettingsSwitchContent>
+                      <FormLabel>{t('Enable conditional check-in')}</FormLabel>
+                      <FormDescription>
+                        {t(
+                          'Require previous-day usage before users can check in'
+                        )}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        disabled={updateOption.isPending || isSubmitting}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='requestThreshold'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Previous-day request threshold')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={0}
+                        placeholder={t('0 means no request limit')}
+                        disabled={!conditionEnabled}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Users whose previous-day requests do not exceed this value cannot check in'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='tokenThreshold'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Previous-day usage threshold')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={0}
+                        placeholder={t('0 means no usage limit')}
+                        disabled={!conditionEnabled}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Users whose previous-day token usage does not exceed this value cannot check in'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <FormField
                 control={form.control}
                 name='minQuota'

@@ -205,6 +205,18 @@ export interface CheckinRecord {
 export interface CheckinStats {
   /** Whether user has checked in today */
   checked_in_today: boolean
+  /** Conditional check-in eligibility */
+  condition?: {
+    enabled: boolean
+    eligible: boolean
+    reason?: 'request_count' | 'token_count'
+    message?: string
+    date: string
+    request_threshold: number
+    token_threshold: number
+    request_count: number
+    token_count: number
+  }
   /** Total number of check-ins */
   total_checkins: number
   /** Total quota earned from check-ins */

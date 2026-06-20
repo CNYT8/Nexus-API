@@ -193,6 +193,9 @@ const BILLING_SECTIONS = [
       <CheckinSettingsSection
         defaultValues={{
           enabled: settings['checkin_setting.enabled'],
+          conditionEnabled: settings['checkin_setting.condition_enabled'],
+          requestThreshold: settings['checkin_setting.request_threshold'],
+          tokenThreshold: settings['checkin_setting.token_threshold'],
           minQuota: settings['checkin_setting.min_quota'],
           maxQuota: settings['checkin_setting.max_quota'],
         }}

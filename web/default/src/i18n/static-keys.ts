@@ -53,6 +53,16 @@ export const STATIC_I18N_KEYS = [
   'Only regular administrators are listed here.',
   'Manage permissions',
   'At least one admin permission must remain enabled',
+  'Enable conditional check-in',
+  'Require previous-day usage before users can check in',
+  'Previous-day request threshold',
+  '0 means no request limit',
+  'Users whose previous-day requests do not exceed this value cannot check in',
+  'Previous-day usage threshold',
+  '0 means no usage limit',
+  'Users whose previous-day token usage does not exceed this value cannot check in',
+  'Previous-day request count did not exceed the check-in requirement',
+  'Previous-day usage did not exceed the check-in requirement',
 
   // Pricing constants
   'Name',

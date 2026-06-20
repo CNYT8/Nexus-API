@@ -165,7 +165,7 @@ const AdminPermissionSetting = () => {
   ];
 
   return (
-    <Card>
+    <Card style={{ marginTop: '10px' }}>
       <Card.Meta
         title={t('管理员权限设置')}
         description={t('只列出普通管理员，超级管理员不受这些开关限制')}

@@ -120,7 +120,22 @@ export function CheckinCalendarCard({
   }, [])
 
   const checkedToday = checkinData?.stats?.checked_in_today === true
+  const condition = checkinData?.stats?.condition
+  const conditionBlocked = condition?.enabled === true && !condition.eligible
+  const conditionBlockedMessage =
+    condition?.reason === 'request_count'
+      ? t('Previous-day request count did not exceed the check-in requirement')
+      : condition?.reason === 'token_count'
+        ? t('Previous-day usage did not exceed the check-in requirement')
+        : t('Previous-day usage did not exceed the check-in requirement')
   const todayAward = checkinRecordsMap[todayString]
+  let checkinStatusText = t('Check in daily to receive random quota rewards')
+  if (conditionBlocked) {
+    checkinStatusText = conditionBlockedMessage
+  }
+  if (checkedToday && todayAward !== undefined) {
+    checkinStatusText = `${t('Today')} +${formatQuotaWithCurrency(todayAward)}`
+  }
 
   useEffect(() => {
     if (initialLoaded) return
@@ -312,15 +327,13 @@ export function CheckinCalendarCard({
                   </span>
                 </div>
                 <p className='text-muted-foreground mt-1 line-clamp-2 text-xs sm:text-sm'>
-                  {checkedToday && todayAward !== undefined
-                    ? `${t('Today')} +${formatQuotaWithCurrency(todayAward)}`
-                    : t('Check in daily to receive random quota rewards')}
+                  {checkinStatusText}
                 </p>
               </div>
             </Button>
             <Button
               onClick={() => doCheckin()}
-              disabled={checkinLoading || checkedToday}
+              disabled={checkinLoading || checkedToday || conditionBlocked}
               size='sm'
               className='w-full shrink-0 sm:w-auto'
             >

@@ -170,6 +170,26 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
     return null;
   }
 
+  const condition = checkinData.stats?.condition;
+  const conditionBlocked = condition?.enabled === true && !condition.eligible;
+  const conditionBlockedMessage =
+    condition?.reason === 'request_count'
+      ? t('前一天调用量未超过签到要求')
+      : t('前一天用量未超过签到要求');
+  let checkinStatusText = t('每日签到可获得随机额度奖励');
+  if (conditionBlocked) {
+    checkinStatusText = conditionBlockedMessage;
+  }
+  if (checkinData.stats?.checked_in_today) {
+    checkinStatusText =
+      t('今日已签到，累计签到') +
+      ` ${checkinData.stats?.total_checkins || 0} ` +
+      t('天');
+  }
+  if (!initialLoaded) {
+    checkinStatusText = t('正在加载签到状态...');
+  }
+
   // 日期渲染函数 - 显示签到状态和获得的额度
   const dateRender = (dateString) => {
     // Semi Calendar 传入的 dateString 是 Date.toString() 格式
@@ -259,13 +279,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
               )}
             </div>
             <div className='text-xs text-gray-500 dark:text-gray-400'>
-              {!initialLoaded
-                ? t('正在加载签到状态...')
-                : checkinData.stats?.checked_in_today
-                  ? t('今日已签到，累计签到') +
-                    ` ${checkinData.stats?.total_checkins || 0} ` +
-                    t('天')
-                  : t('每日签到可获得随机额度奖励')}
+              {checkinStatusText}
             </div>
           </div>
         </div>
@@ -275,7 +289,11 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
           icon={<Gift size={16} />}
           onClick={() => doCheckin()}
           loading={checkinLoading || !initialLoaded}
-          disabled={!initialLoaded || checkinData.stats?.checked_in_today}
+          disabled={
+            !initialLoaded ||
+            checkinData.stats?.checked_in_today ||
+            conditionBlocked
+          }
           className='!bg-green-600 hover:!bg-green-700'
         >
           {!initialLoaded

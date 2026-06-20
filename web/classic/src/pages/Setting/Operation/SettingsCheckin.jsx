@@ -33,6 +33,9 @@ export default function SettingsCheckin(props) {
   const [loading, setLoading] = useState(false);
   const [inputs, setInputs] = useState({
     'checkin_setting.enabled': false,
+    'checkin_setting.condition_enabled': false,
+    'checkin_setting.request_threshold': 0,
+    'checkin_setting.token_threshold': 0,
     'checkin_setting.min_quota': 1000,
     'checkin_setting.max_quota': 10000,
   });
@@ -116,6 +119,49 @@ export default function SettingsCheckin(props) {
                   checkedText='｜'
                   uncheckedText='〇'
                   onChange={handleFieldChange('checkin_setting.enabled')}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field={'checkin_setting.condition_enabled'}
+                  label={t('启用条件签到')}
+                  size='default'
+                  checkedText='｜'
+                  uncheckedText='〇'
+                  onChange={handleFieldChange(
+                    'checkin_setting.condition_enabled',
+                  )}
+                  disabled={!inputs['checkin_setting.enabled']}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'checkin_setting.request_threshold'}
+                  label={t('前一天调用次数阈值')}
+                  placeholder={t('0 表示不限制调用次数')}
+                  onChange={handleFieldChange(
+                    'checkin_setting.request_threshold',
+                  )}
+                  min={0}
+                  disabled={
+                    !inputs['checkin_setting.enabled'] ||
+                    !inputs['checkin_setting.condition_enabled']
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'checkin_setting.token_threshold'}
+                  label={t('前一天用量阈值')}
+                  placeholder={t('0 表示不限制用量')}
+                  onChange={handleFieldChange(
+                    'checkin_setting.token_threshold',
+                  )}
+                  min={0}
+                  disabled={
+                    !inputs['checkin_setting.enabled'] ||
+                    !inputs['checkin_setting.condition_enabled']
+                  }
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
