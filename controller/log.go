@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -49,6 +50,7 @@ func GetUserLogs(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	service.ApplyErrorMaskToUserLogs(logs)
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(logs)
 	common.ApiSuccess(c, pageInfo)
@@ -88,6 +90,7 @@ func GetLogByKey(c *gin.Context) {
 		})
 		return
 	}
+	service.ApplyErrorMaskToUserLogs(logs)
 	c.JSON(200, gin.H{
 		"success": true,
 		"message": "",
