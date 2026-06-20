@@ -34,6 +34,7 @@ func ApplyErrorMask(c *gin.Context, apiErr *types.NewAPIError) {
 		newMsg := substituteErrorMaskPlaceholders(rule.Replacement, errorMaskPlaceholdersFromContext(c), origMsg,
 			fmt.Sprintf("%v", oai.Code), oai.Type, oai.Param, apiErr.StatusCode)
 		apiErr.SetMessage(newMsg)
+		clearMaskedRelayMetadata(apiErr)
 		if rule.Status >= 100 && rule.Status <= 599 {
 			apiErr.StatusCode = rule.Status
 		}
@@ -81,6 +82,18 @@ func applyErrorMaskToMessage(statusCode int, message string, errCode string, err
 		return statusCode, newMsg
 	}
 	return statusCode, message
+}
+
+func clearMaskedRelayMetadata(apiErr *types.NewAPIError) {
+	if apiErr == nil {
+		return
+	}
+	apiErr.Metadata = nil
+	switch relayError := apiErr.RelayError.(type) {
+	case types.OpenAIError:
+		relayError.Metadata = nil
+		apiErr.RelayError = relayError
+	}
 }
 
 func errorMaskInfoFromLog(log *model.Log) (int, string, string) {
