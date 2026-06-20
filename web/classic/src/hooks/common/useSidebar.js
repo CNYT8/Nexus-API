@@ -19,7 +19,16 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect, useMemo, useContext, useRef } from 'react';
 import { StatusContext } from '../../context/Status';
-import { API, isAdmin, isRoot, updateAPI } from '../../helpers';
+import {
+  API,
+  createSelfRequestGuard,
+  getStoredUser,
+  isAdmin,
+  isRoot,
+  parseSidebarModules,
+  shouldApplySelfResponse,
+  updateAPI,
+} from '../../helpers';
 
 // 创建一个全局事件系统来同步所有useSidebar实例
 const sidebarEventTarget = new EventTarget();
@@ -59,6 +68,21 @@ const ROOT_ADMIN_CONFIG = {
 
 const deepClone = (value) => JSON.parse(JSON.stringify(value));
 
+const buildDefaultUserConfig = (adminConfig) => {
+  const defaultUserConfig = {};
+  Object.keys(adminConfig).forEach((sectionKey) => {
+    if (adminConfig[sectionKey]?.enabled) {
+      defaultUserConfig[sectionKey] = { enabled: true };
+      Object.keys(adminConfig[sectionKey]).forEach((moduleKey) => {
+        if (moduleKey !== 'enabled' && adminConfig[sectionKey][moduleKey]) {
+          defaultUserConfig[sectionKey][moduleKey] = true;
+        }
+      });
+    }
+  });
+  return defaultUserConfig;
+};
+
 export const mergeAdminConfig = (savedConfig) => {
   const merged = deepClone(DEFAULT_ADMIN_CONFIG);
   if (!savedConfig || typeof savedConfig !== 'object') return merged;
@@ -80,10 +104,19 @@ export const mergeAdminConfig = (savedConfig) => {
 
 export const useSidebar = () => {
   const [statusState] = useContext(StatusContext);
-  const [userConfig, setUserConfig] = useState(null);
+  const [userConfig, setUserConfig] = useState(() =>
+    parseSidebarModules(getStoredUser()?.sidebar_modules),
+  );
   const [loading, setLoading] = useState(true);
   const instanceIdRef = useRef(null);
   const hasLoadedOnceRef = useRef(false);
+  const requestSeqRef = useRef(0);
+  const userConfigRef = useRef(userConfig);
+
+  const applyUserConfig = (config) => {
+    userConfigRef.current = config;
+    setUserConfig(config);
+  };
 
   if (!instanceIdRef.current) {
     const randomPart = Math.random().toString(16).slice(2);
@@ -115,54 +148,39 @@ export const useSidebar = () => {
         setLoading(true);
       }
 
-      const res = await API.get('/api/user/self');
-      if (res.data.success && res.data.data) {
+      const requestSeq = ++requestSeqRef.current;
+      const requestGuard = createSelfRequestGuard(requestSeq);
+      const res = await API.get('/api/user/self', { disableDuplicate: true });
+
+      if (
+        res.data.success &&
+        shouldApplySelfResponse(
+          res.data.data,
+          requestGuard,
+          requestSeqRef.current,
+        )
+      ) {
         localStorage.setItem('user', JSON.stringify(res.data.data));
         updateAPI();
-      }
-      if (res.data.success && res.data.data.sidebar_modules) {
-        let config;
-        // 检查sidebar_modules是字符串还是对象
-        if (typeof res.data.data.sidebar_modules === 'string') {
-          config = JSON.parse(res.data.data.sidebar_modules);
+
+        const config = parseSidebarModules(res.data.data.sidebar_modules);
+        if (config) {
+          applyUserConfig(config);
         } else {
-          config = res.data.data.sidebar_modules;
+          applyUserConfig(buildDefaultUserConfig(adminConfig));
         }
-        setUserConfig(config);
-      } else {
-        // 当用户没有配置时，生成一个基于管理员配置的默认用户配置
-        // 这样可以确保权限控制正确生效
-        const defaultUserConfig = {};
-        Object.keys(adminConfig).forEach((sectionKey) => {
-          if (adminConfig[sectionKey]?.enabled) {
-            defaultUserConfig[sectionKey] = { enabled: true };
-            // 为每个管理员允许的模块设置默认值为true
-            Object.keys(adminConfig[sectionKey]).forEach((moduleKey) => {
-              if (
-                moduleKey !== 'enabled' &&
-                adminConfig[sectionKey][moduleKey]
-              ) {
-                defaultUserConfig[sectionKey][moduleKey] = true;
-              }
-            });
-          }
-        });
-        setUserConfig(defaultUserConfig);
+      } else if (res.data.success) {
+        const currentConfig = parseSidebarModules(
+          getStoredUser()?.sidebar_modules,
+        );
+        if (currentConfig) {
+          applyUserConfig(currentConfig);
+        }
       }
     } catch (error) {
-      // 出错时也生成默认配置，而不是设置为空对象
-      const defaultUserConfig = {};
-      Object.keys(adminConfig).forEach((sectionKey) => {
-        if (adminConfig[sectionKey]?.enabled) {
-          defaultUserConfig[sectionKey] = { enabled: true };
-          Object.keys(adminConfig[sectionKey]).forEach((moduleKey) => {
-            if (moduleKey !== 'enabled' && adminConfig[sectionKey][moduleKey]) {
-              defaultUserConfig[sectionKey][moduleKey] = true;
-            }
-          });
-        }
-      });
-      setUserConfig(defaultUserConfig);
+      if (!userConfigRef.current) {
+        applyUserConfig(null);
+      }
     } finally {
       if (shouldShowLoader) {
         setLoading(false);

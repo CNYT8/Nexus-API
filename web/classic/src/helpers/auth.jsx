@@ -21,6 +21,11 @@ import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { API, updateAPI } from './api';
 import { history } from './history';
+import {
+  createSelfRequestGuard,
+  getStoredUser,
+  shouldApplySelfResponse,
+} from './userState';
 
 export function authHeader() {
   // return authorization header with jwt token
@@ -69,13 +74,19 @@ export function AdminRoute({ children }) {
   useEffect(() => {
     let cancelled = false;
     if (!hasUser || localRole >= 10) return;
+    const requestGuard = createSelfRequestGuard();
     setAuthCheck({ key: localKey, allowed: null });
     setChecking(true);
-    API.get('/api/user/self')
+    API.get('/api/user/self', { disableDuplicate: true })
       .then((res) => {
         if (cancelled) return;
         const user = res?.data?.data;
-        if (res?.data?.success && user && user.role >= 10) {
+        if (
+          res?.data?.success &&
+          user &&
+          user.role >= 10 &&
+          shouldApplySelfResponse(user, requestGuard)
+        ) {
           localStorage.setItem('user', JSON.stringify(user));
           updateAPI();
           setAuthCheck({ key: localKey, allowed: true });
@@ -100,6 +111,9 @@ export function AdminRoute({ children }) {
     return <Navigate to='/login' state={{ from: history.location }} />;
   }
   if (localRole >= 10) {
+    return children;
+  }
+  if ((getStoredUser()?.role || 0) >= 10) {
     return children;
   }
   if (allowed === true) {
