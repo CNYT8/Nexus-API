@@ -92,6 +92,40 @@ func authHelper(c *gin.Context, minRole int) {
 			return
 		}
 	}
+	if !useAccessToken {
+		userId, ok := id.(int)
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgAuthUserInfoInvalid),
+			})
+			c.Abort()
+			return
+		}
+		currentUser, err := model.GetUserCache(userId)
+		if err != nil {
+			common.SysLog("failed to refresh session user cache in auth: " + err.Error())
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgDatabaseError),
+			})
+			c.Abort()
+			return
+		}
+		username = currentUser.Username
+		role = currentUser.Role
+		status = currentUser.Status
+		if session.Get("username") != username ||
+			session.Get("role") != role ||
+			session.Get("status") != status ||
+			session.Get("group") != currentUser.Group {
+			session.Set("username", username)
+			session.Set("role", role)
+			session.Set("status", status)
+			session.Set("group", currentUser.Group)
+			_ = session.Save()
+		}
+	}
 	// get header New-Api-User
 	apiUserIdStr := c.Request.Header.Get("New-Api-User")
 	if apiUserIdStr == "" {

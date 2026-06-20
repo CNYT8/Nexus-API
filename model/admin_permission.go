@@ -184,15 +184,7 @@ func ApplyAdminPermissionsToSidebarModules(value string, config AdminPermissionC
 		_ = json.Unmarshal([]byte(value), &modules)
 	}
 
-	adminConfig := map[string]bool{
-		"enabled": true,
-		"setting": false,
-	}
-	normalized := NormalizeAdminPermissionConfig(config)
-	for _, module := range adminPermissionModules {
-		adminConfig[module.Key] = normalized[module.Key]
-	}
-	modules["admin"] = adminConfig
+	modules["admin"] = AdminPermissionSidebarConfig(config)
 
 	bytes, err := json.Marshal(modules)
 	if err != nil {
@@ -200,6 +192,19 @@ func ApplyAdminPermissionsToSidebarModules(value string, config AdminPermissionC
 		return value
 	}
 	return string(bytes)
+}
+
+func AdminPermissionSidebarConfig(config AdminPermissionConfig) map[string]bool {
+	normalized := NormalizeAdminPermissionConfig(config)
+	adminConfig := map[string]bool{
+		"enabled": CountEnabledAdminPermissions(normalized) > 0,
+		"setting": false,
+	}
+	for _, module := range adminPermissionModules {
+		adminConfig[module.Key] = normalized[module.Key]
+	}
+	adminConfig["deployment"] = normalized[AdminPermissionModels]
+	return adminConfig
 }
 
 func StripAdminSidebarModules(value string) string {

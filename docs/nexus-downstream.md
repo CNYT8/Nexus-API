@@ -1,6 +1,6 @@
 # Nexus-API downstream overlay
 
-Nexus-API is maintained as a downstream overlay on top of upstream new-api. For large upstream rewrites, rebuild from the fixed upstream `v1.0.0-rc.11` base and reapply the overlay described here instead of relying on memory, broad file copies, or the latest upstream release.
+Nexus-API is maintained as a downstream overlay on top of upstream new-api. For large upstream rewrites, rebuild from the fixed local upstream `v1.0.0-rc.12-4-g6ad5dbb6` (`6ad5dbb641c40771b8ca4c2e75f8ee8f56d831c2`) base and reapply the overlay described here instead of relying on memory, broad file copies, or the remote latest upstream release.
 
 ## Preservation checklist
 
@@ -26,7 +26,7 @@ Nexus-API is maintained as a downstream overlay on top of upstream new-api. For 
 ### System/version information
 
 - Nexus release checks should use the Nexus-API release endpoint.
-- The UI shows the fixed original new-api base `v1.0.0-rc.11`; do not fetch the latest upstream release for this field.
+- The UI shows the fixed local original new-api base `v1.0.0-rc.12-4-g6ad5dbb6`; do not fetch the latest upstream release for this field.
 - Version UI must follow the current upstream settings style in both default and classic frontends.
 
 ### User IP recording
@@ -73,10 +73,16 @@ Skipped (high-cost / low-ROI for Nexus):
 - All `web/default/` upstream rewrites (data-table, model-pricing editor, shared dialog/json-editor/provider-badge, default localized audit renderer).
 - Codex channel chore (Nexus has its own `controller/codex_oauth.go` + `CodexOAuthModal.jsx`), issue templates, and `Footer.jsx` (Nexus has its own attribution).
 
+## local upstream sync notes (v1.0.0-rc.12-4-g6ad5dbb6)
+
+Synced:
+
+- Default frontend performance fix from local upstream commit `6ad5dbb641c40771b8ca4c2e75f8ee8f56d831c2`: React Query `refetchOnWindowFocus` is fixed to `false` in `web/default/src/main.tsx`, avoiding heavy automatic refetches when returning focus to log/data-heavy pages.
+
 ## Sync process
 
 1. Record current Nexus state and downstream overlay status.
-2. Use upstream new-api `v1.0.0-rc.11` as the fixed clean base for large upstream rewrites; do not fetch the latest upstream version.
+2. Use local upstream new-api `v1.0.0-rc.12-4-g6ad5dbb6` (`6ad5dbb641c40771b8ca4c2e75f8ee8f56d831c2`) as the fixed clean base for large upstream rewrites; do not fetch the remote latest upstream version.
 3. Reapply the documented Nexus overlay in small modules.
 4. Validate backend privacy, frontend admin/user behavior, i18n, docs/legal wording, and build/test checks.
 5. Do not push, tag, or release unless explicitly requested.

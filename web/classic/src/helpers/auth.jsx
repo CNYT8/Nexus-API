@@ -17,8 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
+import { API, updateAPI } from './api';
 import { history } from './history';
 
 export function authHeader() {
@@ -50,17 +51,62 @@ function PrivateRoute({ children }) {
 }
 
 export function AdminRoute({ children }) {
+  const [checking, setChecking] = useState(false);
+  const [authCheck, setAuthCheck] = useState({ key: null, allowed: null });
   const raw = localStorage.getItem('user');
-  if (!raw) {
-    return <Navigate to='/login' state={{ from: history.location }} />;
-  }
+  const localKey = raw || '';
+  let hasUser = Boolean(raw);
+  let localRole = 0;
   try {
-    const user = JSON.parse(raw);
-    if (user && typeof user.role === 'number' && user.role >= 10) {
-      return children;
+    if (raw) {
+      const user = JSON.parse(raw);
+      localRole = user?.role || 0;
     }
   } catch (e) {
     // ignore
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!hasUser || localRole >= 10) return;
+    setAuthCheck({ key: localKey, allowed: null });
+    setChecking(true);
+    API.get('/api/user/self')
+      .then((res) => {
+        if (cancelled) return;
+        const user = res?.data?.data;
+        if (res?.data?.success && user && user.role >= 10) {
+          localStorage.setItem('user', JSON.stringify(user));
+          updateAPI();
+          setAuthCheck({ key: localKey, allowed: true });
+        } else {
+          setAuthCheck({ key: localKey, allowed: false });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAuthCheck({ key: localKey, allowed: false });
+      })
+      .finally(() => {
+        if (!cancelled) setChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasUser, localRole, localKey]);
+
+  const allowed = authCheck.key === localKey ? authCheck.allowed : null;
+
+  if (!hasUser) {
+    return <Navigate to='/login' state={{ from: history.location }} />;
+  }
+  if (localRole >= 10) {
+    return children;
+  }
+  if (allowed === true) {
+    return children;
+  }
+  if (checking || allowed === null) {
+    return null;
   }
   return <Navigate to='/forbidden' replace />;
 }

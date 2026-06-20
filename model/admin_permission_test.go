@@ -38,7 +38,7 @@ func TestValidateAdminPermissionConfigRequiresEnabledPermission(t *testing.T) {
 }
 
 func TestApplyAdminPermissionsToSidebarModules(t *testing.T) {
-	sidebar := `{"chat":{"enabled":true,"chat":false},"admin":{"enabled":true,"channel":true}}`
+	sidebar := `{"chat":{"enabled":true,"chat":false},"admin":{"enabled":false,"channel":true}}`
 	config := AdminPermissionConfig{
 		AdminPermissionChannel:      false,
 		AdminPermissionModels:       true,
@@ -56,11 +56,40 @@ func TestApplyAdminPermissionsToSidebarModules(t *testing.T) {
 	if parsed["chat"]["chat"] {
 		t.Fatalf("expected existing chat preference to be preserved")
 	}
+	if !parsed["admin"]["enabled"] {
+		t.Fatalf("expected admin section visibility to follow admin permissions")
+	}
 	if parsed["admin"]["channel"] {
 		t.Fatalf("expected admin channel permission to be overridden")
 	}
 	if parsed["admin"]["setting"] {
 		t.Fatalf("expected admin system settings permission to stay disabled")
+	}
+}
+
+func TestAdminPermissionSidebarConfig(t *testing.T) {
+	config := AdminPermissionSidebarConfig(AdminPermissionConfig{
+		AdminPermissionChannel:      false,
+		AdminPermissionModels:       true,
+		AdminPermissionUser:         false,
+		AdminPermissionRedemption:   true,
+		AdminPermissionSubscription: false,
+	})
+
+	if !config["enabled"] {
+		t.Fatalf("expected admin section to stay enabled when any permission is enabled")
+	}
+	if config["channel"] {
+		t.Fatalf("expected channel permission to be disabled")
+	}
+	if !config["models"] {
+		t.Fatalf("expected models permission to be enabled")
+	}
+	if !config["deployment"] {
+		t.Fatalf("expected deployment permission to follow models permission")
+	}
+	if config["setting"] {
+		t.Fatalf("expected system setting permission to stay disabled")
 	}
 }
 

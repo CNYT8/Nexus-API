@@ -37,6 +37,10 @@ func withHeaderNavModules(t *testing.T, raw string) {
 func performHeaderNavRequest(t *testing.T, handler gin.HandlerFunc, authenticated bool) *httptest.ResponseRecorder {
 	t.Helper()
 
+	if authenticated {
+		setupAuthTestDB(t, common.RoleCommonUser)
+	}
+
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(sessions.Sessions("session", cookie.NewStore([]byte("header-nav-test"))))

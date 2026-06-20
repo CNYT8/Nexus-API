@@ -17,7 +17,7 @@ Nexus-API 是基于 [new-api](https://github.com/QuantumNous/new-api) 的 AGPLv3
 
 ## Nexus 维护原则
 
-- 使用 upstream new-api `v1.0.0-rc.11` 作為固定乾淨底座，不取得最新版本
+- 使用本地 upstream new-api `v1.0.0-rc.12-4-g6ad5dbb6` 作為固定乾淨底座，不直接拉取遠端最新版本
 - 将 Nexus 变更作为模块化 downstream overlay 维护
 - 避免冒用 upstream 商标、合作伙伴、赞助或部署声明
 - 保持页面和代码风格贴近 upstream 原生实现

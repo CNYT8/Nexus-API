@@ -450,10 +450,14 @@ func GetSelf(c *gin.Context) {
 	userSetting := user.GetSetting()
 	sidebarModules := userSetting.SidebarModules
 	if userRole == common.RoleAdminUser {
+		adminPermissions := model.GetAdminPermissionConfigFromSetting(userSetting)
 		sidebarModules = model.ApplyAdminPermissionsToSidebarModules(
 			sidebarModules,
-			model.GetAdminPermissionConfigFromSetting(userSetting),
+			adminPermissions,
 		)
+		permissions["sidebar_modules"] = map[string]interface{}{
+			"admin": model.AdminPermissionSidebarConfig(adminPermissions),
+		}
 	}
 
 	// 构建响应数据，包含用户信息和权限

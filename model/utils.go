@@ -122,6 +122,10 @@ func RecordExist(err error) (bool, error) {
 	return false, err
 }
 
+func redisAvailable() bool {
+	return common.RedisEnabled && common.RDB != nil
+}
+
 func shouldUpdateRedis(fromDB bool, err error) bool {
-	return common.RedisEnabled && fromDB && err == nil
+	return redisAvailable() && fromDB && err == nil
 }
