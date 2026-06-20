@@ -61,8 +61,8 @@ export const STATIC_I18N_KEYS = [
   'Previous-day usage threshold',
   '0 means no usage limit',
   'Users whose previous-day token usage does not exceed this value cannot check in',
-  'Previous-day request count did not exceed the check-in requirement',
-  'Previous-day usage did not exceed the check-in requirement',
+  'Previous-day request count did not meet the check-in requirement',
+  'Previous-day usage did not meet the check-in requirement',
 
   // Pricing constants
   'Name',

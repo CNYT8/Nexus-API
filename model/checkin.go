@@ -93,13 +93,13 @@ func GetCheckinConditionStatus(userId int, setting *operation_setting.CheckinSet
 	if setting.RequestThreshold > 0 && usage.RequestCount <= int64(setting.RequestThreshold) {
 		status.Eligible = false
 		status.Reason = "request_count"
-		status.Message = "前一天调用量未超过签到要求"
+		status.Message = "前一天调用量未达到签到要求"
 		return status, nil
 	}
 	if setting.TokenThreshold > 0 && usage.TokenCount <= int64(setting.TokenThreshold) {
 		status.Eligible = false
 		status.Reason = "token_count"
-		status.Message = "前一天用量未超过签到要求"
+		status.Message = "前一天用量未达到签到要求"
 		return status, nil
 	}
 
