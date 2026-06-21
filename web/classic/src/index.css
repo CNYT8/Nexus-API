@@ -18,8 +18,6 @@
   --sidebar-width: 180px;
   --sidebar-width-collapsed: 60px;
   --sidebar-current-width: var(--sidebar-width);
-  --classic-theme-duration: 220ms;
-  --classic-theme-ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
 body.sidebar-collapsed {
@@ -31,9 +29,6 @@ body {
     sans-serif;
   color: var(--semi-color-text-0);
   background-color: var(--semi-color-bg-0);
-  transition: background-color var(--classic-theme-duration)
-      var(--classic-theme-ease),
-    color var(--classic-theme-duration) var(--classic-theme-ease);
 }
 
 html.theme-switching *,
@@ -44,13 +39,16 @@ html.theme-switching *::after {
 
 /* 暖黄模式沿用 Semi CSS 变量覆盖方式，保持组件原有取色链路 */
 body[theme-mode='warm'] {
+  --classic-warm-surface: #fff9ef;
+  --classic-warm-surface-muted: #fff3df;
+  --classic-warm-surface-glass: rgba(255, 249, 239, 0.9);
   --semi-color-primary: #a16207;
   --semi-color-primary-hover: #854d0e;
   --semi-color-primary-active: #713f12;
-  --semi-color-primary-disabled: rgba(161, 98, 7, 0.34);
-  --semi-color-primary-light-default: rgba(217, 119, 6, 0.1);
-  --semi-color-primary-light-hover: rgba(217, 119, 6, 0.16);
-  --semi-color-primary-light-active: rgba(217, 119, 6, 0.23);
+  --semi-color-primary-disabled: rgba(161, 98, 7, 0.28);
+  --semi-color-primary-light-default: rgba(217, 119, 6, 0.07);
+  --semi-color-primary-light-hover: rgba(217, 119, 6, 0.11);
+  --semi-color-primary-light-active: rgba(217, 119, 6, 0.16);
   --semi-color-link: #a16207;
   --semi-color-link-hover: #854d0e;
   --semi-color-link-active: #431407;
@@ -59,52 +57,74 @@ body[theme-mode='warm'] {
   --semi-color-border: rgba(120, 53, 15, 0.14);
   --semi-color-border-light: rgba(120, 53, 15, 0.09);
   --semi-color-shadow: rgba(120, 53, 15, 0.14);
-  --semi-color-fill-0: rgba(161, 98, 7, 0.05);
-  --semi-color-fill-1: rgba(161, 98, 7, 0.09);
-  --semi-color-fill-2: rgba(161, 98, 7, 0.14);
-  --semi-color-bg-0: #fffaf2;
-  --semi-color-bg-1: #fff5e6;
-  --semi-color-bg-2: #ffecd1;
-  --semi-color-bg-3: #ffe1b8;
-  --semi-color-bg-4: #ffd39a;
-  --semi-color-bg-overlay: #fffaf2;
+  --semi-color-fill-0: rgba(161, 98, 7, 0.035);
+  --semi-color-fill-1: rgba(161, 98, 7, 0.06);
+  --semi-color-fill-2: rgba(161, 98, 7, 0.1);
+  --semi-color-bg-0: #fffdf8;
+  --semi-color-bg-1: #fff9ef;
+  --semi-color-bg-2: #fff3df;
+  --semi-color-bg-3: #ffecd0;
+  --semi-color-bg-4: #ffe5bd;
+  --semi-color-bg-overlay: #fffdf8;
   --semi-color-overlay-bg: rgba(47, 36, 22, 0.42);
-  --semi-color-nav-bg: #fffaf2;
+  --semi-color-nav-bg: #fffdf8;
   --semi-color-text-0: #2f2416;
   --semi-color-text-1: #5f4830;
   --semi-color-text-2: #8a6a43;
   --semi-color-text-3: #b08a57;
   --semi-color-highlight: #854d0e;
-  --semi-color-highlight-bg: rgba(253, 186, 116, 0.22);
+  --semi-color-highlight-bg: rgba(253, 186, 116, 0.14);
 }
 
 body[theme-mode='warm'] .classic-header {
-  background-color: rgba(255, 250, 242, 0.84) !important;
+  background-color: rgba(255, 253, 248, 0.86) !important;
   border-bottom: 1px solid rgba(120, 53, 15, 0.08);
 }
 
+body[theme-mode='warm'] .semi-layout,
+body[theme-mode='warm'] .semi-layout-content,
+body[theme-mode='warm'] .classic-page-fill.bg-gray-50,
+body[theme-mode='warm'] .classic-page-fill.bg-gray-100 {
+  background-color: var(--semi-color-bg-0) !important;
+}
+
 body[theme-mode='warm'] .bg-white,
+body[theme-mode='warm'] .\!bg-white,
 body[theme-mode='warm'] .bg-gray-50,
+body[theme-mode='warm'] .\!bg-gray-50,
 body[theme-mode='warm'] .bg-gray-50\/50,
-body[theme-mode='warm'] .bg-slate-50 {
-  background-color: var(--semi-color-bg-1) !important;
+body[theme-mode='warm'] .bg-slate-50,
+body[theme-mode='warm'] .\!bg-slate-50 {
+  background-color: var(--classic-warm-surface) !important;
 }
 
 body[theme-mode='warm'] .bg-gray-100,
+body[theme-mode='warm'] .\!bg-gray-100,
 body[theme-mode='warm'] .bg-slate-100 {
-  background-color: var(--semi-color-bg-2) !important;
+  background-color: var(--classic-warm-surface-muted) !important;
 }
 
 body[theme-mode='warm'] .bg-white\/70,
 body[theme-mode='warm'] .bg-white\/75,
 body[theme-mode='warm'] .bg-white\/80,
 body[theme-mode='warm'] .bg-white\/90 {
-  background-color: rgba(255, 250, 242, 0.86) !important;
+  background-color: var(--classic-warm-surface-glass) !important;
 }
 
 body[theme-mode='warm'] .hover\:bg-white:hover,
 body[theme-mode='warm'] .hover\:bg-gray-50:hover {
-  background-color: var(--semi-color-bg-2) !important;
+  background-color: var(--classic-warm-surface-muted) !important;
+}
+
+body[theme-mode='warm'] .semi-modal-content,
+body[theme-mode='warm'] .semi-modal-header,
+body[theme-mode='warm'] .semi-modal-body,
+body[theme-mode='warm'] .semi-modal-footer,
+body[theme-mode='warm'] .semi-sidesheet-content,
+body[theme-mode='warm'] .semi-sidesheet-header,
+body[theme-mode='warm'] .semi-sidesheet-body,
+body[theme-mode='warm'] .semi-sidesheet-footer {
+  background-color: var(--classic-warm-surface) !important;
 }
 
 .app-layout {

@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect, useMemo, useContext, useRef } from 'react';
 import { StatusContext } from '../../context/Status';
+import { mergeGlobalSidebarAdminConfig } from '../../constants/sidebarModules';
 import {
   API,
   createSelfRequestGuard,
@@ -33,27 +34,6 @@ import {
 // 创建一个全局事件系统来同步所有useSidebar实例
 const sidebarEventTarget = new EventTarget();
 const SIDEBAR_REFRESH_EVENT = 'sidebar-refresh';
-
-export const DEFAULT_ADMIN_CONFIG = {
-  chat: {
-    enabled: true,
-    playground: true,
-    chat: true,
-  },
-  console: {
-    enabled: true,
-    detail: true,
-    token: true,
-    log: true,
-    midjourney: true,
-    task: true,
-  },
-  personal: {
-    enabled: true,
-    topup: true,
-    personal: true,
-  },
-};
 
 const ROOT_ADMIN_CONFIG = {
   enabled: true,
@@ -84,22 +64,7 @@ const buildDefaultUserConfig = (adminConfig) => {
 };
 
 export const mergeAdminConfig = (savedConfig) => {
-  const merged = deepClone(DEFAULT_ADMIN_CONFIG);
-  if (!savedConfig || typeof savedConfig !== 'object') return merged;
-
-  for (const [sectionKey, sectionConfig] of Object.entries(savedConfig)) {
-    if (!sectionConfig || typeof sectionConfig !== 'object') continue;
-    if (sectionKey === 'admin') continue;
-
-    if (!merged[sectionKey]) {
-      merged[sectionKey] = { ...sectionConfig };
-      continue;
-    }
-
-    merged[sectionKey] = { ...merged[sectionKey], ...sectionConfig };
-  }
-
-  return merged;
+  return mergeGlobalSidebarAdminConfig(savedConfig);
 };
 
 export const useSidebar = () => {
