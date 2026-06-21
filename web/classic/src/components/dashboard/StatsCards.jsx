@@ -29,9 +29,11 @@ const StatsCards = ({
   getTrendSpec,
   CARD_PROPS,
   CHART_CONFIG,
+  chartThemeKey = 'light',
 }) => {
   const navigate = useNavigate();
   const { t } = useTranslation();
+
   return (
     <div className='mb-4'>
       <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
@@ -97,6 +99,7 @@ const StatsCards = ({
                       (item.trendData && item.trendData.length > 0)) && (
                       <div className='w-24 h-10'>
                         <VChart
+                          key={`dashboard-stat-${chartThemeKey}-${idx}-${itemIdx}`}
                           spec={getTrendSpec(item.trendData, item.trendColor)}
                           option={CHART_CONFIG}
                         />

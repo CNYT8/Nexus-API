@@ -21,6 +21,7 @@ import React, { useContext, useEffect } from 'react';
 import { getRelativeTime } from '../../helpers';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
+import { useActualTheme } from '../../context/Theme';
 
 import DashboardHeader from './DashboardHeader';
 import StatsCards from './StatsCards';
@@ -34,6 +35,7 @@ import SearchModal from './modals/SearchModal';
 import { useDashboardData } from '../../hooks/dashboard/useDashboardData';
 import { useDashboardStats } from '../../hooks/dashboard/useDashboardStats';
 import { useDashboardCharts } from '../../hooks/dashboard/useDashboardCharts';
+import { useDashboardChartTheme } from '../../hooks/dashboard/useDashboardChartTheme';
 
 import {
   CHART_CONFIG,
@@ -56,6 +58,8 @@ const Dashboard = () => {
   // ========== Context ==========
   const [userState, userDispatch] = useContext(UserContext);
   const [statusState, statusDispatch] = useContext(StatusContext);
+  const actualTheme = useActualTheme();
+  const chartThemeKey = useDashboardChartTheme(actualTheme);
 
   // ========== 主要数据管理 ==========
   const dashboardData = useDashboardData(userState, userDispatch, statusState);
@@ -180,6 +184,7 @@ const Dashboard = () => {
         getTrendSpec={getTrendSpec}
         CARD_PROPS={CARD_PROPS}
         CHART_CONFIG={CHART_CONFIG}
+        chartThemeKey={chartThemeKey}
       />
 
       {/* API信息和图表面板 */}
@@ -202,6 +207,7 @@ const Dashboard = () => {
             FLEX_CENTER_GAP2={FLEX_CENTER_GAP2}
             hasApiInfoPanel={dashboardData.hasApiInfoPanel}
             t={dashboardData.t}
+            chartThemeKey={chartThemeKey}
           />
 
           {dashboardData.hasApiInfoPanel && (

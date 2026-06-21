@@ -37,6 +37,7 @@ const ChartsPanel = ({
   FLEX_CENTER_GAP2,
   hasApiInfoPanel,
   t,
+  chartThemeKey = 'light',
 }) => {
   return (
     <Card
@@ -70,22 +71,46 @@ const ChartsPanel = ({
     >
       <div className='h-96 p-2'>
         {activeChartTab === '1' && (
-          <VChart spec={spec_line} option={CHART_CONFIG} />
+          <VChart
+            key={`dashboard-consume-${chartThemeKey}`}
+            spec={spec_line}
+            option={CHART_CONFIG}
+          />
         )}
         {activeChartTab === '2' && (
-          <VChart spec={spec_model_line} option={CHART_CONFIG} />
+          <VChart
+            key={`dashboard-model-${chartThemeKey}`}
+            spec={spec_model_line}
+            option={CHART_CONFIG}
+          />
         )}
         {activeChartTab === '3' && (
-          <VChart spec={spec_pie} option={CHART_CONFIG} />
+          <VChart
+            key={`dashboard-pie-${chartThemeKey}`}
+            spec={spec_pie}
+            option={CHART_CONFIG}
+          />
         )}
         {activeChartTab === '4' && (
-          <VChart spec={spec_rank_bar} option={CHART_CONFIG} />
+          <VChart
+            key={`dashboard-rank-${chartThemeKey}`}
+            spec={spec_rank_bar}
+            option={CHART_CONFIG}
+          />
         )}
         {activeChartTab === '5' && isAdminUser && (
-          <VChart spec={spec_user_rank} option={CHART_CONFIG} />
+          <VChart
+            key={`dashboard-user-rank-${chartThemeKey}`}
+            spec={spec_user_rank}
+            option={CHART_CONFIG}
+          />
         )}
         {activeChartTab === '6' && isAdminUser && (
-          <VChart spec={spec_user_trend} option={CHART_CONFIG} />
+          <VChart
+            key={`dashboard-user-trend-${chartThemeKey}`}
+            spec={spec_user_trend}
+            option={CHART_CONFIG}
+          />
         )}
       </div>
     </Card>
