@@ -21,6 +21,8 @@ import {
   createContext,
   useCallback,
   useContext,
+  useLayoutEffect,
+  useRef,
   useState,
   useEffect,
 } from 'react';
@@ -50,6 +52,7 @@ const getSystemTheme = () => {
 };
 
 export const ThemeProvider = ({ children }) => {
+  const themeSwitchFrameRef = useRef(null);
   const [theme, _setTheme] = useState(() => {
     try {
       return normalizeTheme(localStorage.getItem('theme-mode'));
@@ -81,23 +84,38 @@ export const ThemeProvider = ({ children }) => {
   }, []);
 
   // 应用主题到DOM
-  useEffect(() => {
+  useLayoutEffect(() => {
     const body = document.body;
     const root = document.documentElement;
 
+    if (themeSwitchFrameRef.current) {
+      window.cancelAnimationFrame(themeSwitchFrameRef.current);
+    }
+
+    root.classList.add('theme-switching');
     body.removeAttribute('theme-mode');
     root.classList.remove('dark', 'warm');
 
     if (actualTheme === 'dark') {
       body.setAttribute('theme-mode', 'dark');
       root.classList.add('dark');
-      return;
-    }
-
-    if (actualTheme === 'warm') {
+    } else if (actualTheme === 'warm') {
       body.setAttribute('theme-mode', 'warm');
       root.classList.add('warm');
     }
+
+    themeSwitchFrameRef.current = window.requestAnimationFrame(() => {
+      root.classList.remove('theme-switching');
+      themeSwitchFrameRef.current = null;
+    });
+
+    return () => {
+      if (themeSwitchFrameRef.current) {
+        window.cancelAnimationFrame(themeSwitchFrameRef.current);
+        themeSwitchFrameRef.current = null;
+      }
+      root.classList.remove('theme-switching');
+    };
   }, [actualTheme]);
 
   const setTheme = useCallback((newTheme) => {

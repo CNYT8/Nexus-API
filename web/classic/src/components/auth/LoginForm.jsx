@@ -110,6 +110,8 @@ const LoginForm = () => {
   const [githubButtonState, setGithubButtonState] = useState('idle');
   const [githubButtonDisabled, setGithubButtonDisabled] = useState(false);
   const githubTimeoutRef = useRef(null);
+  const loginSubmittingRef = useRef(false);
+  const loginSuccessToastShownRef = useRef(false);
   const githubButtonText = t(githubButtonTextKeyByState[githubButtonState]);
   const [customOAuthLoading, setCustomOAuthLoading] = useState({});
 
@@ -131,6 +133,24 @@ const LoginForm = () => {
       return {};
     }
   }, [statusState?.status]);
+
+  const showLoginSuccess = () => {
+    if (loginSuccessToastShownRef.current) {
+      return;
+    }
+    loginSuccessToastShownRef.current = true;
+    showSuccess('登录成功！');
+  };
+
+  const completeLogin = (data, redirectPath = '/console') => {
+    userDispatch({ type: 'login', payload: data });
+    localStorage.setItem('user', JSON.stringify(data));
+    setUserData(data);
+    updateAPI();
+    showLoginSuccess();
+    navigate(redirectPath);
+  };
+
   const hasCustomOAuthProviders =
     (status.custom_oauth_providers || []).length > 0;
   const hasOAuthLoginOptions = Boolean(
@@ -194,12 +214,7 @@ const LoginForm = () => {
       );
       const { success, message, data } = res.data;
       if (success) {
-        userDispatch({ type: 'login', payload: data });
-        localStorage.setItem('user', JSON.stringify(data));
-        setUserData(data);
-        updateAPI();
-        navigate('/');
-        showSuccess('登录成功！');
+        completeLogin(data, '/');
         setShowWeChatLoginModal(false);
       } else {
         showError(message);
@@ -216,6 +231,11 @@ const LoginForm = () => {
   }
 
   async function handleSubmit(e) {
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
+    if (loginSubmittingRef.current) {
+      return;
+    }
     if ((hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms) {
       showInfo(t('请先阅读并同意用户协议和隐私政策'));
       return;
@@ -224,6 +244,7 @@ const LoginForm = () => {
       showInfo('请稍后几秒重试，Turnstile 正在检查用户环境！');
       return;
     }
+    loginSubmittingRef.current = true;
     setSubmitted(true);
     setLoginLoading(true);
     try {
@@ -244,10 +265,7 @@ const LoginForm = () => {
             return;
           }
 
-          userDispatch({ type: 'login', payload: data });
-          setUserData(data);
-          updateAPI();
-          showSuccess('登录成功！');
+          completeLogin(data);
           if (username === 'root' && password === '123456') {
             Modal.error({
               title: '您正在使用默认密码！',
@@ -255,7 +273,6 @@ const LoginForm = () => {
               centered: true,
             });
           }
-          navigate('/console');
         } else {
           showError(message);
         }
@@ -265,6 +282,7 @@ const LoginForm = () => {
     } catch (error) {
       showError('登录失败，请重试');
     } finally {
+      loginSubmittingRef.current = false;
       setLoginLoading(false);
     }
   }
@@ -295,12 +313,7 @@ const LoginForm = () => {
       const res = await API.get(`/api/oauth/telegram/login`, { params });
       const { success, message, data } = res.data;
       if (success) {
-        userDispatch({ type: 'login', payload: data });
-        localStorage.setItem('user', JSON.stringify(data));
-        showSuccess('登录成功！');
-        setUserData(data);
-        updateAPI();
-        navigate('/');
+        completeLogin(data, '/');
       } else {
         showError(message);
       }
@@ -452,11 +465,7 @@ const LoginForm = () => {
       );
       const finish = finishRes.data;
       if (finish.success) {
-        userDispatch({ type: 'login', payload: finish.data });
-        setUserData(finish.data);
-        updateAPI();
-        showSuccess('登录成功！');
-        navigate('/console');
+        completeLogin(finish.data);
       } else {
         showError(finish.message || 'Passkey 登录失败，请重试');
       }
@@ -487,11 +496,7 @@ const LoginForm = () => {
 
   // 2FA验证成功处理
   const handle2FASuccess = (data) => {
-    userDispatch({ type: 'login', payload: data });
-    setUserData(data);
-    updateAPI();
-    showSuccess('登录成功！');
-    navigate('/console');
+    completeLogin(data);
   };
 
   // 返回登录页面
@@ -744,7 +749,7 @@ const LoginForm = () => {
                   <span className='ml-3'>{t('使用 Passkey 登录')}</span>
                 </Button>
               )}
-              <Form className='space-y-3'>
+              <Form className='space-y-3' onSubmit={handleSubmit}>
                 <Form.Input
                   field='username'
                   label={t('用户名或邮箱')}
@@ -808,7 +813,6 @@ const LoginForm = () => {
                     className='w-full !rounded-full'
                     type='primary'
                     htmlType='submit'
-                    onClick={handleSubmit}
                     loading={loginLoading}
                     disabled={
                       (hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms

@@ -31,24 +31,15 @@ body {
     sans-serif;
   color: var(--semi-color-text-0);
   background-color: var(--semi-color-bg-0);
-}
-
-body,
-.classic-header,
-.sidebar-container,
-.sidebar-nav,
-.sidebar-collapse-button,
-.semi-layout,
-.semi-layout-content,
-.semi-card,
-.semi-table-wrapper,
-.semi-modal-content,
-.semi-dropdown-menu {
   transition: background-color var(--classic-theme-duration)
       var(--classic-theme-ease),
-    border-color var(--classic-theme-duration) var(--classic-theme-ease),
-    color var(--classic-theme-duration) var(--classic-theme-ease),
-    box-shadow var(--classic-theme-duration) var(--classic-theme-ease);
+    color var(--classic-theme-duration) var(--classic-theme-ease);
+}
+
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition: none !important;
 }
 
 /* 暖黄模式沿用 Semi CSS 变量覆盖方式，保持组件原有取色链路 */
