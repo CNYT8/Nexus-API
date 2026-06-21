@@ -30,6 +30,7 @@ const StatsCards = ({
   CARD_PROPS,
   CHART_CONFIG,
   chartThemeKey = 'light',
+  chartTheme,
 }) => {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -100,7 +101,16 @@ const StatsCards = ({
                       <div className='w-24 h-10'>
                         <VChart
                           key={`dashboard-stat-${chartThemeKey}-${idx}-${itemIdx}`}
-                          spec={getTrendSpec(item.trendData, item.trendColor)}
+                          spec={{
+                            ...getTrendSpec(
+                              item.trendData,
+                              item.trendColor,
+                            ),
+                            background: {
+                              fill:
+                                chartTheme?.backgroundColor || 'transparent',
+                            },
+                          }}
                           option={CHART_CONFIG}
                         />
                       </div>

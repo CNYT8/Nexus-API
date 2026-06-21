@@ -17,10 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Card, Tabs, TabPane } from '@douyinfe/semi-ui';
 import { PieChart } from 'lucide-react';
 import { VChart } from '@visactor/react-vchart';
+import { applyDashboardChartTheme } from '../../helpers/dashboard';
 
 const ChartsPanel = ({
   activeChartTab,
@@ -38,7 +39,28 @@ const ChartsPanel = ({
   hasApiInfoPanel,
   t,
   chartThemeKey = 'light',
+  chartTheme,
 }) => {
+  const themedSpecs = useMemo(
+    () => ({
+      spec_line: applyDashboardChartTheme(spec_line, chartTheme),
+      spec_model_line: applyDashboardChartTheme(spec_model_line, chartTheme),
+      spec_pie: applyDashboardChartTheme(spec_pie, chartTheme),
+      spec_rank_bar: applyDashboardChartTheme(spec_rank_bar, chartTheme),
+      spec_user_rank: applyDashboardChartTheme(spec_user_rank, chartTheme),
+      spec_user_trend: applyDashboardChartTheme(spec_user_trend, chartTheme),
+    }),
+    [
+      spec_line,
+      spec_model_line,
+      spec_pie,
+      spec_rank_bar,
+      spec_user_rank,
+      spec_user_trend,
+      chartTheme,
+    ],
+  );
+
   return (
     <Card
       {...CARD_PROPS}
@@ -73,42 +95,42 @@ const ChartsPanel = ({
         {activeChartTab === '1' && (
           <VChart
             key={`dashboard-consume-${chartThemeKey}`}
-            spec={spec_line}
+            spec={themedSpecs.spec_line}
             option={CHART_CONFIG}
           />
         )}
         {activeChartTab === '2' && (
           <VChart
             key={`dashboard-model-${chartThemeKey}`}
-            spec={spec_model_line}
+            spec={themedSpecs.spec_model_line}
             option={CHART_CONFIG}
           />
         )}
         {activeChartTab === '3' && (
           <VChart
             key={`dashboard-pie-${chartThemeKey}`}
-            spec={spec_pie}
+            spec={themedSpecs.spec_pie}
             option={CHART_CONFIG}
           />
         )}
         {activeChartTab === '4' && (
           <VChart
             key={`dashboard-rank-${chartThemeKey}`}
-            spec={spec_rank_bar}
+            spec={themedSpecs.spec_rank_bar}
             option={CHART_CONFIG}
           />
         )}
         {activeChartTab === '5' && isAdminUser && (
           <VChart
             key={`dashboard-user-rank-${chartThemeKey}`}
-            spec={spec_user_rank}
+            spec={themedSpecs.spec_user_rank}
             option={CHART_CONFIG}
           />
         )}
         {activeChartTab === '6' && isAdminUser && (
           <VChart
             key={`dashboard-user-trend-${chartThemeKey}`}
-            spec={spec_user_trend}
+            spec={themedSpecs.spec_user_trend}
             option={CHART_CONFIG}
           />
         )}

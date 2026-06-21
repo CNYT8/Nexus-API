@@ -135,6 +135,210 @@ export const getTrendSpec = (data, color) => ({
   },
 });
 
+const applyTitleTheme = (title, chartTheme) => {
+  if (!title) return title;
+
+  return {
+    ...title,
+    textStyle: {
+      ...title.textStyle,
+      fill: chartTheme.textColor,
+    },
+    subtextStyle: {
+      ...title.subtextStyle,
+      fill: chartTheme.secondaryTextColor,
+    },
+  };
+};
+
+const applyLegendTheme = (legend, chartTheme) => {
+  if (!legend) return legend;
+
+  return {
+    ...legend,
+    item: {
+      ...legend.item,
+      label: {
+        ...legend.item?.label,
+        style: {
+          ...legend.item?.label?.style,
+          fill: chartTheme.secondaryTextColor,
+        },
+      },
+    },
+  };
+};
+
+const applyAxisTheme = (axis, chartTheme) => ({
+  ...axis,
+  label: {
+    ...axis.label,
+    style: {
+      ...axis.label?.style,
+      fill: chartTheme.secondaryTextColor,
+    },
+  },
+  title: {
+    ...axis.title,
+    style: {
+      ...axis.title?.style,
+      fill: chartTheme.textColor,
+    },
+  },
+  tick: {
+    ...axis.tick,
+    style: {
+      ...axis.tick?.style,
+      stroke: chartTheme.axisColor,
+    },
+  },
+  domainLine: {
+    ...axis.domainLine,
+    style: {
+      ...axis.domainLine?.style,
+      stroke: chartTheme.axisColor,
+    },
+  },
+  grid: {
+    ...axis.grid,
+    style: {
+      ...axis.grid?.style,
+      stroke: chartTheme.gridColor,
+    },
+  },
+});
+
+const applyTooltipTheme = (tooltip, chartTheme) => {
+  if (!tooltip) return tooltip;
+
+  return {
+    ...tooltip,
+    style: {
+      ...tooltip.style,
+      panel: {
+        ...tooltip.style?.panel,
+        backgroundColor: chartTheme.tooltipBackgroundColor,
+        border: {
+          ...tooltip.style?.panel?.border,
+          color: chartTheme.tooltipBorderColor,
+          width: 1,
+        },
+      },
+      titleLabel: {
+        ...tooltip.style?.titleLabel,
+        fontColor: chartTheme.textColor,
+      },
+      keyLabel: {
+        ...tooltip.style?.keyLabel,
+        fontColor: chartTheme.secondaryTextColor,
+      },
+      valueLabel: {
+        ...tooltip.style?.valueLabel,
+        fontColor: chartTheme.textColor,
+      },
+    },
+  };
+};
+
+const getDashboardChartThemeSpec = (chartTheme) => ({
+  type: chartTheme.type || 'light',
+  background: chartTheme.backgroundColor,
+  component: {
+    title: {
+      textStyle: {
+        fill: chartTheme.textColor,
+      },
+      subtextStyle: {
+        fill: chartTheme.secondaryTextColor,
+      },
+    },
+    axis: {
+      label: {
+        style: {
+          fill: chartTheme.secondaryTextColor,
+        },
+      },
+      title: {
+        style: {
+          fill: chartTheme.textColor,
+        },
+      },
+      tick: {
+        style: {
+          stroke: chartTheme.axisColor,
+        },
+      },
+      domainLine: {
+        style: {
+          stroke: chartTheme.axisColor,
+        },
+      },
+      grid: {
+        style: {
+          stroke: chartTheme.gridColor,
+        },
+      },
+    },
+    discreteLegend: {
+      item: {
+        label: {
+          style: {
+            fill: chartTheme.secondaryTextColor,
+          },
+        },
+      },
+    },
+    tooltip: {
+      style: {
+        panel: {
+          backgroundColor: chartTheme.tooltipBackgroundColor,
+          border: {
+            color: chartTheme.tooltipBorderColor,
+            width: 1,
+          },
+        },
+        titleLabel: {
+          fontColor: chartTheme.textColor,
+        },
+        keyLabel: {
+          fontColor: chartTheme.secondaryTextColor,
+        },
+        valueLabel: {
+          fontColor: chartTheme.textColor,
+        },
+      },
+    },
+  },
+});
+
+export const applyDashboardChartTheme = (spec, chartTheme) => {
+  if (!spec || !chartTheme) return spec;
+
+  return {
+    ...spec,
+    background: {
+      ...spec.background,
+      fill: chartTheme.backgroundColor,
+    },
+    theme: getDashboardChartThemeSpec(chartTheme),
+    title: applyTitleTheme(spec.title, chartTheme),
+    legends: Array.isArray(spec.legends)
+      ? spec.legends.map((legend) => applyLegendTheme(legend, chartTheme))
+      : applyLegendTheme(spec.legends, chartTheme),
+    axes: spec.axes?.map((axis) => applyAxisTheme(axis, chartTheme)),
+    label: spec.label
+      ? {
+          ...spec.label,
+          style: {
+            ...spec.label.style,
+            fill: chartTheme.textColor,
+          },
+        }
+      : spec.label,
+    tooltip: applyTooltipTheme(spec.tooltip, chartTheme),
+  };
+};
+
 // ========== UI 工具函数 ==========
 export const createSectionTitle = (Icon, text) => (
   <div className='flex items-center gap-2'>
