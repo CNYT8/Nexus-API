@@ -18,123 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useEffect, useRef, useState } from 'react';
-import { initVChartSemiTheme } from '@visactor/vchart-semi-theme';
+import {
+  generateVChartSemiTheme,
+  initVChartSemiTheme,
+  switchVChartSemiTheme,
+} from '@visactor/vchart-semi-theme';
 
 let dashboardVChartSemiThemeInitialized = false;
 
-const FALLBACK_CHART_THEMES = {
-  light: {
-    type: 'light',
-    backgroundColor: 'transparent',
-    textColor: '#1f2329',
-    secondaryTextColor: '#646a73',
-    axisColor: '#dee0e3',
-    gridColor: '#f0f0f0',
-    tooltipBackgroundColor: '#ffffff',
-    tooltipBorderColor: '#dee0e3',
-  },
-  dark: {
-    type: 'light',
-    backgroundColor: 'transparent',
-    textColor: '#f5f6f7',
-    secondaryTextColor: '#c9cdd4',
-    axisColor: 'rgba(255, 255, 255, 0.18)',
-    gridColor: 'rgba(255, 255, 255, 0.1)',
-    tooltipBackgroundColor: '#1f2329',
-    tooltipBorderColor: 'rgba(255, 255, 255, 0.18)',
-  },
-  warm: {
-    type: 'light',
-    backgroundColor: 'transparent',
-    textColor: '#2f2416',
-    secondaryTextColor: '#8a6a43',
-    axisColor: 'rgba(120, 53, 15, 0.18)',
-    gridColor: 'rgba(120, 53, 15, 0.1)',
-    tooltipBackgroundColor: '#fffdf8',
-    tooltipBorderColor: 'rgba(120, 53, 15, 0.16)',
-  },
-};
-
-const getFallbackChartTheme = (themeMode) =>
-  FALLBACK_CHART_THEMES[themeMode] || FALLBACK_CHART_THEMES.light;
-
-const isResolvedColor = (color) =>
-  color &&
-  !color.includes('var(') &&
-  !color.includes('undefined') &&
-  color !== 'transparent';
-
-const resolveSemiColor = (name, property, fallback) => {
-  if (
-    typeof window === 'undefined' ||
-    !window.getComputedStyle ||
-    typeof document === 'undefined' ||
-    !document.body
-  ) {
-    return fallback;
-  }
-
-  const probe = document.createElement('span');
-  probe.style[property] = `var(${name})`;
-  probe.style.position = 'absolute';
-  probe.style.pointerEvents = 'none';
-  probe.style.visibility = 'hidden';
-  document.body.appendChild(probe);
-
-  const color = window.getComputedStyle(probe)[property];
-  document.body.removeChild(probe);
-
-  return isResolvedColor(color) ? color : fallback;
-};
-
-const readDashboardChartTheme = (themeMode) => {
-  const fallback = getFallbackChartTheme(themeMode);
-
-  if (typeof window === 'undefined' || !window.getComputedStyle) {
-    return fallback;
-  }
-
-  const backgroundColor = 'transparent';
-  const textColor = resolveSemiColor(
-    '--semi-color-text-0',
-    'color',
-    fallback.textColor,
-  );
-  const secondaryTextColor = resolveSemiColor(
-    '--semi-color-text-2',
-    'color',
-    fallback.secondaryTextColor,
-  );
-  const axisColor = resolveSemiColor(
-    '--semi-color-border',
-    'borderColor',
-    fallback.axisColor,
-  );
-  const gridColor = resolveSemiColor(
-    '--semi-color-border-light',
-    'borderColor',
-    fallback.gridColor,
-  );
-  const tooltipBackgroundColor = resolveSemiColor(
-    '--semi-color-bg-overlay',
-    'backgroundColor',
-    resolveSemiColor(
-      '--semi-color-bg-0',
-      'backgroundColor',
-      fallback.tooltipBackgroundColor,
-    ),
-  );
-
-  return {
-    backgroundColor,
-    textColor,
-    secondaryTextColor,
-    axisColor,
-    gridColor,
-    tooltipBackgroundColor,
-    tooltipBorderColor: axisColor,
-  };
-};
+const getSemiThemeMode = (themeMode) =>
+  themeMode === 'dark' ? 'dark' : 'light';
 
 const initDashboardVChartSemiTheme = () => {
   if (
@@ -150,49 +43,64 @@ const initDashboardVChartSemiTheme = () => {
   dashboardVChartSemiThemeInitialized = true;
 };
 
+const refreshDashboardVChartSemiTheme = (themeMode) => {
+  if (typeof document === 'undefined' || !document.body) {
+    return;
+  }
+
+  const mode = getSemiThemeMode(themeMode);
+
+  // Warm mode is implemented as a light Semi theme with overridden CSS tokens.
+  // Force-regenerate the VChart theme after those tokens are applied.
+  switchVChartSemiTheme(
+    true,
+    mode,
+    generateVChartSemiTheme(mode, document.body),
+  );
+};
+
 export const useDashboardChartTheme = (actualTheme) => {
   const themeVersionRef = useRef(0);
-  const [chartThemeState, setChartThemeState] = useState(() => {
-    const themeMode = actualTheme || 'light';
-
-    return {
-      key: `${themeMode}-0`,
-      palette: readDashboardChartTheme(themeMode),
-    };
-  });
+  const [chartThemeKey, setChartThemeKey] = useState(
+    () => `${actualTheme || 'light'}-0`,
+  );
 
   useEffect(() => {
-    let rafId = null;
+    const frameIds = [];
     const nextTheme = actualTheme || 'light';
+    let isCurrent = true;
 
-    const updateChartTheme = () => {
+    const updateChartThemeKey = () => {
+      if (!isCurrent) return;
+
+      refreshDashboardVChartSemiTheme(nextTheme);
       themeVersionRef.current += 1;
-      setChartThemeState({
-        key: `${nextTheme}-${themeVersionRef.current}`,
-        palette: readDashboardChartTheme(nextTheme),
-      });
+      setChartThemeKey(`${nextTheme}-${themeVersionRef.current}`);
     };
 
     if (typeof window === 'undefined') {
-      updateChartTheme();
+      updateChartThemeKey();
       return undefined;
     }
 
     initDashboardVChartSemiTheme();
 
     if (!window.requestAnimationFrame) {
-      updateChartTheme();
+      updateChartThemeKey();
       return undefined;
     }
 
-    rafId = window.requestAnimationFrame(updateChartTheme);
+    frameIds.push(
+      window.requestAnimationFrame(() => {
+        frameIds.push(window.requestAnimationFrame(updateChartThemeKey));
+      }),
+    );
 
     return () => {
-      if (rafId) {
-        window.cancelAnimationFrame(rafId);
-      }
+      isCurrent = false;
+      frameIds.forEach((frameId) => window.cancelAnimationFrame(frameId));
     };
   }, [actualTheme]);
 
-  return chartThemeState;
+  return chartThemeKey;
 };

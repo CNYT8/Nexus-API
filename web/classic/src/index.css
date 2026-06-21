@@ -147,6 +147,15 @@ body[theme-mode='warm'] .semi-sidesheet-footer {
   min-height: 100%;
 }
 
+@supports (contain: style) {
+  .app-layout,
+  .classic-page-fill,
+  .sidebar-container,
+  .sidebar-nav {
+    contain: style;
+  }
+}
+
 .classic-home-page,
 .classic-home-default {
   display: flex;

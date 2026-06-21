@@ -59,8 +59,7 @@ const Dashboard = () => {
   const [userState, userDispatch] = useContext(UserContext);
   const [statusState, statusDispatch] = useContext(StatusContext);
   const actualTheme = useActualTheme();
-  const { key: chartThemeKey, palette: chartTheme } =
-    useDashboardChartTheme(actualTheme);
+  const chartThemeKey = useDashboardChartTheme(actualTheme);
 
   // ========== 主要数据管理 ==========
   const dashboardData = useDashboardData(userState, userDispatch, statusState);
@@ -186,7 +185,6 @@ const Dashboard = () => {
         CARD_PROPS={CARD_PROPS}
         CHART_CONFIG={CHART_CONFIG}
         chartThemeKey={chartThemeKey}
-        chartTheme={chartTheme}
       />
 
       {/* API信息和图表面板 */}
@@ -210,7 +208,6 @@ const Dashboard = () => {
             hasApiInfoPanel={dashboardData.hasApiInfoPanel}
             t={dashboardData.t}
             chartThemeKey={chartThemeKey}
-            chartTheme={chartTheme}
           />
 
           {dashboardData.hasApiInfoPanel && (
