@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useMemo } from 'react';
 import { Button, Dropdown } from '@douyinfe/semi-ui';
-import { Sun, SunMedium, Moon, Monitor } from 'lucide-react';
+import { Sun, Flame, Moon, Monitor } from 'lucide-react';
 import { useActualTheme } from '../../../context/Theme';
 
 const ThemeToggle = ({ theme, onThemeToggle, t }) => {
@@ -43,8 +43,8 @@ const ThemeToggle = ({ theme, onThemeToggle, t }) => {
       },
       {
         key: 'warm',
-        icon: <SunMedium size={18} />,
-        buttonIcon: <SunMedium size={18} />,
+        icon: <Flame size={18} />,
+        buttonIcon: <Flame size={18} />,
         label: t('暖黄模式'),
         description: t('使用偏暖的浅色主题'),
       },

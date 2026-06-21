@@ -85,22 +85,19 @@ export const ThemeProvider = ({ children }) => {
     const body = document.body;
     const root = document.documentElement;
 
+    body.removeAttribute('theme-mode');
+    root.classList.remove('dark', 'warm');
+
     if (actualTheme === 'dark') {
       body.setAttribute('theme-mode', 'dark');
       root.classList.add('dark');
-      root.classList.remove('warm');
       return;
     }
 
     if (actualTheme === 'warm') {
       body.setAttribute('theme-mode', 'warm');
       root.classList.add('warm');
-      root.classList.remove('dark');
-      return;
     }
-
-    body.removeAttribute('theme-mode');
-    root.classList.remove('dark', 'warm');
   }, [actualTheme]);
 
   const setTheme = useCallback((newTheme) => {

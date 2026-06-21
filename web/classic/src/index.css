@@ -18,6 +18,8 @@
   --sidebar-width: 180px;
   --sidebar-width-collapsed: 60px;
   --sidebar-current-width: var(--sidebar-width);
+  --classic-theme-duration: 220ms;
+  --classic-theme-ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
 body.sidebar-collapsed {
@@ -31,48 +33,87 @@ body {
   background-color: var(--semi-color-bg-0);
 }
 
+body,
+.classic-header,
+.sidebar-container,
+.sidebar-nav,
+.sidebar-collapse-button,
+.semi-layout,
+.semi-layout-content,
+.semi-card,
+.semi-table-wrapper,
+.semi-modal-content,
+.semi-dropdown-menu {
+  transition: background-color var(--classic-theme-duration)
+      var(--classic-theme-ease),
+    border-color var(--classic-theme-duration) var(--classic-theme-ease),
+    color var(--classic-theme-duration) var(--classic-theme-ease),
+    box-shadow var(--classic-theme-duration) var(--classic-theme-ease);
+}
+
 /* 暖黄模式沿用 Semi CSS 变量覆盖方式，保持组件原有取色链路 */
 body[theme-mode='warm'] {
-  --semi-blue-0: 251, 191, 36;
-  --semi-blue-4: 217, 119, 6;
-  --semi-blue-5: 180, 83, 9;
-  --semi-color-primary: #b45309;
-  --semi-color-primary-hover: #92400e;
-  --semi-color-primary-active: #78350f;
-  --semi-color-primary-disabled: rgba(180, 83, 9, 0.36);
-  --semi-color-primary-light-default: rgba(245, 158, 11, 0.12);
-  --semi-color-primary-light-hover: rgba(245, 158, 11, 0.18);
-  --semi-color-primary-light-active: rgba(245, 158, 11, 0.26);
-  --semi-color-link: #9a3412;
-  --semi-color-link-hover: #7c2d12;
+  --semi-color-primary: #a16207;
+  --semi-color-primary-hover: #854d0e;
+  --semi-color-primary-active: #713f12;
+  --semi-color-primary-disabled: rgba(161, 98, 7, 0.34);
+  --semi-color-primary-light-default: rgba(217, 119, 6, 0.1);
+  --semi-color-primary-light-hover: rgba(217, 119, 6, 0.16);
+  --semi-color-primary-light-active: rgba(217, 119, 6, 0.23);
+  --semi-color-link: #a16207;
+  --semi-color-link-hover: #854d0e;
   --semi-color-link-active: #431407;
   --semi-color-link-visited: #854d0e;
-  --semi-color-focus-border: rgba(217, 119, 6, 0.72);
-  --semi-color-border: rgba(146, 64, 14, 0.16);
-  --semi-color-border-light: rgba(146, 64, 14, 0.1);
-  --semi-color-shadow: rgba(146, 64, 14, 0.16);
-  --semi-color-fill-0: rgba(180, 83, 9, 0.06);
-  --semi-color-fill-1: rgba(180, 83, 9, 0.1);
-  --semi-color-fill-2: rgba(180, 83, 9, 0.16);
-  --semi-color-bg-0: #fff8ec;
-  --semi-color-bg-1: #fff3df;
-  --semi-color-bg-2: #ffebcc;
-  --semi-color-bg-3: #ffe2b8;
-  --semi-color-bg-4: #ffd89f;
-  --semi-color-bg-overlay: #fffaf0;
+  --semi-color-focus-border: rgba(202, 138, 4, 0.72);
+  --semi-color-border: rgba(120, 53, 15, 0.14);
+  --semi-color-border-light: rgba(120, 53, 15, 0.09);
+  --semi-color-shadow: rgba(120, 53, 15, 0.14);
+  --semi-color-fill-0: rgba(161, 98, 7, 0.05);
+  --semi-color-fill-1: rgba(161, 98, 7, 0.09);
+  --semi-color-fill-2: rgba(161, 98, 7, 0.14);
+  --semi-color-bg-0: #fffaf2;
+  --semi-color-bg-1: #fff5e6;
+  --semi-color-bg-2: #ffecd1;
+  --semi-color-bg-3: #ffe1b8;
+  --semi-color-bg-4: #ffd39a;
+  --semi-color-bg-overlay: #fffaf2;
   --semi-color-overlay-bg: rgba(47, 36, 22, 0.42);
-  --semi-color-nav-bg: #fff8ec;
+  --semi-color-nav-bg: #fffaf2;
   --semi-color-text-0: #2f2416;
   --semi-color-text-1: #5f4830;
   --semi-color-text-2: #8a6a43;
   --semi-color-text-3: #b08a57;
-  --semi-color-highlight: #92400e;
-  --semi-color-highlight-bg: rgba(251, 191, 36, 0.2);
+  --semi-color-highlight: #854d0e;
+  --semi-color-highlight-bg: rgba(253, 186, 116, 0.22);
 }
 
 body[theme-mode='warm'] .classic-header {
-  background-color: rgba(255, 248, 236, 0.82) !important;
-  border-bottom: 1px solid rgba(146, 64, 14, 0.08);
+  background-color: rgba(255, 250, 242, 0.84) !important;
+  border-bottom: 1px solid rgba(120, 53, 15, 0.08);
+}
+
+body[theme-mode='warm'] .bg-white,
+body[theme-mode='warm'] .bg-gray-50,
+body[theme-mode='warm'] .bg-gray-50\/50,
+body[theme-mode='warm'] .bg-slate-50 {
+  background-color: var(--semi-color-bg-1) !important;
+}
+
+body[theme-mode='warm'] .bg-gray-100,
+body[theme-mode='warm'] .bg-slate-100 {
+  background-color: var(--semi-color-bg-2) !important;
+}
+
+body[theme-mode='warm'] .bg-white\/70,
+body[theme-mode='warm'] .bg-white\/75,
+body[theme-mode='warm'] .bg-white\/80,
+body[theme-mode='warm'] .bg-white\/90 {
+  background-color: rgba(255, 250, 242, 0.86) !important;
+}
+
+body[theme-mode='warm'] .hover\:bg-white:hover,
+body[theme-mode='warm'] .hover\:bg-gray-50:hover {
+  background-color: var(--semi-color-bg-2) !important;
 }
 
 .app-layout {
@@ -236,6 +277,14 @@ code {
   background-color: rgba(var(--semi-blue-0), 0.12);
   color: var(--semi-color-primary);
   font-weight: 500;
+}
+
+body[theme-mode='warm'] .sidebar-nav-item:hover {
+  background-color: rgba(217, 119, 6, 0.1);
+}
+
+body[theme-mode='warm'] .sidebar-nav-item-selected {
+  background-color: rgba(217, 119, 6, 0.14);
 }
 
 /* 图标容器样式 */
