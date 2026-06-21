@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useMemo } from 'react';
 import { Button, Dropdown } from '@douyinfe/semi-ui';
-import { Sun, Moon, Monitor } from 'lucide-react';
+import { Sun, SunMedium, Moon, Monitor } from 'lucide-react';
 import { useActualTheme } from '../../../context/Theme';
 
 const ThemeToggle = ({ theme, onThemeToggle, t }) => {
@@ -42,6 +42,13 @@ const ThemeToggle = ({ theme, onThemeToggle, t }) => {
         description: t('始终使用深色主题'),
       },
       {
+        key: 'warm',
+        icon: <SunMedium size={18} />,
+        buttonIcon: <SunMedium size={18} />,
+        label: t('暖黄模式'),
+        description: t('使用偏暖的浅色主题'),
+      },
+      {
         key: 'auto',
         icon: <Monitor size={18} />,
         buttonIcon: <Monitor size={18} />,
@@ -59,7 +66,8 @@ const ThemeToggle = ({ theme, onThemeToggle, t }) => {
 
   const currentButtonIcon = useMemo(() => {
     const currentOption = themeOptions.find((option) => option.key === theme);
-    return currentOption?.buttonIcon || themeOptions[2].buttonIcon;
+    const autoOption = themeOptions.find((option) => option.key === 'auto');
+    return currentOption?.buttonIcon || autoOption?.buttonIcon;
   }, [theme, themeOptions]);
 
   return (

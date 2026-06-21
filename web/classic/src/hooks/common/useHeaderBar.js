@@ -22,7 +22,12 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
-import { useSetTheme, useTheme, useActualTheme } from '../../context/Theme';
+import {
+  isThemeMode,
+  useActualTheme,
+  useSetTheme,
+  useTheme,
+} from '../../context/Theme';
 import { getLogo, getSystemName, API, showSuccess } from '../../helpers';
 import { normalizeLanguage } from '../../i18n/language';
 import { useIsMobile } from './useIsMobile';
@@ -198,10 +203,7 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
 
   const handleThemeToggle = useCallback(
     (newTheme) => {
-      if (
-        !newTheme ||
-        (newTheme !== 'light' && newTheme !== 'dark' && newTheme !== 'auto')
-      ) {
+      if (!isThemeMode(newTheme)) {
         return;
       }
       setTheme(newTheme);

@@ -34,6 +34,11 @@ export const useActualTheme = () => useContext(ActualThemeContext);
 const SetThemeContext = createContext(null);
 export const useSetTheme = () => useContext(SetThemeContext);
 
+export const THEME_MODES = ['light', 'dark', 'warm', 'auto'];
+export const isThemeMode = (themeMode) => THEME_MODES.includes(themeMode);
+const normalizeTheme = (themeMode) =>
+  isThemeMode(themeMode) ? themeMode : 'auto';
+
 // 检测系统主题偏好
 const getSystemTheme = () => {
   if (typeof window !== 'undefined' && window.matchMedia) {
@@ -47,7 +52,7 @@ const getSystemTheme = () => {
 export const ThemeProvider = ({ children }) => {
   const [theme, _setTheme] = useState(() => {
     try {
-      return localStorage.getItem('theme-mode') || 'auto';
+      return normalizeTheme(localStorage.getItem('theme-mode'));
     } catch {
       return 'auto';
     }
@@ -78,13 +83,24 @@ export const ThemeProvider = ({ children }) => {
   // 应用主题到DOM
   useEffect(() => {
     const body = document.body;
+    const root = document.documentElement;
+
     if (actualTheme === 'dark') {
       body.setAttribute('theme-mode', 'dark');
-      document.documentElement.classList.add('dark');
-    } else {
-      body.removeAttribute('theme-mode');
-      document.documentElement.classList.remove('dark');
+      root.classList.add('dark');
+      root.classList.remove('warm');
+      return;
     }
+
+    if (actualTheme === 'warm') {
+      body.setAttribute('theme-mode', 'warm');
+      root.classList.add('warm');
+      root.classList.remove('dark');
+      return;
+    }
+
+    body.removeAttribute('theme-mode');
+    root.classList.remove('dark', 'warm');
   }, [actualTheme]);
 
   const setTheme = useCallback((newTheme) => {
@@ -94,8 +110,8 @@ export const ThemeProvider = ({ children }) => {
       // 向后兼容原有的 boolean 参数
       themeValue = newTheme ? 'dark' : 'light';
     } else if (typeof newTheme === 'string') {
-      // 新的字符串参数支持 'light', 'dark', 'auto'
-      themeValue = newTheme;
+      // 新的字符串参数支持 'light', 'dark', 'warm', 'auto'
+      themeValue = normalizeTheme(newTheme);
     } else {
       themeValue = 'auto';
     }
