@@ -102,6 +102,10 @@ export function SidebarModulesSection({
         title: t('Usage logs'),
         description: t('Detailed request logs for investigations.'),
       },
+      model_monitor: {
+        title: t('Model Monitor'),
+        description: t('Global model experience scores.'),
+      },
       midjourney: {
         title: t('Drawing logs'),
         description: t('History of Midjourney-style image tasks.'),

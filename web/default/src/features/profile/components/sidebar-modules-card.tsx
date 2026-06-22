@@ -92,6 +92,11 @@ export function SidebarModulesCard() {
           description: t('API usage records'),
         },
         {
+          key: 'model_monitor',
+          title: t('Model Monitor'),
+          description: t('Global model experience scores.'),
+        },
+        {
           key: 'midjourney',
           title: t('Drawing Logs'),
           description: t('Drawing task records'),

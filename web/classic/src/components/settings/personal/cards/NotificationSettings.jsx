@@ -267,6 +267,11 @@ const NotificationSettings = ({
         { key: 'token', title: t('令牌管理'), description: t('API令牌管理') },
         { key: 'log', title: t('使用日志'), description: t('API使用记录') },
         {
+          key: 'model_monitor',
+          title: t('模型监控'),
+          description: t('全局模型体验评分'),
+        },
+        {
           key: 'midjourney',
           title: t('绘图日志'),
           description: t('绘图任务记录'),

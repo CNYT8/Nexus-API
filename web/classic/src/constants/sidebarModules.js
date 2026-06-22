@@ -28,6 +28,7 @@ export const GLOBAL_SIDEBAR_DEFAULT_CONFIG = {
     detail: true,
     token: true,
     log: true,
+    model_monitor: true,
     midjourney: true,
     task: true,
   },
@@ -75,6 +76,11 @@ export const GLOBAL_SIDEBAR_SECTION_CONFIGS = [
         key: 'log',
         title: '使用日志',
         description: 'API使用记录',
+      },
+      {
+        key: 'model_monitor',
+        title: '模型监控',
+        description: '全局模型体验评分',
       },
       {
         key: 'midjourney',

@@ -88,6 +88,11 @@ export function useSidebarData(): SidebarData {
             icon: FileText,
           },
           {
+            title: t('Model Monitor'),
+            url: '/model-monitor',
+            icon: Activity,
+          },
+          {
             title: t('Task Logs'),
             url: '/usage-logs/task',
             activeUrls: ['/usage-logs/drawing'],

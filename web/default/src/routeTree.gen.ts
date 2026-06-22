@@ -20,6 +20,7 @@ import { Route as PricingIndexRouteImport } from './routes/pricing/index'
 import { Route as AboutIndexRouteImport } from './routes/about/index'
 import { Route as OauthProviderRouteImport } from './routes/oauth/$provider'
 import { Route as ConsoleTopupRouteImport } from './routes/console/topup'
+import { Route as ConsoleModelMonitorRouteImport } from './routes/console/model-monitor'
 import { Route as ConsoleLogRouteImport } from './routes/console/log'
 import { Route as AuthenticatedChat2linkRouteImport } from './routes/_authenticated/chat2link'
 import { Route as errors503RouteImport } from './routes/(errors)/503'
@@ -44,6 +45,7 @@ import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_a
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
+import { Route as AuthenticatedModelMonitorIndexRouteImport } from './routes/_authenticated/model-monitor/index'
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
@@ -126,6 +128,11 @@ const ConsoleTopupRoute = ConsoleTopupRouteImport.update({
 const ConsoleLogRoute = ConsoleLogRouteImport.update({
   id: '/console/log',
   path: '/console/log',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConsoleModelMonitorRoute = ConsoleModelMonitorRouteImport.update({
+  id: '/console/model-monitor',
+  path: '/console/model-monitor',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedChat2linkRoute = AuthenticatedChat2linkRouteImport.update({
@@ -255,6 +262,12 @@ const AuthenticatedModelsIndexRoute =
   AuthenticatedModelsIndexRouteImport.update({
     id: '/models/',
     path: '/models/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedModelMonitorIndexRoute =
+  AuthenticatedModelMonitorIndexRouteImport.update({
+    id: '/model-monitor/',
+    path: '/model-monitor/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedKeysIndexRoute = AuthenticatedKeysIndexRouteImport.update({
@@ -418,6 +431,7 @@ export interface FileRoutesByFullPath {
   '/503': typeof errors503Route
   '/chat2link': typeof AuthenticatedChat2linkRoute
   '/console/log': typeof ConsoleLogRoute
+  '/console/model-monitor': typeof ConsoleModelMonitorRoute
   '/console/topup': typeof ConsoleTopupRoute
   '/oauth/$provider': typeof OauthProviderRoute
   '/about/': typeof AboutIndexRoute
@@ -433,6 +447,7 @@ export interface FileRoutesByFullPath {
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
+  '/model-monitor/': typeof AuthenticatedModelMonitorIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
@@ -477,6 +492,7 @@ export interface FileRoutesByTo {
   '/503': typeof errors503Route
   '/chat2link': typeof AuthenticatedChat2linkRoute
   '/console/log': typeof ConsoleLogRoute
+  '/console/model-monitor': typeof ConsoleModelMonitorRoute
   '/console/topup': typeof ConsoleTopupRoute
   '/oauth/$provider': typeof OauthProviderRoute
   '/about': typeof AboutIndexRoute
@@ -492,6 +508,7 @@ export interface FileRoutesByTo {
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
+  '/model-monitor': typeof AuthenticatedModelMonitorIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
@@ -540,6 +557,7 @@ export interface FileRoutesById {
   '/(errors)/503': typeof errors503Route
   '/_authenticated/chat2link': typeof AuthenticatedChat2linkRoute
   '/console/log': typeof ConsoleLogRoute
+  '/console/model-monitor': typeof ConsoleModelMonitorRoute
   '/console/topup': typeof ConsoleTopupRoute
   '/oauth/$provider': typeof OauthProviderRoute
   '/about/': typeof AboutIndexRoute
@@ -555,6 +573,7 @@ export interface FileRoutesById {
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
+  '/_authenticated/model-monitor/': typeof AuthenticatedModelMonitorIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
@@ -602,6 +621,7 @@ export interface FileRouteTypes {
     | '/503'
     | '/chat2link'
     | '/console/log'
+    | '/console/model-monitor'
     | '/console/topup'
     | '/oauth/$provider'
     | '/about/'
@@ -617,6 +637,7 @@ export interface FileRouteTypes {
     | '/channels/'
     | '/dashboard/'
     | '/keys/'
+    | '/model-monitor/'
     | '/models/'
     | '/playground/'
     | '/profile/'
@@ -661,6 +682,7 @@ export interface FileRouteTypes {
     | '/503'
     | '/chat2link'
     | '/console/log'
+    | '/console/model-monitor'
     | '/console/topup'
     | '/oauth/$provider'
     | '/about'
@@ -676,6 +698,7 @@ export interface FileRouteTypes {
     | '/channels'
     | '/dashboard'
     | '/keys'
+    | '/model-monitor'
     | '/models'
     | '/playground'
     | '/profile'
@@ -723,6 +746,7 @@ export interface FileRouteTypes {
     | '/(errors)/503'
     | '/_authenticated/chat2link'
     | '/console/log'
+    | '/console/model-monitor'
     | '/console/topup'
     | '/oauth/$provider'
     | '/about/'
@@ -738,6 +762,7 @@ export interface FileRouteTypes {
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/keys/'
+    | '/_authenticated/model-monitor/'
     | '/_authenticated/models/'
     | '/_authenticated/playground/'
     | '/_authenticated/profile/'
@@ -777,6 +802,7 @@ export interface RootRouteChildren {
   errors500Route: typeof errors500Route
   errors503Route: typeof errors503Route
   ConsoleLogRoute: typeof ConsoleLogRoute
+  ConsoleModelMonitorRoute: typeof ConsoleModelMonitorRoute
   ConsoleTopupRoute: typeof ConsoleTopupRoute
   OauthProviderRoute: typeof OauthProviderRoute
   AboutIndexRoute: typeof AboutIndexRoute
@@ -870,6 +896,13 @@ declare module '@tanstack/react-router' {
       path: '/console/log'
       fullPath: '/console/log'
       preLoaderRoute: typeof ConsoleLogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/console/model-monitor': {
+      id: '/console/model-monitor'
+      path: '/console/model-monitor'
+      fullPath: '/console/model-monitor'
+      preLoaderRoute: typeof ConsoleModelMonitorRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/chat2link': {
@@ -1038,6 +1071,13 @@ declare module '@tanstack/react-router' {
       path: '/models'
       fullPath: '/models/'
       preLoaderRoute: typeof AuthenticatedModelsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/model-monitor/': {
+      id: '/_authenticated/model-monitor/'
+      path: '/model-monitor'
+      fullPath: '/model-monitor/'
+      preLoaderRoute: typeof AuthenticatedModelMonitorIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/keys/': {
@@ -1308,6 +1348,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
+  AuthenticatedModelMonitorIndexRoute: typeof AuthenticatedModelMonitorIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
@@ -1330,6 +1371,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
+  AuthenticatedModelMonitorIndexRoute: AuthenticatedModelMonitorIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
   AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
@@ -1356,6 +1398,7 @@ const rootRouteChildren: RootRouteChildren = {
   errors500Route: errors500Route,
   errors503Route: errors503Route,
   ConsoleLogRoute: ConsoleLogRoute,
+  ConsoleModelMonitorRoute: ConsoleModelMonitorRoute,
   ConsoleTopupRoute: ConsoleTopupRoute,
   OauthProviderRoute: OauthProviderRoute,
   AboutIndexRoute: AboutIndexRoute,
