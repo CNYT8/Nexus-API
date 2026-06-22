@@ -64,3 +64,35 @@ jobs:
           echo "ghcr.io/cnyt8/nexus-api:${{ github.event.inputs.image_tag }}" >> "$GITHUB_STEP_SUMMARY"
           echo "ghcr.io/cnyt8/nexus-api:latest" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prune old GHCR image versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_OWNER: CNYT8
+          PACKAGE_NAME: nexus-api
+        run: |
+          set -euo pipefail
+
+          versions_file="$(mktemp)"
+          gh api "/users/${PACKAGE_OWNER}/packages/container/${PACKAGE_NAME}/versions?per_page=100" --paginate --slurp > "$versions_file"
+
+          keep_id="$(jq -r '[.[][]?] | sort_by(.created_at) | reverse | .[0].id // empty' "$versions_file")"
+          if [ -z "$keep_id" ]; then
+            echo "No GHCR package versions found."
+            exit 0
+          fi
+
+          keep_summary="$(jq -r --argjson keep_id "$keep_id" '[.[][]?] | map(select(.id == $keep_id)) | .[0] | "Keeping version \(.id), created at \(.created_at), tags: \((.metadata.container.tags // []) | join(", "))"' "$versions_file")"
+          echo "$keep_summary"
+
+          delete_ids="$(jq -r --argjson keep_id "$keep_id" '[.[][]?] | sort_by(.created_at) | reverse | .[1:][] | .id' "$versions_file")"
+          if [ -z "$delete_ids" ]; then
+            echo "No old GHCR package versions to delete."
+            exit 0
+          fi
+
+          while IFS= read -r version_id; do
+            [ -n "$version_id" ] || continue
+            echo "Deleting old GHCR package version ${version_id}"
+            gh api --method DELETE "/users/${PACKAGE_OWNER}/packages/container/${PACKAGE_NAME}/versions/${version_id}"
+          done <<< "$delete_ids"
