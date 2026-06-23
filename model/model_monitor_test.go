@@ -56,6 +56,8 @@ func TestScoreModelMonitorBucket(t *testing.T) {
 }
 
 func TestGetModelMonitorSummaryAggregatesRecentLogs(t *testing.T) {
+	InvalidateModelMonitorCache()
+	t.Cleanup(InvalidateModelMonitorCache)
 	require.NoError(t, LOG_DB.Exec("DELETE FROM logs").Error)
 	t.Cleanup(func() {
 		_ = LOG_DB.Exec("DELETE FROM logs").Error
@@ -93,6 +95,36 @@ func TestGetModelMonitorSummaryAggregatesRecentLogs(t *testing.T) {
 	require.Equal(t, "OpenAI", summary.Vendors[0].Name)
 	require.Len(t, summary.Vendors[0].Models, 1)
 	require.Equal(t, "gpt-monitor-test", summary.Vendors[0].Models[0].ModelName)
+	require.True(t, summary.Vendors[0].Models[0].HasData)
+	require.NotEqual(t, "unknown", summary.Vendors[0].Models[0].Status)
 	require.GreaterOrEqual(t, summary.Vendors[0].Models[0].Score, 1)
 	require.LessOrEqual(t, summary.Vendors[0].Models[0].Score, 100)
+}
+
+func TestGetModelMonitorSummaryIncludesUnknownEnabledModels(t *testing.T) {
+	InvalidateModelMonitorCache()
+	t.Cleanup(InvalidateModelMonitorCache)
+	truncateTables(t)
+
+	require.NoError(t, DB.Create(&Channel{
+		Id:     991,
+		Type:   1,
+		Status: common.ChannelStatusEnabled,
+	}).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "unused-monitor-test",
+		ChannelId: 991,
+		Enabled:   true,
+	}).Error)
+
+	summary, err := GetModelMonitorSummary()
+	require.NoError(t, err)
+	require.Equal(t, 1, summary.ModelCount)
+	require.Equal(t, 0, summary.KnownCount)
+	require.Equal(t, 1, summary.UnknownCount)
+	require.Len(t, summary.Vendors, 1)
+	require.Equal(t, "未知状态", summary.Vendors[0].Models[0].StatusText)
+	require.False(t, summary.Vendors[0].Models[0].HasData)
+	require.Equal(t, 0, summary.Vendors[0].Models[0].Score)
 }

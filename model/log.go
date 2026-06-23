@@ -89,6 +89,57 @@ func formatUserLogs(logs []*Log, startIdx int) {
 	}
 }
 
+func StripChannelRestrictedAdminLogFields(logs []*Log) {
+	for _, log := range logs {
+		if log == nil {
+			continue
+		}
+		log.ChannelId = 0
+		log.ChannelName = ""
+		if strings.TrimSpace(log.Other) == "" {
+			continue
+		}
+
+		otherMap, err := common.StrToMap(log.Other)
+		if err != nil || otherMap == nil {
+			continue
+		}
+		stripChannelRestrictedLogMap(otherMap)
+		if adminInfo, ok := otherMap["admin_info"].(map[string]interface{}); ok {
+			stripChannelRestrictedAdminInfo(adminInfo)
+			if len(adminInfo) == 0 {
+				delete(otherMap, "admin_info")
+			}
+		}
+		log.Other = common.MapToJsonStr(otherMap)
+	}
+}
+
+func stripChannelRestrictedLogMap(otherMap map[string]interface{}) {
+	delete(otherMap, "channel_id")
+	delete(otherMap, "channel_name")
+	delete(otherMap, "channel_type")
+	delete(otherMap, "channel_affinity")
+	delete(otherMap, "is_model_mapped")
+	delete(otherMap, "upstream_model_name")
+	delete(otherMap, "original_model")
+	delete(otherMap, "original_model_name")
+	delete(otherMap, "upstream_model")
+}
+
+func stripChannelRestrictedAdminInfo(adminInfo map[string]interface{}) {
+	delete(adminInfo, "use_channel")
+	delete(adminInfo, "channel_affinity")
+	delete(adminInfo, "channel_id")
+	delete(adminInfo, "channel_name")
+	delete(adminInfo, "channel_type")
+	delete(adminInfo, "is_model_mapped")
+	delete(adminInfo, "upstream_model_name")
+	delete(adminInfo, "original_model")
+	delete(adminInfo, "original_model_name")
+	delete(adminInfo, "upstream_model")
+}
+
 func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
 	err = LOG_DB.Model(&Log{}).Where("token_id = ?", tokenId).Order("id desc").Limit(common.MaxRecentItems).Find(&logs).Error
 	formatUserLogs(logs, 0)

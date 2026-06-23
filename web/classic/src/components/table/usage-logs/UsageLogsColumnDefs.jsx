@@ -506,9 +506,12 @@ export const getLogsColumns = ({
       title: t('渠道'),
       dataIndex: 'channel',
       render: (text, record, index) => {
+        const channelNumber = Number(text);
+        const hasChannel =
+          Number.isFinite(channelNumber) && channelNumber > 0;
         let isMultiKey = false;
         let multiKeyIndex = -1;
-        let content = t('渠道') + `：${record.channel}`;
+        let content = t('渠道') + `：${hasChannel ? record.channel : '-'}`;
         let affinity = null;
         let showMarker = false;
         let other = getLogOther(record.other);
@@ -540,10 +543,14 @@ export const getLogsColumns = ({
               <Tooltip content={record.channel_name || t('未知渠道')}>
                 <span>
                   <Tag
-                    color={colors[parseInt(text) % colors.length]}
+                    color={
+                      hasChannel
+                        ? colors[channelNumber % colors.length]
+                        : 'grey'
+                    }
                     shape='circle'
                   >
-                    {text}
+                    {hasChannel ? text : '-'}
                   </Tag>
                 </span>
               </Tooltip>
@@ -889,7 +896,10 @@ export const getLogsColumns = ({
         if (!(record.type === 2 || record.type === 5)) {
           return <></>;
         }
-        let content = t('渠道') + `：${record.channel}`;
+        const channelNumber = Number(record.channel);
+        const hasChannel =
+          Number.isFinite(channelNumber) && channelNumber > 0;
+        let content = t('渠道') + `：${hasChannel ? record.channel : '-'}`;
         if (record.other !== '') {
           let other = JSON.parse(record.other);
           if (other === null) {

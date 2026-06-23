@@ -28,10 +28,29 @@ func GetAllLogs(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	restricted, err := shouldRestrictAdminLogChannelInfo(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if restricted {
+		model.StripChannelRestrictedAdminLogFields(logs)
+	}
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(logs)
 	common.ApiSuccess(c, pageInfo)
 	return
+}
+
+func shouldRestrictAdminLogChannelInfo(c *gin.Context) (bool, error) {
+	if c.GetInt("role") != common.RoleAdminUser {
+		return false, nil
+	}
+	allowed, err := model.IsAdminPermissionAllowed(c.GetInt("id"), model.AdminPermissionChannel)
+	if err != nil {
+		return false, err
+	}
+	return !allowed, nil
 }
 
 func GetUserLogs(c *gin.Context) {

@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 )
@@ -11,31 +12,48 @@ import (
 const (
 	modelMonitorWindowSeconds = 7 * 24 * 60 * 60
 	modelMonitorHotSeconds    = 3 * 24 * 60 * 60
+	modelMonitorCacheSeconds  = 60
 )
 
 type ModelMonitorModel struct {
-	ModelName string `json:"model_name"`
-	Score     int    `json:"score"`
+	ModelName  string `json:"model_name"`
+	Score      int    `json:"score"`
+	Status     string `json:"status"`
+	StatusText string `json:"status_text"`
+	HasData    bool   `json:"has_data"`
 }
 
 type ModelMonitorVendor struct {
-	ID          int                 `json:"id"`
-	Name        string              `json:"name"`
-	Description string              `json:"description,omitempty"`
-	Icon        string              `json:"icon,omitempty"`
-	Score       int                 `json:"score"`
-	Models      []ModelMonitorModel `json:"models"`
+	ID           int                 `json:"id"`
+	Name         string              `json:"name"`
+	Description  string              `json:"description,omitempty"`
+	Icon         string              `json:"icon,omitempty"`
+	Score        int                 `json:"score"`
+	Status       string              `json:"status"`
+	StatusText   string              `json:"status_text"`
+	KnownCount   int                 `json:"known_count"`
+	UnknownCount int                 `json:"unknown_count"`
+	Models       []ModelMonitorModel `json:"models"`
 }
 
 type ModelMonitorSummary struct {
-	WindowDays  int                  `json:"window_days"`
-	HotDays     int                  `json:"hot_days"`
-	UpdatedAt   int64                `json:"updated_at"`
-	ModelCount  int                  `json:"model_count"`
-	VendorCount int                  `json:"vendor_count"`
-	BestScore   int                  `json:"best_score"`
-	Vendors     []ModelMonitorVendor `json:"vendors"`
+	WindowDays     int                  `json:"window_days"`
+	HotDays        int                  `json:"hot_days"`
+	RefreshSeconds int                  `json:"refresh_seconds"`
+	UpdatedAt      int64                `json:"updated_at"`
+	ModelCount     int                  `json:"model_count"`
+	KnownCount     int                  `json:"known_count"`
+	UnknownCount   int                  `json:"unknown_count"`
+	VendorCount    int                  `json:"vendor_count"`
+	BestScore      int                  `json:"best_score"`
+	Vendors        []ModelMonitorVendor `json:"vendors"`
 }
+
+var modelMonitorCache = struct {
+	sync.Mutex
+	summary   *ModelMonitorSummary
+	expiresAt int64
+}{}
 
 type modelMonitorBucket struct {
 	weightedRequests float64
@@ -93,6 +111,22 @@ func clampModelMonitorScore(score float64) int {
 		return 100
 	}
 	return int(math.Round(score))
+}
+
+func modelMonitorStatus(score int, hasData bool) (string, string) {
+	if !hasData {
+		return "unknown", "未知状态"
+	}
+	if score >= 85 {
+		return "excellent", "优秀"
+	}
+	if score >= 70 {
+		return "good", "良好"
+	}
+	if score >= 45 {
+		return "unstable", "不稳定"
+	}
+	return "poor", "体验较差"
 }
 
 func scoreModelMonitorBucket(bucket modelMonitorBucket) int {
@@ -171,8 +205,82 @@ func getModelMonitorVendorMap(pricing []Pricing, vendors []PricingVendor) map[st
 	return modelVendorMap
 }
 
+func getOrCreateModelMonitorVendor(vendorMap map[string]*ModelMonitorVendor, vendor PricingVendor, modelName string) *ModelMonitorVendor {
+	if vendor.Name == "" {
+		vendor.Name = modelMonitorVendorFallback(modelName)
+	}
+	group := vendorMap[vendor.Name]
+	if group != nil {
+		return group
+	}
+	group = &ModelMonitorVendor{
+		ID:          vendor.ID,
+		Name:        vendor.Name,
+		Description: vendor.Description,
+		Icon:        vendor.Icon,
+		Models:      make([]ModelMonitorModel, 0),
+	}
+	vendorMap[vendor.Name] = group
+	return group
+}
+
+func appendModelMonitorModel(vendorMap map[string]*ModelMonitorVendor, vendor PricingVendor, modelName string, bucket modelMonitorBucket, hasData bool) {
+	score := 0
+	if hasData {
+		score = scoreModelMonitorBucket(bucket)
+	}
+	status, statusText := modelMonitorStatus(score, hasData)
+	group := getOrCreateModelMonitorVendor(vendorMap, vendor, modelName)
+	group.Models = append(group.Models, ModelMonitorModel{
+		ModelName:  modelName,
+		Score:      score,
+		Status:     status,
+		StatusText: statusText,
+		HasData:    hasData,
+	})
+}
+
+func cloneModelMonitorSummary(summary *ModelMonitorSummary) *ModelMonitorSummary {
+	if summary == nil {
+		return nil
+	}
+	out := *summary
+	out.Vendors = make([]ModelMonitorVendor, len(summary.Vendors))
+	for i := range summary.Vendors {
+		out.Vendors[i] = summary.Vendors[i]
+		out.Vendors[i].Models = append([]ModelMonitorModel(nil), summary.Vendors[i].Models...)
+	}
+	return &out
+}
+
+func InvalidateModelMonitorCache() {
+	modelMonitorCache.Lock()
+	defer modelMonitorCache.Unlock()
+	modelMonitorCache.summary = nil
+	modelMonitorCache.expiresAt = 0
+}
+
 func GetModelMonitorSummary() (*ModelMonitorSummary, error) {
 	now := common.GetTimestamp()
+	modelMonitorCache.Lock()
+	defer modelMonitorCache.Unlock()
+	if modelMonitorCache.summary != nil && now < modelMonitorCache.expiresAt {
+		return cloneModelMonitorSummary(modelMonitorCache.summary), nil
+	}
+
+	summary, err := buildModelMonitorSummary(now)
+	if err != nil {
+		if modelMonitorCache.summary != nil {
+			return cloneModelMonitorSummary(modelMonitorCache.summary), nil
+		}
+		return nil, err
+	}
+	modelMonitorCache.summary = cloneModelMonitorSummary(summary)
+	modelMonitorCache.expiresAt = now + modelMonitorCacheSeconds
+	return summary, nil
+}
+
+func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 	since := now - modelMonitorWindowSeconds
 
 	weightSQL := modelMonitorWeightSQL()
@@ -231,37 +339,44 @@ func GetModelMonitorSummary() (*ModelMonitorSummary, error) {
 	pricing := GetPricing()
 	vendorByModel := getModelMonitorVendorMap(pricing, GetVendors())
 	vendorMap := make(map[string]*ModelMonitorVendor)
+	seenModels := make(map[string]bool)
 
-	for modelName, bucket := range buckets {
-		score := scoreModelMonitorBucket(bucket)
+	for _, item := range pricing {
+		modelName := strings.TrimSpace(item.ModelName)
+		if modelName == "" || seenModels[modelName] {
+			continue
+		}
+		seenModels[modelName] = true
 		vendor, ok := vendorByModel[modelName]
 		if !ok || vendor.Name == "" {
 			vendor.Name = modelMonitorVendorFallback(modelName)
 		}
+		bucket, hasData := buckets[modelName]
+		appendModelMonitorModel(vendorMap, vendor, modelName, bucket, hasData)
+	}
 
-		group := vendorMap[vendor.Name]
-		if group == nil {
-			group = &ModelMonitorVendor{
-				ID:          vendor.ID,
-				Name:        vendor.Name,
-				Description: vendor.Description,
-				Icon:        vendor.Icon,
-				Models:      make([]ModelMonitorModel, 0),
-			}
-			vendorMap[vendor.Name] = group
+	for modelName, bucket := range buckets {
+		if seenModels[modelName] {
+			continue
 		}
-
-		group.Models = append(group.Models, ModelMonitorModel{
-			ModelName: modelName,
-			Score:     score,
-		})
+		seenModels[modelName] = true
+		vendor, ok := vendorByModel[modelName]
+		if !ok || vendor.Name == "" {
+			vendor.Name = modelMonitorVendorFallback(modelName)
+		}
+		appendModelMonitorModel(vendorMap, vendor, modelName, bucket, true)
 	}
 
 	vendors := make([]ModelMonitorVendor, 0, len(vendorMap))
 	bestScore := 0
 	modelCount := 0
+	knownCount := 0
+	unknownCount := 0
 	for _, vendor := range vendorMap {
 		sort.Slice(vendor.Models, func(i, j int) bool {
+			if vendor.Models[i].HasData != vendor.Models[j].HasData {
+				return vendor.Models[i].HasData
+			}
 			if vendor.Models[i].Score == vendor.Models[j].Score {
 				return vendor.Models[i].ModelName < vendor.Models[j].ModelName
 			}
@@ -270,6 +385,14 @@ func GetModelMonitorSummary() (*ModelMonitorSummary, error) {
 		var weightedScore float64
 		var totalWeight float64
 		for _, item := range vendor.Models {
+			modelCount++
+			if !item.HasData {
+				vendor.UnknownCount++
+				unknownCount++
+				continue
+			}
+			vendor.KnownCount++
+			knownCount++
 			bucket := buckets[item.ModelName]
 			weight := bucket.weightedRequests
 			if weight <= 0 {
@@ -277,18 +400,23 @@ func GetModelMonitorSummary() (*ModelMonitorSummary, error) {
 			}
 			weightedScore += float64(item.Score) * weight
 			totalWeight += weight
-			modelCount++
 			if item.Score > bestScore {
 				bestScore = item.Score
 			}
 		}
 		if totalWeight > 0 {
 			vendor.Score = clampModelMonitorScore(weightedScore / totalWeight)
+			vendor.Status, vendor.StatusText = modelMonitorStatus(vendor.Score, true)
+		} else {
+			vendor.Status, vendor.StatusText = modelMonitorStatus(0, false)
 		}
 		vendors = append(vendors, *vendor)
 	}
 
 	sort.Slice(vendors, func(i, j int) bool {
+		if (vendors[i].KnownCount > 0) != (vendors[j].KnownCount > 0) {
+			return vendors[i].KnownCount > 0
+		}
 		if vendors[i].Score == vendors[j].Score {
 			return vendors[i].Name < vendors[j].Name
 		}
@@ -296,12 +424,15 @@ func GetModelMonitorSummary() (*ModelMonitorSummary, error) {
 	})
 
 	return &ModelMonitorSummary{
-		WindowDays:  7,
-		HotDays:     3,
-		UpdatedAt:   now,
-		ModelCount:  modelCount,
-		VendorCount: len(vendors),
-		BestScore:   bestScore,
-		Vendors:     vendors,
+		WindowDays:     7,
+		HotDays:        3,
+		RefreshSeconds: modelMonitorCacheSeconds,
+		UpdatedAt:      now,
+		ModelCount:     modelCount,
+		KnownCount:     knownCount,
+		UnknownCount:   unknownCount,
+		VendorCount:    len(vendors),
+		BestScore:      bestScore,
+		Vendors:        vendors,
 	}, nil
 }
