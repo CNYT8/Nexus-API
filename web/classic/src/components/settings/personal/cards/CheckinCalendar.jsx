@@ -172,11 +172,13 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
 
   const condition = checkinData.stats?.condition;
   const conditionBlocked = condition?.enabled === true && !condition.eligible;
-  const conditionBlockedMessage =
-    condition?.reason === 'request_count'
-      ? t('前一天调用量未达到签到要求')
-      : t('前一天用量未达到签到要求');
-  let checkinStatusText = t('每日签到可获得随机额度奖励');
+  let conditionBlockedMessage = t('前一天用量未达到签到要求');
+  if (condition?.message) {
+    conditionBlockedMessage = t(condition.message);
+  } else if (condition?.reason === 'request_count') {
+    conditionBlockedMessage = t('前一天调用量未达到签到要求');
+  }
+  let checkinStatusText = t('每日签到可获得额度奖励');
   if (conditionBlocked) {
     checkinStatusText = conditionBlockedMessage;
   }
@@ -388,7 +390,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
         <div className='mt-3 p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg'>
           <Typography.Text type='tertiary' className='text-xs'>
             <ul className='list-disc list-inside space-y-0.5'>
-              <li>{t('每日签到可获得随机额度奖励')}</li>
+              <li>{t('每日签到可获得额度奖励')}</li>
               <li>{t('签到奖励将直接添加到您的账户余额')}</li>
               <li>{t('每日仅可签到一次，请勿重复签到')}</li>
             </ul>

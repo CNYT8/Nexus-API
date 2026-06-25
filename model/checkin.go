@@ -35,6 +35,10 @@ type CheckinConditionStatus struct {
 	TokenThreshold   int    `json:"token_threshold"`
 	RequestCount     int64  `json:"request_count"`
 	TokenCount       int64  `json:"token_count"`
+	StageMode        bool   `json:"stage_mode"`
+	MatchedStage     int    `json:"-"`
+	StageMinQuota    int    `json:"-"`
+	StageMaxQuota    int    `json:"-"`
 }
 
 func (Checkin) TableName() string {
@@ -62,17 +66,26 @@ func HasCheckedInToday(userId int) (bool, error) {
 }
 
 func GetCheckinConditionStatus(userId int, setting *operation_setting.CheckinSetting) (*CheckinConditionStatus, error) {
+	status, _, _, err := getCheckinConditionStatusWithQuota(userId, setting)
+	return status, err
+}
+
+func getCheckinConditionStatusWithQuota(userId int, setting *operation_setting.CheckinSetting) (*CheckinConditionStatus, int, int, error) {
 	yesterday := time.Now().AddDate(0, 0, -1)
+	minQuota, maxQuota := normalizeCheckinQuotaRange(setting.MinQuota, setting.MaxQuota)
 	status := &CheckinConditionStatus{
 		Enabled:          setting.ConditionEnabled,
 		Eligible:         true,
 		Date:             yesterday.Format("2006-01-02"),
 		RequestThreshold: setting.RequestThreshold,
 		TokenThreshold:   setting.TokenThreshold,
+		MatchedStage:     -1,
+		StageMinQuota:    minQuota,
+		StageMaxQuota:    maxQuota,
 	}
 
 	if !setting.ConditionEnabled {
-		return status, nil
+		return status, minQuota, maxQuota, nil
 	}
 
 	startAt := time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 0, 0, 0, 0, time.Local)
@@ -85,25 +98,77 @@ func GetCheckinConditionStatus(userId int, setting *operation_setting.CheckinSet
 		Select("COUNT(*) AS request_count, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS token_count").
 		Where("user_id = ? AND type = ? AND created_at >= ? AND created_at < ?", userId, LogTypeConsume, startAt.Unix(), endAt.Unix()).
 		Scan(&usage).Error; err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 
 	status.RequestCount = usage.RequestCount
 	status.TokenCount = usage.TokenCount
+
+	if len(setting.StageRules) > 0 {
+		status.StageMode = true
+		for index, rule := range setting.StageRules {
+			if !checkinStageRuleMatches(rule, usage.RequestCount, usage.TokenCount) {
+				continue
+			}
+			status.MatchedStage = index
+			status.RequestThreshold = rule.RequestThreshold
+			status.TokenThreshold = rule.TokenThreshold
+			stageMinQuota, stageMaxQuota := normalizeCheckinQuotaRange(rule.MinQuota, rule.MaxQuota)
+			status.StageMinQuota = stageMinQuota
+			status.StageMaxQuota = stageMaxQuota
+			if !rule.AllowCheckin {
+				status.Eligible = false
+				status.Reason = "stage_disabled"
+				status.Message = "当前阶段无法签到"
+				return status, 0, 0, nil
+			}
+			return status, stageMinQuota, stageMaxQuota, nil
+		}
+		status.Eligible = false
+		status.Reason = "stage_no_match"
+		status.Message = "前一天用量未达到阶段签到要求"
+		return status, 0, 0, nil
+	}
+
 	if setting.RequestThreshold > 0 && usage.RequestCount <= int64(setting.RequestThreshold) {
 		status.Eligible = false
 		status.Reason = "request_count"
 		status.Message = "前一天调用量未达到签到要求"
-		return status, nil
+		return status, 0, 0, nil
 	}
 	if setting.TokenThreshold > 0 && usage.TokenCount <= int64(setting.TokenThreshold) {
 		status.Eligible = false
 		status.Reason = "token_count"
 		status.Message = "前一天用量未达到签到要求"
-		return status, nil
+		return status, 0, 0, nil
 	}
 
-	return status, nil
+	return status, minQuota, maxQuota, nil
+}
+
+func checkinStageRuleMatches(rule operation_setting.CheckinStageRule, requestCount int64, tokenCount int64) bool {
+	if rule.RequestThreshold <= 0 && rule.TokenThreshold <= 0 {
+		return true
+	}
+	return (rule.RequestThreshold > 0 && requestCount > int64(rule.RequestThreshold)) ||
+		(rule.TokenThreshold > 0 && tokenCount > int64(rule.TokenThreshold))
+}
+
+func normalizeCheckinQuotaRange(minQuota int, maxQuota int) (int, int) {
+	if minQuota < 0 {
+		minQuota = 0
+	}
+	if maxQuota < minQuota {
+		maxQuota = minQuota
+	}
+	return minQuota, maxQuota
+}
+
+func randomCheckinQuota(minQuota int, maxQuota int) int {
+	if maxQuota > minQuota {
+		return minQuota + rand.Intn(maxQuota-minQuota+1)
+	}
+	return minQuota
 }
 
 // UserCheckin 执行用户签到
@@ -124,7 +189,7 @@ func UserCheckin(userId int) (*Checkin, error) {
 		return nil, errors.New("今日已签到")
 	}
 
-	condition, err := GetCheckinConditionStatus(userId, setting)
+	condition, minQuota, maxQuota, err := getCheckinConditionStatusWithQuota(userId, setting)
 	if err != nil {
 		return nil, err
 	}
@@ -132,11 +197,7 @@ func UserCheckin(userId int) (*Checkin, error) {
 		return nil, errors.New(condition.Message)
 	}
 
-	// 计算随机额度奖励
-	quotaAwarded := setting.MinQuota
-	if setting.MaxQuota > setting.MinQuota {
-		quotaAwarded = setting.MinQuota + rand.Intn(setting.MaxQuota-setting.MinQuota+1)
-	}
+	quotaAwarded := randomCheckinQuota(minQuota, maxQuota)
 
 	today := time.Now().Format("2006-01-02")
 	checkin := &Checkin{
@@ -243,7 +304,7 @@ func GetUserCheckinStats(userId int, month string) (map[string]interface{}, erro
 		"total_checkins":   totalCheckins,   // 所有时间累计签到次数
 		"checkin_count":    len(records),    // 本月签到次数
 		"checked_in_today": hasCheckedToday, // 今天是否已签到
-		"condition":        condition,       // 条件签到状态
+		"condition":        condition,       // 阶段签到状态
 		"records":          checkinRecords,  // 本月签到记录详情（不含id和user_id）
 	}, nil
 }

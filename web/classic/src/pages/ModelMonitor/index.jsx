@@ -35,7 +35,7 @@ import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
-import { API, getLobeHubIcon, showError, timestamp2string } from '../../helpers';
+import { API, getLobeHubIcon, showError } from '../../helpers';
 import CardPro from '../../components/common/ui/CardPro';
 
 const { Text } = Typography;
@@ -83,6 +83,16 @@ const getItemStatus = (item) => {
 };
 
 const getStatusMeta = (status) => STATUS_META[status] || STATUS_META.unknown;
+
+const formatRefreshClock = (timestamp) => {
+  if (!timestamp) {
+    return '--:--';
+  }
+  const date = new Date(timestamp);
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+};
 
 const renderVendorIcon = (vendor) => {
   if (vendor.icon) {
@@ -214,6 +224,7 @@ const ModelMonitor = () => {
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState(null);
   const [expandedVendors, setExpandedVendors] = useState(null);
+  const [nextRefreshAt, setNextRefreshAt] = useState(0);
 
   const fetchMonitor = useCallback(
     async (silent = false) => {
@@ -228,6 +239,9 @@ const ModelMonitor = () => {
           return;
         }
         setSummary(data);
+        setNextRefreshAt(
+          Date.now() + (data?.refresh_seconds || 60) * 1000,
+        );
       } catch (error) {
         showError(t('加载失败'));
       } finally {
@@ -297,10 +311,7 @@ const ModelMonitor = () => {
           {t('未知')} {summary.unknown_count}
         </Text>
         <Text type='tertiary' size='small'>
-          {t('每1分钟更新')}
-        </Text>
-        <Text type='tertiary' size='small'>
-          {timestamp2string(summary.updated_at)}
+          {t('每1分钟动态更新数据')} {formatRefreshClock(nextRefreshAt)}
         </Text>
       </Space>
     </div>
@@ -334,8 +345,14 @@ const ModelMonitor = () => {
 
   return (
     <div className='mt-[60px] px-2'>
-      <CardPro type='type2' statsArea={headerArea} t={t}>
+      <CardPro type='type2' t={t}>
         <div className='flex flex-col'>
+          <div
+            className='border-b pb-3'
+            style={{ borderColor: 'var(--semi-color-border)' }}
+          >
+            {headerArea}
+          </div>
           {summary.vendors.map((vendor) => {
             const key = String(vendor.name);
             return (

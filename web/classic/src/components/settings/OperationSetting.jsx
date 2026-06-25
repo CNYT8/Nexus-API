@@ -81,6 +81,7 @@ const OperationSetting = () => {
     'checkin_setting.condition_enabled': false,
     'checkin_setting.request_threshold': 0,
     'checkin_setting.token_threshold': 0,
+    'checkin_setting.stage_rules': '',
     'checkin_setting.min_quota': 1000,
     'checkin_setting.max_quota': 10000,
 
