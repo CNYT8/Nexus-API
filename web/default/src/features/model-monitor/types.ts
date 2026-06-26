@@ -16,11 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export type ModelMonitorStatus = 'excellent' | 'good' | 'unstable' | 'poor'
+export type ModelMonitorStatus =
+  | 'excellent'
+  | 'good'
+  | 'unstable'
+  | 'poor'
+  | 'unknown'
 
 export interface ModelMonitorModel {
   model_name: string
   score: number
+  status: ModelMonitorStatus
+  status_text: string
+  has_data: boolean
 }
 
 export interface ModelMonitorVendor {
@@ -29,14 +37,21 @@ export interface ModelMonitorVendor {
   description?: string
   icon?: string
   score: number
+  status: ModelMonitorStatus
+  status_text: string
+  known_count: number
+  unknown_count: number
   models: ModelMonitorModel[]
 }
 
 export interface ModelMonitorSummary {
   window_days: number
   hot_days: number
+  refresh_seconds: number
   updated_at: number
   model_count: number
+  known_count: number
+  unknown_count: number
   vendor_count: number
   best_score: number
   vendors: ModelMonitorVendor[]

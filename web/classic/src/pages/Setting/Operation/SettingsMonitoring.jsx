@@ -44,6 +44,7 @@ export default function SettingsMonitoring(props) {
       '100-199,300-399,401-407,409-499,500-503,505-523,525-599',
     'monitor_setting.auto_test_channel_enabled': false,
     'monitor_setting.auto_test_channel_minutes': 10,
+    'monitor_setting.channel_test_mode': 'scheduled_all',
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -166,6 +167,28 @@ export default function SettingsMonitoring(props) {
               </Col>
             </Row>
             <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Select
+                  label={t('自动测试模式')}
+                  field={'monitor_setting.channel_test_mode'}
+                  extraText={t(
+                    '被动恢复仅测试自动禁用渠道，不会自动禁用正常渠道',
+                  )}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      'monitor_setting.channel_test_mode': value,
+                    })
+                  }
+                >
+                  <Form.Select.Option value='scheduled_all'>
+                    {t('定时测试所有渠道')}
+                  </Form.Select.Option>
+                  <Form.Select.Option value='passive_recovery'>
+                    {t('被动恢复自动禁用渠道')}
+                  </Form.Select.Option>
+                </Form.Select>
+              </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.InputNumber
                   label={t('测试所有渠道的最长响应时间')}

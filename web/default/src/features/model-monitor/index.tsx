@@ -39,7 +39,11 @@ import {
 } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getModelMonitor } from './api'
-import type { ModelMonitorStatus, ModelMonitorVendor } from './types'
+import type {
+  ModelMonitorModel,
+  ModelMonitorStatus,
+  ModelMonitorVendor,
+} from './types'
 
 const statusClassName: Record<ModelMonitorStatus, string> = {
   excellent:
@@ -48,6 +52,8 @@ const statusClassName: Record<ModelMonitorStatus, string> = {
   unstable:
     'border-rose-400/20 bg-rose-400/10 text-rose-600 dark:text-rose-300',
   poor: 'border-red-600/20 bg-red-600/10 text-red-700 dark:text-red-300',
+  unknown:
+    'border-muted bg-muted/40 text-muted-foreground dark:text-muted-foreground',
 }
 
 const barClassName: Record<ModelMonitorStatus, string> = {
@@ -55,6 +61,12 @@ const barClassName: Record<ModelMonitorStatus, string> = {
   good: 'bg-amber-500',
   unstable: 'bg-rose-400',
   poor: 'bg-red-600',
+  unknown: 'bg-muted-foreground/30',
+}
+
+function clampScore(score: number): number {
+  if (!Number.isFinite(score)) return 0
+  return Math.min(100, Math.max(0, Math.round(score)))
 }
 
 function getScoreStatus(score: number): ModelMonitorStatus {
@@ -64,20 +76,39 @@ function getScoreStatus(score: number): ModelMonitorStatus {
   return 'poor'
 }
 
-function ScoreBadge(props: { score: number }) {
-  const status = getScoreStatus(props.score)
+function getMonitorStatus(item: {
+  score: number
+  status?: ModelMonitorStatus
+  has_data?: boolean
+}): ModelMonitorStatus {
+  if (item.has_data === false || item.status === 'unknown') return 'unknown'
+  return item.status || getScoreStatus(clampScore(item.score))
+}
+
+function formatRefreshClock(timestamp: number) {
+  if (!timestamp) return '--:--'
+  const date = new Date(timestamp)
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${hours}:${minutes}`
+}
+
+function ScoreBadge(props: { score: number; status?: ModelMonitorStatus }) {
+  const score = clampScore(props.score)
+  const status = props.status || getScoreStatus(score)
   return (
     <Badge
       variant='outline'
       className={cn('h-6 min-w-12 tabular-nums', statusClassName[status])}
     >
-      {props.score}
+      {status === 'unknown' ? '-' : score}
     </Badge>
   )
 }
 
-function ScoreBar(props: { score: number }) {
-  const status = getScoreStatus(props.score)
+function ScoreBar(props: { score: number; status?: ModelMonitorStatus }) {
+  const score = clampScore(props.score)
+  const status = props.status || getScoreStatus(score)
   return (
     <div
       className='bg-muted h-1.5 overflow-hidden rounded-full'
@@ -85,8 +116,32 @@ function ScoreBar(props: { score: number }) {
     >
       <div
         className={cn('h-full rounded-full', barClassName[status])}
-        style={{ width: `${props.score}%` }}
+        style={{ width: `${status === 'unknown' ? 0 : score}%` }}
       />
+    </div>
+  )
+}
+
+function ModelScoreCard(props: { model: ModelMonitorModel }) {
+  const status = getMonitorStatus(props.model)
+  const score = clampScore(props.model.score)
+
+  return (
+    <div className='rounded-lg border p-3'>
+      <div className='flex items-start justify-between gap-3'>
+        <div className='min-w-0'>
+          <div className='truncate font-mono text-sm font-semibold'>
+            {props.model.model_name}
+          </div>
+          <div className='text-muted-foreground mt-0.5 text-xs'>
+            {props.model.status_text}
+          </div>
+        </div>
+        <ScoreBadge score={score} status={status} />
+      </div>
+      <div className='mt-3'>
+        <ScoreBar score={score} status={status} />
+      </div>
     </div>
   )
 }
@@ -141,9 +196,14 @@ export function ModelMonitor() {
     queryKey: ['model-monitor'],
     queryFn: getModelMonitor,
     staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
   })
 
   const summary = monitorQuery.data?.data
+  const nextRefreshAt =
+    monitorQuery.dataUpdatedAt && summary?.refresh_seconds
+      ? monitorQuery.dataUpdatedAt + summary.refresh_seconds * 1000
+      : Date.now() + 60 * 1000
 
   return (
     <SectionPageLayout>
@@ -167,13 +227,7 @@ export function ModelMonitor() {
                   {t('Model Monitor')}
                 </CardTitle>
                 <CardDescription>
-                  {t(
-                    'Global model experience scores from the last {{window}} days, with recent {{hot}} days weighted higher.',
-                    {
-                      window: summary.window_days,
-                      hot: summary.hot_days,
-                    }
-                  )}
+                  {t('近7天全局模型体验评分，依靠 Dawn 智能调度算法给出多维度综合评分。')}
                 </CardDescription>
               </CardHeader>
               <CardContent className='flex flex-wrap gap-2 pt-0'>
@@ -184,59 +238,60 @@ export function ModelMonitor() {
                   {t('Vendors')} {summary.vendor_count}
                 </Badge>
                 <Badge variant='secondary'>
+                  {t('Known')} {summary.known_count}
+                </Badge>
+                <Badge variant='secondary'>
+                  {t('Unknown')} {summary.unknown_count}
+                </Badge>
+                <Badge variant='secondary'>
                   {t('Best Score')} {summary.best_score}
                 </Badge>
+                <span className='text-muted-foreground flex items-center gap-1 text-xs'>
+                  <span>{t('每1分钟动态更新数据')}</span>
+                  <span>
+                    {t('下次更新时间:')} {formatRefreshClock(nextRefreshAt)}
+                  </span>
+                </span>
               </CardContent>
             </Card>
 
             <Accordion className='gap-3'>
-              {summary.vendors.map((vendor) => (
-                <AccordionItem
-                  key={vendor.name}
-                  value={vendor.name}
-                  className='rounded-xl border px-4'
-                >
-                  <AccordionTrigger className='py-3 hover:no-underline'>
-                    <div className='flex min-w-0 flex-1 items-center gap-3 pr-3'>
-                      <VendorIcon vendor={vendor} />
-                      <div className='min-w-0 text-left'>
-                        <div className='truncate font-semibold'>
-                          {vendor.name || t('Unknown Vendor')}
-                        </div>
-                        <div className='text-muted-foreground text-xs'>
-                          {t('Models')} {vendor.models.length}
+              {summary.vendors.map((vendor) => {
+                const status = getMonitorStatus(vendor)
+                const score = clampScore(vendor.score)
+
+                return (
+                  <AccordionItem
+                    key={vendor.name}
+                    value={vendor.name}
+                    className='rounded-xl border px-4'
+                  >
+                    <AccordionTrigger className='py-3 hover:no-underline'>
+                      <div className='flex min-w-0 flex-1 items-center gap-3 pr-3'>
+                        <VendorIcon vendor={vendor} />
+                        <div className='min-w-0 text-left'>
+                          <div className='truncate font-semibold'>
+                            {vendor.name || t('Unknown Vendor')}
+                          </div>
+                          <div className='text-muted-foreground text-xs'>
+                            {t('Models')} {vendor.models.length}
+                            {' · '}
+                            {vendor.status_text}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <ScoreBadge score={vendor.score} />
-                  </AccordionTrigger>
-                  <AccordionContent className='pb-4'>
-                    <div className='grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3'>
-                      {vendor.models.map((model) => (
-                        <div
-                          key={model.model_name}
-                          className='rounded-lg border p-3'
-                        >
-                          <div className='flex items-start justify-between gap-3'>
-                            <div className='min-w-0'>
-                              <div className='truncate font-mono text-sm font-semibold'>
-                                {model.model_name}
-                              </div>
-                              <div className='text-muted-foreground mt-0.5 text-xs'>
-                                {t('Score')} {model.score}
-                              </div>
-                            </div>
-                            <ScoreBadge score={model.score} />
-                          </div>
-                          <div className='mt-3'>
-                            <ScoreBar score={model.score} />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              ))}
+                      <ScoreBadge score={score} status={status} />
+                    </AccordionTrigger>
+                    <AccordionContent className='pb-4'>
+                      <div className='grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3'>
+                        {vendor.models.map((model) => (
+                          <ModelScoreCard key={model.model_name} model={model} />
+                        ))}
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                )
+              })}
             </Accordion>
           </div>
         )}

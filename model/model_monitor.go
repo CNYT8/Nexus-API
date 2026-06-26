@@ -13,6 +13,7 @@ const (
 	modelMonitorWindowSeconds = 7 * 24 * 60 * 60
 	modelMonitorHotSeconds    = 3 * 24 * 60 * 60
 	modelMonitorCacheSeconds  = 60
+	modelMonitorSlowSeconds   = 30
 )
 
 type ModelMonitorModel struct {
@@ -56,12 +57,16 @@ var modelMonitorCache = struct {
 }{}
 
 type modelMonitorBucket struct {
-	weightedRequests float64
-	weightedSuccess  float64
-	weightedErrors   float64
-	weightedTokens   float64
-	weightedUseTime  float64
-	lastSeen         int64
+	weightedRequests         float64
+	weightedSuccess          float64
+	weightedErrors           float64
+	weightedPromptTokens     float64
+	weightedCompletionTokens float64
+	weightedTokens           float64
+	weightedUseTime          float64
+	weightedEmptyOutputs     float64
+	weightedSlowRequests     float64
+	lastSeen                 int64
 }
 
 func modelMonitorWeight(createdAt int64, now int64) float64 {
@@ -113,6 +118,85 @@ func clampModelMonitorScore(score float64) int {
 	return int(math.Round(score))
 }
 
+func clampModelMonitorRatio(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
+func modelMonitorSafeRatio(value float64, total float64) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return value / total
+}
+
+func modelMonitorLatencyScore(avgUseTime float64, slowRate float64) float64 {
+	if avgUseTime <= 0 {
+		return 72
+	}
+	if avgUseTime <= 2 {
+		return 100 * (1 - clampModelMonitorRatio(slowRate)*0.12)
+	}
+	if avgUseTime >= 45 {
+		return 15
+	}
+	score := 100 - ((avgUseTime-2)/43)*85
+	return math.Max(0, score-clampModelMonitorRatio(slowRate)*18)
+}
+
+func modelMonitorThroughputScore(completionTokens float64, useTime float64, hasSuccess bool) float64 {
+	if !hasSuccess {
+		return 0
+	}
+	if completionTokens <= 0 {
+		return 25
+	}
+	if useTime <= 0 {
+		return 70
+	}
+	tokensPerSecond := completionTokens / useTime
+	switch {
+	case tokensPerSecond >= 20:
+		return 100
+	case tokensPerSecond >= 10:
+		return 85
+	case tokensPerSecond >= 4:
+		return 65
+	case tokensPerSecond >= 1:
+		return 42
+	default:
+		return 25
+	}
+}
+
+func modelMonitorOutputBalanceScore(avgPromptTokens float64, avgCompletionTokens float64, hasSuccess bool) float64 {
+	if !hasSuccess {
+		return 0
+	}
+	if avgCompletionTokens <= 0 {
+		return 20
+	}
+	if avgPromptTokens <= 0 {
+		return 75
+	}
+	outputRatio := avgCompletionTokens / avgPromptTokens
+	switch {
+	case outputRatio >= 0.2:
+		return 100
+	case outputRatio >= 0.08:
+		return 85
+	case outputRatio >= 0.03:
+		return 65
+	default:
+		return 45
+	}
+}
+
 func modelMonitorStatus(score int, hasData bool) (string, string) {
 	if !hasData {
 		return "unknown", "未知状态"
@@ -134,23 +218,48 @@ func scoreModelMonitorBucket(bucket modelMonitorBucket) int {
 		return 1
 	}
 
-	successRate := bucket.weightedSuccess / bucket.weightedRequests
-	errorRate := bucket.weightedErrors / bucket.weightedRequests
-	avgTokens := bucket.weightedTokens / bucket.weightedRequests
-	avgUseTime := bucket.weightedUseTime / bucket.weightedRequests
+	hasSuccess := bucket.weightedSuccess > 0
+	successRate := clampModelMonitorRatio(modelMonitorSafeRatio(bucket.weightedSuccess, bucket.weightedRequests))
+	errorRate := clampModelMonitorRatio(modelMonitorSafeRatio(bucket.weightedErrors, bucket.weightedRequests))
+	emptyRate := clampModelMonitorRatio(modelMonitorSafeRatio(bucket.weightedEmptyOutputs, bucket.weightedSuccess))
+	slowRate := clampModelMonitorRatio(modelMonitorSafeRatio(bucket.weightedSlowRequests, bucket.weightedRequests))
+	avgUseTime := modelMonitorSafeRatio(bucket.weightedUseTime, bucket.weightedRequests)
+	avgPromptTokens := modelMonitorSafeRatio(bucket.weightedPromptTokens, bucket.weightedSuccess)
+	avgCompletionTokens := modelMonitorSafeRatio(bucket.weightedCompletionTokens, bucket.weightedSuccess)
 
-	tokenFactor := math.Log1p(avgTokens) / math.Log1p(32000)
-	if tokenFactor > 1 {
-		tokenFactor = 1
+	reliabilityScore := successRate * 100
+	emptyOutputScore := 100 * (1 - emptyRate)
+	if !hasSuccess {
+		emptyOutputScore = 0
 	}
-
-	latencyFactor := 1.0
-	if avgUseTime > 0 {
-		latencyFactor = 1 - math.Min(avgUseTime, 30)/30
+	latencyScore := modelMonitorLatencyScore(avgUseTime, slowRate)
+	throughputScore := modelMonitorThroughputScore(bucket.weightedCompletionTokens, bucket.weightedUseTime, hasSuccess)
+	outputBalanceScore := modelMonitorOutputBalanceScore(avgPromptTokens, avgCompletionTokens, hasSuccess)
+	tokenVolumeScore := 0.0
+	if hasSuccess {
+		tokenVolumeScore = math.Min(1, math.Log1p(avgCompletionTokens)/math.Log1p(800)) * 100
 	}
+	sampleScore := math.Min(1, math.Log1p(bucket.weightedRequests)/math.Log1p(40)) * 100
 
-	sampleFactor := math.Min(1, math.Log1p(bucket.weightedRequests)/math.Log1p(30))
-	score := 45 + successRate*34 - errorRate*38 + tokenFactor*11 + latencyFactor*8 + sampleFactor*6
+	score := reliabilityScore*0.32 +
+		emptyOutputScore*0.18 +
+		latencyScore*0.16 +
+		throughputScore*0.12 +
+		outputBalanceScore*0.10 +
+		tokenVolumeScore*0.06 +
+		sampleScore*0.06
+	if errorRate >= 0.8 {
+		score = math.Min(score, 42)
+	}
+	if emptyRate >= 0.7 {
+		score = math.Min(score, 50)
+	}
+	if hasSuccess && avgPromptTokens > 0 && avgCompletionTokens/avgPromptTokens < 0.02 {
+		score = math.Min(score, 72)
+	}
+	if hasSuccess && bucket.weightedCompletionTokens <= 0 {
+		score = math.Min(score, 52)
+	}
 	if bucket.weightedRequests < 2 {
 		score = math.Min(score, 68)
 	}
@@ -288,27 +397,43 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 		"SUM(" + weightSQL + ") AS weighted_requests, " +
 		"SUM(CASE WHEN type = ? THEN " + weightSQL + " ELSE 0 END) AS weighted_success, " +
 		"SUM(CASE WHEN type = ? THEN " + weightSQL + " ELSE 0 END) AS weighted_errors, " +
+		"SUM(CASE WHEN type = ? THEN prompt_tokens * (" + weightSQL + ") ELSE 0 END) AS weighted_prompt_tokens, " +
+		"SUM(CASE WHEN type = ? THEN completion_tokens * (" + weightSQL + ") ELSE 0 END) AS weighted_completion_tokens, " +
 		"SUM((prompt_tokens + completion_tokens) * (" + weightSQL + ")) AS weighted_tokens, " +
 		"SUM(use_time * (" + weightSQL + ")) AS weighted_use_time, " +
+		"SUM(CASE WHEN type = ? AND prompt_tokens > 0 AND completion_tokens <= 0 THEN " + weightSQL + " ELSE 0 END) AS weighted_empty_outputs, " +
+		"SUM(CASE WHEN use_time >= ? THEN " + weightSQL + " ELSE 0 END) AS weighted_slow_requests, " +
 		"MAX(created_at) AS last_seen"
 
-	selectArgs := make([]any, 0, 83)
+	selectArgs := make([]any, 0, 150)
 	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
 	selectArgs = append(selectArgs, LogTypeConsume)
 	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
 	selectArgs = append(selectArgs, LogTypeError)
 	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
+	selectArgs = append(selectArgs, LogTypeConsume)
 	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
+	selectArgs = append(selectArgs, LogTypeConsume)
+	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
+	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
+	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
+	selectArgs = append(selectArgs, LogTypeConsume)
+	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
+	selectArgs = append(selectArgs, modelMonitorSlowSeconds)
 	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
 
 	type row struct {
-		ModelName        string
-		WeightedRequests float64
-		WeightedSuccess  float64
-		WeightedErrors   float64
-		WeightedTokens   float64
-		WeightedUseTime  float64
-		LastSeen         int64
+		ModelName                string
+		WeightedRequests         float64
+		WeightedSuccess          float64
+		WeightedErrors           float64
+		WeightedPromptTokens     float64
+		WeightedCompletionTokens float64
+		WeightedTokens           float64
+		WeightedUseTime          float64
+		WeightedEmptyOutputs     float64
+		WeightedSlowRequests     float64
+		LastSeen                 int64
 	}
 
 	var rows []row
@@ -327,12 +452,16 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 			continue
 		}
 		buckets[modelName] = modelMonitorBucket{
-			weightedRequests: item.WeightedRequests,
-			weightedSuccess:  item.WeightedSuccess,
-			weightedErrors:   item.WeightedErrors,
-			weightedTokens:   item.WeightedTokens,
-			weightedUseTime:  item.WeightedUseTime,
-			lastSeen:         item.LastSeen,
+			weightedRequests:         item.WeightedRequests,
+			weightedSuccess:          item.WeightedSuccess,
+			weightedErrors:           item.WeightedErrors,
+			weightedPromptTokens:     item.WeightedPromptTokens,
+			weightedCompletionTokens: item.WeightedCompletionTokens,
+			weightedTokens:           item.WeightedTokens,
+			weightedUseTime:          item.WeightedUseTime,
+			weightedEmptyOutputs:     item.WeightedEmptyOutputs,
+			weightedSlowRequests:     item.WeightedSlowRequests,
+			lastSeen:                 item.LastSeen,
 		}
 	}
 

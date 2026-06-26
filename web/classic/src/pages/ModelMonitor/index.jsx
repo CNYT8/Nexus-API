@@ -84,6 +84,8 @@ const getItemStatus = (item) => {
 
 const getStatusMeta = (status) => STATUS_META[status] || STATUS_META.unknown;
 
+const clampScore = (score) => Math.min(100, Math.max(0, Number(score) || 0));
+
 const formatRefreshClock = (timestamp) => {
   if (!timestamp) {
     return '--:--';
@@ -112,12 +114,13 @@ const renderVendorIcon = (vendor) => {
 const ModelScoreBar = ({ model }) => {
   const hasData = model.has_data !== false && getItemStatus(model) !== 'unknown';
   const meta = getStatusMeta(getItemStatus(model));
+  const score = hasData ? clampScore(model.score) : 0;
 
   return (
     <div className='flex min-w-[138px] items-center justify-end gap-2'>
       <div className='w-[92px]'>
         <Progress
-          percent={hasData ? model.score : 0}
+          percent={score}
           stroke={meta.progressColor}
           showInfo={false}
           style={{ margin: 0 }}
@@ -128,7 +131,7 @@ const ModelScoreBar = ({ model }) => {
         size='small'
         className='inline-block w-8 text-right'
       >
-        {hasData ? model.score : '-'}
+        {hasData ? score : '-'}
       </Text>
     </div>
   );
@@ -310,9 +313,14 @@ const ModelMonitor = () => {
         <Text type='secondary' size='small'>
           {t('未知')} {summary.unknown_count}
         </Text>
-        <Text type='tertiary' size='small'>
-          {t('每1分钟动态更新数据')} {formatRefreshClock(nextRefreshAt)}
-        </Text>
+        <Space spacing={4} wrap>
+          <Text type='tertiary' size='small'>
+            {t('每1分钟动态更新数据')}
+          </Text>
+          <Text type='tertiary' size='small' className='text-xs'>
+            {t('下次更新时间:')} {formatRefreshClock(nextRefreshAt)}
+          </Text>
+        </Space>
       </Space>
     </div>
   );

@@ -26,32 +26,62 @@ func TestModelMonitorWeight(t *testing.T) {
 
 func TestScoreModelMonitorBucket(t *testing.T) {
 	healthy := modelMonitorBucket{
-		weightedRequests: 10,
-		weightedSuccess:  10,
-		weightedTokens:   10000,
-		weightedUseTime:  20,
+		weightedRequests:         10,
+		weightedSuccess:          10,
+		weightedPromptTokens:     6000,
+		weightedCompletionTokens: 4000,
+		weightedTokens:           10000,
+		weightedUseTime:          20,
 	}
 	if score := scoreModelMonitorBucket(healthy); score < 85 {
 		t.Fatalf("healthy score = %d, want >= 85", score)
 	}
 
 	poor := modelMonitorBucket{
-		weightedRequests: 10,
-		weightedErrors:   10,
-		weightedUseTime:  200,
+		weightedRequests:     10,
+		weightedErrors:       10,
+		weightedUseTime:      200,
+		weightedSlowRequests: 10,
 	}
 	if score := scoreModelMonitorBucket(poor); score >= 45 {
 		t.Fatalf("poor score = %d, want < 45", score)
 	}
 
 	lowSample := modelMonitorBucket{
-		weightedRequests: 1,
-		weightedSuccess:  1,
-		weightedTokens:   10000,
-		weightedUseTime:  1,
+		weightedRequests:         1,
+		weightedSuccess:          1,
+		weightedPromptTokens:     600,
+		weightedCompletionTokens: 400,
+		weightedTokens:           1000,
+		weightedUseTime:          1,
 	}
 	if score := scoreModelMonitorBucket(lowSample); score > 68 {
 		t.Fatalf("low sample score = %d, want <= 68", score)
+	}
+
+	emptyOutput := modelMonitorBucket{
+		weightedRequests:     8,
+		weightedSuccess:      8,
+		weightedPromptTokens: 8000,
+		weightedTokens:       8000,
+		weightedUseTime:      16,
+		weightedEmptyOutputs: 8,
+	}
+	if score := scoreModelMonitorBucket(emptyOutput); score >= 55 {
+		t.Fatalf("empty output score = %d, want < 55", score)
+	}
+
+	thinOutput := modelMonitorBucket{
+		weightedRequests:         10,
+		weightedSuccess:          10,
+		weightedPromptTokens:     10000,
+		weightedCompletionTokens: 80,
+		weightedTokens:           10080,
+		weightedUseTime:          60,
+		weightedSlowRequests:     3,
+	}
+	if score := scoreModelMonitorBucket(thinOutput); score >= 75 {
+		t.Fatalf("thin output score = %d, want < 75", score)
 	}
 }
 
@@ -73,6 +103,14 @@ func TestGetModelMonitorSummaryAggregatesRecentLogs(t *testing.T) {
 		UseTime:          2,
 	}).Error)
 	require.NoError(t, LOG_DB.Create(&Log{
+		CreatedAt:        now - 90,
+		Type:             LogTypeConsume,
+		ModelName:        "gpt-empty-monitor-test",
+		PromptTokens:     800,
+		CompletionTokens: 0,
+		UseTime:          3,
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
 		CreatedAt: now - 120,
 		Type:      LogTypeError,
 		ModelName: "gpt-monitor-test",
@@ -89,16 +127,25 @@ func TestGetModelMonitorSummaryAggregatesRecentLogs(t *testing.T) {
 
 	summary, err := GetModelMonitorSummary()
 	require.NoError(t, err)
-	require.Equal(t, 1, summary.ModelCount)
+	require.Equal(t, 2, summary.ModelCount)
 	require.Equal(t, 1, summary.VendorCount)
 	require.Len(t, summary.Vendors, 1)
 	require.Equal(t, "OpenAI", summary.Vendors[0].Name)
-	require.Len(t, summary.Vendors[0].Models, 1)
-	require.Equal(t, "gpt-monitor-test", summary.Vendors[0].Models[0].ModelName)
-	require.True(t, summary.Vendors[0].Models[0].HasData)
-	require.NotEqual(t, "unknown", summary.Vendors[0].Models[0].Status)
-	require.GreaterOrEqual(t, summary.Vendors[0].Models[0].Score, 1)
-	require.LessOrEqual(t, summary.Vendors[0].Models[0].Score, 100)
+	require.Len(t, summary.Vendors[0].Models, 2)
+
+	models := make(map[string]ModelMonitorModel)
+	for _, item := range summary.Vendors[0].Models {
+		models[item.ModelName] = item
+	}
+	normalModel := models["gpt-monitor-test"]
+	emptyModel := models["gpt-empty-monitor-test"]
+	require.True(t, normalModel.HasData)
+	require.True(t, emptyModel.HasData)
+	require.NotEqual(t, "unknown", normalModel.Status)
+	require.NotEqual(t, "unknown", emptyModel.Status)
+	require.GreaterOrEqual(t, normalModel.Score, 1)
+	require.LessOrEqual(t, normalModel.Score, 100)
+	require.Less(t, emptyModel.Score, normalModel.Score)
 }
 
 func TestGetModelMonitorSummaryIncludesUnknownEnabledModels(t *testing.T) {
