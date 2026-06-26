@@ -27,6 +27,7 @@ export const modelsQueryKeys = {
   list: (filters: GetModelsParams | SearchModelsParams) =>
     [...modelsQueryKeys.lists(), filters] as const,
   detail: (id: number) => [...modelsQueryKeys.all, 'detail', id] as const,
+  tags: () => [...modelsQueryKeys.all, 'tags'] as const,
   missing: () => [...modelsQueryKeys.all, 'missing'] as const,
 }
 

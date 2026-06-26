@@ -119,34 +119,48 @@ function LegalLinks(props: { leadingSeparator?: boolean }) {
 function ProjectAttribution(props: { currentYear: number; inline?: boolean }) {
   const { t } = useTranslation()
   const content = (
-    <span className='text-muted-foreground/45'>
-      &copy; {props.currentYear}{' '}
-      <a
-        href='https://github.com/CNYT8/Nexus-API'
-        target='_blank'
-        rel='noopener noreferrer'
-        className='text-foreground/70 hover:text-foreground font-medium transition-colors'
-      >
-        {t('Nexus-API')}
-      </a>{' '}
-      {t('is a modified downstream project based on')}{' '}
-      <a
-        href='https://github.com/QuantumNous/new-api'
-        target='_blank'
-        rel='noopener noreferrer'
-        className='text-foreground/70 hover:text-foreground font-medium transition-colors'
-      >
-        {t('New API')}
-      </a>
-      <br />
-      {t('Frontend design and development by New API contributors.')}
-    </span>
+    <div className='grid w-full grid-cols-1 items-center gap-2 text-center text-[13px] sm:grid-cols-3'>
+      <span className='text-muted-foreground/45 sm:text-left'>
+        &copy; {props.currentYear} {t('Nexus-API')}. {t('All rights reserved.')}
+      </span>
+      <span className='text-muted-foreground/55'>
+        {t('Nexus-API maintenance team')}:
+        <a
+          href='https://dawncloudapi.xyz'
+          target='_blank'
+          rel='noopener noreferrer'
+          className='text-foreground/70 hover:text-foreground ml-1 font-medium transition-colors'
+        >
+          DawnRouter
+        </a>
+      </span>
+      <span className='text-muted-foreground/55 sm:text-right'>
+        | {t('Designed and Developed by')}{' '}
+        <a
+          href='https://github.com/QuantumNous/new-api'
+          target='_blank'
+          rel='noopener noreferrer'
+          className='text-foreground/70 hover:text-foreground font-medium transition-colors'
+        >
+          {t('New API')}
+        </a>
+        {' & '}
+        <a
+          href='https://github.com/CNYT8/Nexus-API'
+          target='_blank'
+          rel='noopener noreferrer'
+          className='text-foreground/70 hover:text-foreground font-medium transition-colors'
+        >
+          {t('Nexus-API')}
+        </a>
+      </span>
+    </div>
   )
   if (props.inline) {
     return content
   }
   return (
-    <div className='text-muted-foreground/45 text-center text-xs sm:text-right'>
+    <div className='w-full'>
       {content}
     </div>
   )
@@ -239,7 +253,7 @@ export function Footer(props: FooterProps) {
               className='custom-footer text-muted-foreground min-w-0 text-center text-sm sm:text-left'
               dangerouslySetInnerHTML={{ __html: footerHtml }}
             />
-            <div className='border-border/60 text-muted-foreground/45 flex w-full flex-wrap items-center justify-center gap-x-3 gap-y-1 border-t pt-4 text-xs sm:w-auto sm:justify-end sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5'>
+            <div className='border-border/60 text-muted-foreground/45 flex w-full flex-col items-center justify-center gap-2 border-t pt-4 text-xs sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5'>
               <LegalLinks />
               <ProjectAttribution currentYear={currentYear} inline />
             </div>
@@ -293,14 +307,8 @@ export function Footer(props: FooterProps) {
           )}
         </div>
 
-        {/* Copyright + optional legal links inline on the left, project
-            attribution on the right; wraps on narrow screens. */}
-        <div className='border-border/30 mt-12 flex flex-col items-center justify-between gap-x-3 gap-y-2 border-t pt-6 sm:flex-row'>
+        <div className='border-border/30 mt-12 flex flex-col items-center gap-3 border-t pt-6'>
           <div className='text-muted-foreground/40 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs sm:justify-start'>
-            <span>
-              &copy; {currentYear} {displayName}.{' '}
-              {props.copyright ?? t('footer.defaultCopyright')}
-            </span>
             <LegalLinks leadingSeparator />
           </div>
           <ProjectAttribution currentYear={currentYear} />

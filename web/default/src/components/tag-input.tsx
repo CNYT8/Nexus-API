@@ -26,6 +26,9 @@ import { Button } from '@/components/ui/button'
 interface TagInputProps {
   value: string[]
   onChange: (tags: string[]) => void
+  inputValue?: string
+  onInputValueChange?: (value: string) => void
+  shouldAddTag?: (tag: string) => boolean
   placeholder?: string
   className?: string
   disabled?: boolean
@@ -34,18 +37,32 @@ interface TagInputProps {
 export function TagInput({
   value = [],
   onChange,
+  inputValue: controlledInputValue,
+  onInputValueChange,
+  shouldAddTag,
   placeholder,
   className,
   disabled = false,
 }: TagInputProps) {
   const { t } = useTranslation()
   const placeholderText = placeholder ?? t('Add tags...')
-  const [inputValue, setInputValue] = useState('')
+  const [uncontrolledInputValue, setUncontrolledInputValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const inputValue = controlledInputValue ?? uncontrolledInputValue
+  const setInputValue = (nextValue: string) => {
+    if (controlledInputValue === undefined) {
+      setUncontrolledInputValue(nextValue)
+    }
+    onInputValueChange?.(nextValue)
+  }
 
   const addTag = (tag: string) => {
     const trimmed = tag.trim()
-    if (trimmed && !value.includes(trimmed)) {
+    if (
+      trimmed &&
+      (shouldAddTag?.(trimmed) ?? true) &&
+      !value.includes(trimmed)
+    ) {
       onChange([...value, trimmed])
       setInputValue('')
     }

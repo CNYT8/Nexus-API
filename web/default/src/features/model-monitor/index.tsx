@@ -50,7 +50,7 @@ const statusClassName: Record<ModelMonitorStatus, string> = {
     'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
   good: 'border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300',
   unstable:
-    'border-rose-400/20 bg-rose-400/10 text-rose-600 dark:text-rose-300',
+    'border-rose-600/30 bg-rose-500/15 text-rose-700 dark:text-rose-300',
   poor: 'border-red-600/20 bg-red-600/10 text-red-700 dark:text-red-300',
   unknown:
     'border-muted bg-muted/40 text-muted-foreground dark:text-muted-foreground',
@@ -59,9 +59,19 @@ const statusClassName: Record<ModelMonitorStatus, string> = {
 const barClassName: Record<ModelMonitorStatus, string> = {
   excellent: 'bg-emerald-500',
   good: 'bg-amber-500',
-  unstable: 'bg-rose-400',
+  unstable: 'bg-rose-600 dark:bg-rose-500',
   poor: 'bg-red-600',
   unknown: 'bg-muted-foreground/30',
+}
+
+const cardClassName: Record<ModelMonitorStatus, string> = {
+  excellent:
+    'border-emerald-500/30 border-l-4 bg-emerald-500/[0.06] dark:bg-emerald-500/[0.08]',
+  good: 'border-amber-500/35 border-l-4 bg-amber-500/[0.07] dark:bg-amber-500/[0.08]',
+  unstable:
+    'border-rose-600/35 border-l-4 bg-rose-500/[0.07] dark:bg-rose-500/[0.09]',
+  poor: 'border-red-600/45 border-l-4 bg-red-600/[0.08] dark:bg-red-600/[0.1]',
+  unknown: 'border-border bg-transparent',
 }
 
 function clampScore(score: number): number {
@@ -111,7 +121,7 @@ function ScoreBar(props: { score: number; status?: ModelMonitorStatus }) {
   const status = props.status || getScoreStatus(score)
   return (
     <div
-      className='bg-muted h-1.5 overflow-hidden rounded-full'
+      className='bg-muted h-2.5 overflow-hidden rounded-full'
       aria-label='model monitor score'
     >
       <div
@@ -127,7 +137,7 @@ function ModelScoreCard(props: { model: ModelMonitorModel }) {
   const score = clampScore(props.model.score)
 
   return (
-    <div className='rounded-lg border p-3'>
+    <div className={cn('rounded-lg border p-3', cardClassName[status])}>
       <div className='flex items-start justify-between gap-3'>
         <div className='min-w-0'>
           <div className='truncate font-mono text-sm font-semibold'>
@@ -248,7 +258,7 @@ export function ModelMonitor() {
                 </Badge>
                 <span className='text-muted-foreground flex items-center gap-1 text-xs'>
                   <span>{t('每1分钟动态更新数据')}</span>
-                  <span>
+                  <span className='text-[11.5px] leading-5'>
                     {t('下次更新时间:')} {formatRefreshClock(nextRefreshAt)}
                   </span>
                 </span>

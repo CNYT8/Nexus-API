@@ -29,6 +29,7 @@ import type {
   SyncUpstreamResponse,
   PreviewUpstreamDiffResponse,
   MissingModelsResponse,
+  ModelTagsResponse,
   PrefillGroupsResponse,
   SyncLocale,
   SyncSource,
@@ -235,6 +236,14 @@ export async function applyUpstreamOverwrite(params: {
  */
 export async function getMissingModels(): Promise<MissingModelsResponse> {
   const res = await api.get('/api/models/missing')
+  return res.data
+}
+
+/**
+ * Get tags used by configured models
+ */
+export async function getModelTags(): Promise<ModelTagsResponse> {
+  const res = await api.get('/api/models/tags')
   return res.data
 }
 

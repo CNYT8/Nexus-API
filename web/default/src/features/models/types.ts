@@ -211,6 +211,12 @@ export interface MissingModelsResponse {
   data?: string[]
 }
 
+export interface ModelTagsResponse {
+  success: boolean
+  message?: string
+  data?: string[]
+}
+
 /**
  * Prefill groups response
  */

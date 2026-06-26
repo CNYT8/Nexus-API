@@ -1,6 +1,7 @@
 package model
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 
@@ -108,6 +109,31 @@ func GetAllModels(offset int, limit int) ([]*Model, error) {
 	var models []*Model
 	err := DB.Order("id DESC").Offset(offset).Limit(limit).Find(&models).Error
 	return models, err
+}
+
+func GetAllModelTags() ([]string, error) {
+	var rows []string
+	if err := DB.Model(&Model{}).Where("tags IS NOT NULL AND tags <> ?", "").Pluck("tags", &rows).Error; err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]struct{})
+	tags := make([]string, 0)
+	for _, row := range rows {
+		for _, tag := range strings.Split(row, ",") {
+			tag = strings.TrimSpace(tag)
+			if tag == "" {
+				continue
+			}
+			if _, ok := seen[tag]; ok {
+				continue
+			}
+			seen[tag] = struct{}{}
+			tags = append(tags, tag)
+		}
+	}
+	sort.Strings(tags)
+	return tags, nil
 }
 
 func GetBoundChannelsByModelsMap(modelNames []string) (map[string][]BoundChannel, error) {

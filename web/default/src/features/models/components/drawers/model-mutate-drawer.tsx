@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Select,
@@ -79,7 +80,13 @@ import { useUpdateOption } from '@/features/system-settings/hooks/use-update-opt
 import { normalizeJsonString } from '@/features/system-settings/models/utils'
 import type { ModelSettings } from '@/features/system-settings/types'
 import { safeJsonParse } from '@/features/system-settings/utils/json-parser'
-import { createModel, updateModel, getModel, getVendors } from '../../api'
+import {
+  createModel,
+  updateModel,
+  getModel,
+  getVendors,
+  getModelTags,
+} from '../../api'
 import { getNameRuleOptions, ENDPOINT_TEMPLATES } from '../../constants'
 import { modelsQueryKeys, vendorsQueryKeys, parseModelTags } from '../../lib'
 import type { Model } from '../../types'
@@ -104,6 +111,11 @@ const extendedModelFormSchema = z.object({
   audioRatio: z.string().optional(),
   audioCompletionRatio: z.string().optional(),
 })
+
+function getMentionKeyword(value: string): string | null {
+  if (!value.includes('@')) return null
+  return value.slice(value.lastIndexOf('@') + 1).trim().toLowerCase()
+}
 
 type ExtendedModelFormValues = z.infer<typeof extendedModelFormSchema>
 
@@ -131,6 +143,7 @@ export function ModelMutateDrawer({
   const [promptPrice, setPromptPrice] = useState('')
   const [completionPrice, setCompletionPrice] = useState('')
   const [oldModelName, setOldModelName] = useState<string>('')
+  const [tagInputValue, setTagInputValue] = useState('')
 
   // Fetch vendors for dropdown
   const { data: vendorsData } = useQuery({
@@ -140,6 +153,17 @@ export function ModelMutateDrawer({
   })
 
   const vendors = vendorsData?.data?.items || []
+
+  const { data: modelTagsData } = useQuery({
+    queryKey: modelsQueryKeys.tags(),
+    queryFn: getModelTags,
+    enabled: open,
+  })
+
+  const modelTagOptions = useMemo(
+    () => modelTagsData?.data || [],
+    [modelTagsData]
+  )
 
   // Fetch model detail if editing
   const { data: modelData } = useQuery({
@@ -392,6 +416,39 @@ export function ModelMutateDrawer({
     }
   }, [open, isEditing, modelData, currentRow, form, modelSettings])
 
+  useEffect(() => {
+    if (!open) {
+      setTagInputValue('')
+    }
+  }, [open])
+
+  const getTagSuggestions = useCallback(
+    (currentTags: string[] = []) => {
+      const keyword = getMentionKeyword(tagInputValue)
+      if (keyword === null) return []
+      const current = new Set(currentTags)
+      return modelTagOptions
+        .filter((tag) => {
+          const normalized = tag.trim()
+          if (!normalized || current.has(normalized)) return false
+          return normalized.toLowerCase().includes(keyword)
+        })
+        .slice(0, 20)
+    },
+    [modelTagOptions, tagInputValue]
+  )
+
+  const appendTags = useCallback(
+    (tags: string[]) => {
+      const currentTags = form.getValues('tags') || []
+      form.setValue('tags', Array.from(new Set([...currentTags, ...tags])), {
+        shouldDirty: true,
+      })
+      setTagInputValue('')
+    },
+    [form]
+  )
+
   const onSubmit = useCallback(
     async (values: ExtendedModelFormValues): Promise<void> => {
       setIsSubmitting(true)
@@ -602,6 +659,7 @@ export function ModelMutateDrawer({
               : 'Model created successfully'
           )
           queryClient.invalidateQueries({ queryKey: modelsQueryKeys.lists() })
+          queryClient.invalidateQueries({ queryKey: modelsQueryKeys.tags() })
           queryClient.invalidateQueries({ queryKey: ['system-options'] })
           onOpenChange(false)
         } else {
@@ -765,22 +823,53 @@ export function ModelMutateDrawer({
               <FormField
                 control={form.control}
                 name='tags'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Tags')}</FormLabel>
-                    <FormControl>
-                      <TagInput
-                        value={field.value || []}
-                        onChange={field.onChange}
-                        placeholder={t('Add tags...')}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t('Press Enter or comma to add tags')}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
+                render={({ field }) => {
+                  const tagSuggestions = getTagSuggestions(field.value || [])
+
+                  return (
+                    <FormItem>
+                      <FormLabel>{t('Tags')}</FormLabel>
+                      <FormControl>
+                        <TagInput
+                          value={field.value || []}
+                          onChange={(tags) => {
+                            field.onChange(tags)
+                            setTagInputValue('')
+                          }}
+                          inputValue={tagInputValue}
+                          onInputValueChange={setTagInputValue}
+                          shouldAddTag={(tag) => !tag.startsWith('@')}
+                          placeholder={t('Add tags...')}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t('Press Enter or comma to add tags')}
+                        {' · '}
+                        {t('Enter @ to reference tags used by all models')}
+                      </FormDescription>
+                      {tagSuggestions.length > 0 && (
+                        <div className='flex flex-wrap items-center gap-1.5'>
+                          <Badge variant='outline' className='h-6 rounded-md'>
+                            {t('Reference existing tags')}
+                          </Badge>
+                          {tagSuggestions.map((tag) => (
+                            <Button
+                              key={tag}
+                              type='button'
+                              variant='secondary'
+                              size='xs'
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => appendTags([tag])}
+                            >
+                              {tag}
+                            </Button>
+                          ))}
+                        </div>
+                      )}
+                      <FormMessage />
+                    </FormItem>
+                  )
+                }}
               />
             </SideDrawerSection>
 

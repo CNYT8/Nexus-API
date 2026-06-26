@@ -38,6 +38,11 @@ import {
 import { Plus, Edit, Trash2, Save, Settings } from 'lucide-react';
 import { API, showError, showSuccess } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
+import NexusApiPresetIcon, {
+  NEXUS_HK_CLOUDFLARE_LABEL,
+  NEXUS_HK_CLOUDFLARE_PRESET,
+  isNexusHongKongCloudflarePreset,
+} from '../../../components/common/NexusApiPresetIcon';
 
 const { Text } = Typography;
 
@@ -82,7 +87,28 @@ const SettingsAPIInfo = ({ options, refresh }) => {
     { value: 'indigo', label: 'indigo' },
     { value: 'violet', label: 'violet' },
     { value: 'grey', label: 'grey' },
+    {
+      value: NEXUS_HK_CLOUDFLARE_PRESET,
+      label: NEXUS_HK_CLOUDFLARE_LABEL,
+      preset: true,
+    },
   ];
+
+  const renderColorMark = (color, size = 18) =>
+    isNexusHongKongCloudflarePreset(color) ? (
+      <NexusApiPresetIcon size={size} />
+    ) : (
+      <Avatar size='extra-extra-small' color={color} />
+    );
+
+  const renderApiRouteMark = (api) =>
+    isNexusHongKongCloudflarePreset(api.color) ? (
+      <NexusApiPresetIcon size={30} />
+    ) : (
+      <Avatar size='extra-small' color={api.color}>
+        {api.route.substring(0, 2)}
+      </Avatar>
+    );
 
   const updateOption = async (key, value) => {
     const res = await API.put('/api/option/', {
@@ -247,7 +273,15 @@ const SettingsAPIInfo = ({ options, refresh }) => {
       title: t('API地址'),
       dataIndex: 'url',
       render: (text, record) => (
-        <Tag color={record.color} shape='circle' style={{ maxWidth: '280px' }}>
+        <Tag
+          color={
+            isNexusHongKongCloudflarePreset(record.color)
+              ? 'orange'
+              : record.color
+          }
+          shape='circle'
+          style={{ maxWidth: '280px' }}
+        >
           {text}
         </Tag>
       ),
@@ -255,7 +289,12 @@ const SettingsAPIInfo = ({ options, refresh }) => {
     {
       title: t('线路描述'),
       dataIndex: 'route',
-      render: (text, record) => <Tag shape='circle'>{text}</Tag>,
+      render: (text, record) => (
+        <div className='flex items-center gap-2'>
+          {renderApiRouteMark(record)}
+          <Tag shape='circle'>{text}</Tag>
+        </div>
+      ),
     },
     {
       title: t('说明'),
@@ -266,7 +305,7 @@ const SettingsAPIInfo = ({ options, refresh }) => {
     {
       title: t('颜色'),
       dataIndex: 'color',
-      render: (color) => <Avatar size='extra-extra-small' color={color} />,
+      render: (color) => renderColorMark(color),
     },
     {
       title: t('操作'),
@@ -481,7 +520,7 @@ const SettingsAPIInfo = ({ options, refresh }) => {
             onChange={(value) => setApiForm({ ...apiForm, color: value })}
             render={(option) => (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Avatar size='extra-extra-small' color={option.value} />
+                {renderColorMark(option.value)}
                 {option.label}
               </div>
             )}

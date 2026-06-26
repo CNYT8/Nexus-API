@@ -59,6 +59,26 @@ const nameRuleOptions = [
   { label: '后缀名称匹配', value: 3 },
 ];
 
+const normalizeTags = (tags) => {
+  if (!Array.isArray(tags)) return [];
+  return [
+    ...new Set(
+      tags.flatMap((tag) =>
+        String(tag)
+          .split(',')
+          .map((t) => t.trim())
+          .filter((t) => t && !t.startsWith('@')),
+      ),
+    ),
+  ];
+};
+
+const getMentionKeyword = (value) => {
+  if (!value || !value.includes('@')) return null;
+  const keyword = value.slice(value.lastIndexOf('@') + 1).trim().toLowerCase();
+  return keyword;
+};
+
 const EditModelModal = (props) => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
@@ -73,6 +93,8 @@ const EditModelModal = (props) => {
   // 预填组（标签、端点）
   const [tagGroups, setTagGroups] = useState([]);
   const [endpointGroups, setEndpointGroups] = useState([]);
+  const [modelTagOptions, setModelTagOptions] = useState([]);
+  const [tagInputValue, setTagInputValue] = useState('');
 
   // 获取供应商列表
   const fetchVendors = async () => {
@@ -105,10 +127,22 @@ const EditModelModal = (props) => {
     }
   };
 
+  const fetchModelTags = async () => {
+    try {
+      const res = await API.get('/api/models/tags');
+      if (res.data.success) {
+        setModelTagOptions(Array.isArray(res.data.data) ? res.data.data : []);
+      }
+    } catch (error) {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     if (props.visiable) {
       fetchVendors();
       fetchPrefillGroups();
+      fetchModelTags();
     }
   }, [props.visiable]);
 
@@ -186,8 +220,77 @@ const EditModelModal = (props) => {
       }
     } else {
       formApiRef.current?.reset();
+      setTagInputValue('');
     }
   }, [props.visiable, props.editingModel?.id, props.editingModel?.model_name]);
+
+  const getTagSuggestions = (currentTags) => {
+    const keyword = getMentionKeyword(tagInputValue);
+    if (keyword === null) return [];
+    const current = new Set(normalizeTags(currentTags));
+    return modelTagOptions
+      .filter((tag) => {
+        const normalized = String(tag).trim();
+        if (!normalized || current.has(normalized)) return false;
+        return normalized.toLowerCase().includes(keyword);
+      })
+      .slice(0, 20);
+  };
+
+  const appendTags = (tags) => {
+    if (!formApiRef.current) return;
+    const incomingTags = Array.isArray(tags) ? tags : [tags];
+    const currentTags = formApiRef.current.getValue('tags') || [];
+    formApiRef.current.setValue(
+      'tags',
+      normalizeTags([...currentTags, ...incomingTags]),
+    );
+    setTagInputValue('');
+  };
+
+  const renderTagExtra = (currentTags) => {
+    const suggestions = getTagSuggestions(currentTags);
+    return (
+      <Space vertical align='start' spacing='tight' style={{ width: '100%' }}>
+        <Text type='tertiary' size='small'>
+          {t('输入 @ 可引用所有模型已使用标签')}
+        </Text>
+        {suggestions.length > 0 && (
+          <Space wrap>
+            <Text type='secondary' size='small'>
+              {t('引用已有标签')}
+            </Text>
+            {suggestions.map((tag) => (
+              <Button
+                key={tag}
+                size='small'
+                type='tertiary'
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => appendTags([tag])}
+              >
+                {tag}
+              </Button>
+            ))}
+          </Space>
+        )}
+        {tagGroups.length > 0 && (
+          <Space wrap>
+            {tagGroups.map((group) => (
+              <Button
+                key={group.id}
+                size='small'
+                type='primary'
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => appendTags(group.items || [])}
+              >
+                {group.name}
+              </Button>
+            ))}
+          </Space>
+        )}
+      </Space>
+    );
+  };
 
   const submit = async (values) => {
     setLoading(true);
@@ -372,55 +475,16 @@ const EditModelModal = (props) => {
                       placeholder={t('输入标签或使用","分隔多个标签')}
                       addOnBlur
                       showClear
+                      inputValue={tagInputValue}
+                      onInputChange={(value) => setTagInputValue(value || '')}
                       onChange={(newTags) => {
                         if (!formApiRef.current) return;
-                        const normalize = (tags) => {
-                          if (!Array.isArray(tags)) return [];
-                          return [
-                            ...new Set(
-                              tags.flatMap((tag) =>
-                                tag
-                                  .split(',')
-                                  .map((t) => t.trim())
-                                  .filter(Boolean),
-                              ),
-                            ),
-                          ];
-                        };
-                        const normalized = normalize(newTags);
+                        const normalized = normalizeTags(newTags);
                         formApiRef.current.setValue('tags', normalized);
+                        setTagInputValue('');
                       }}
                       style={{ width: '100%' }}
-                      {...(tagGroups.length > 0 && {
-                        extraText: (
-                          <Space wrap>
-                            {tagGroups.map((group) => (
-                              <Button
-                                key={group.id}
-                                size='small'
-                                type='primary'
-                                onClick={() => {
-                                  if (formApiRef.current) {
-                                    const currentTags =
-                                      formApiRef.current.getValue('tags') || [];
-                                    const newTags = [
-                                      ...currentTags,
-                                      ...(group.items || []),
-                                    ];
-                                    const uniqueTags = [...new Set(newTags)];
-                                    formApiRef.current.setValue(
-                                      'tags',
-                                      uniqueTags,
-                                    );
-                                  }
-                                }}
-                              >
-                                {group.name}
-                              </Button>
-                            ))}
-                          </Space>
-                        ),
-                      })}
+                      extraText={renderTagExtra(values.tags)}
                     />
                   </Col>
                   <Col span={24}>

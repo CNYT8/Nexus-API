@@ -44,26 +44,36 @@ const STATUS_META = {
   excellent: {
     tagColor: 'green',
     progressColor: 'var(--semi-color-success)',
+    panelColor: 'rgba(var(--semi-green-5), 0.08)',
+    panelBorderColor: 'rgba(var(--semi-green-5), 0.36)',
     fallbackText: '优秀',
   },
   good: {
     tagColor: 'yellow',
     progressColor: 'var(--semi-color-warning)',
+    panelColor: 'rgba(var(--semi-yellow-5), 0.1)',
+    panelBorderColor: 'rgba(var(--semi-yellow-5), 0.38)',
     fallbackText: '良好',
   },
   unstable: {
     tagColor: 'pink',
-    progressColor: 'var(--semi-color-danger-light-default)',
+    progressColor: '#f43f5e',
+    panelColor: 'rgba(244, 63, 94, 0.08)',
+    panelBorderColor: 'rgba(244, 63, 94, 0.42)',
     fallbackText: '不稳定',
   },
   poor: {
     tagColor: 'red',
     progressColor: 'var(--semi-color-danger)',
+    panelColor: 'rgba(var(--semi-red-5), 0.1)',
+    panelBorderColor: 'rgba(var(--semi-red-5), 0.5)',
     fallbackText: '体验较差',
   },
   unknown: {
     tagColor: 'grey',
     progressColor: 'var(--semi-color-fill-2)',
+    panelColor: 'transparent',
+    panelBorderColor: 'var(--semi-color-border)',
     fallbackText: '未知状态',
   },
 };
@@ -122,6 +132,7 @@ const ModelScoreBar = ({ model }) => {
         <Progress
           percent={score}
           stroke={meta.progressColor}
+          strokeWidth={8}
           showInfo={false}
           style={{ margin: 0 }}
         />
@@ -143,8 +154,13 @@ const ModelRow = ({ model, t }) => {
 
   return (
     <div
-      className='flex flex-col gap-2 border-t py-2 first:border-t-0 md:flex-row md:items-center md:justify-between'
-      style={{ borderColor: 'var(--semi-color-border)' }}
+      className='my-1 flex flex-col gap-2 rounded-md border py-2 pl-3 pr-2 md:flex-row md:items-center md:justify-between'
+      style={{
+        backgroundColor: meta.panelColor,
+        borderColor: meta.panelBorderColor,
+        borderLeftColor: meta.progressColor,
+        borderLeftWidth: status === 'unknown' ? 1 : 3,
+      }}
     >
       <div className='min-w-0'>
         <Text className='block truncate'>{model.model_name}</Text>
@@ -317,7 +333,11 @@ const ModelMonitor = () => {
           <Text type='tertiary' size='small'>
             {t('每1分钟动态更新数据')}
           </Text>
-          <Text type='tertiary' size='small' className='text-xs'>
+          <Text
+            type='tertiary'
+            size='small'
+            style={{ fontSize: 11.5, lineHeight: 1.25 }}
+          >
             {t('下次更新时间:')} {formatRefreshClock(nextRefreshAt)}
           </Text>
         </Space>

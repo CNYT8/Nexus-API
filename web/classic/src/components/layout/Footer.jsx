@@ -39,6 +39,42 @@ const FooterBar = () => {
   };
 
   const currentYear = new Date().getFullYear();
+  const maintenanceTeam = useMemo(() => (
+    <span className='!text-semi-color-text-2 text-[13px]'>
+      {t('Nexus-API维护团队')}:
+      <a
+        href='https://dawncloudapi.xyz'
+        target='_blank'
+        rel='noopener noreferrer'
+        className='!text-semi-color-primary font-medium ml-1'
+      >
+        DawnRouter
+      </a>
+    </span>
+  ), [t]);
+  const designCredit = useMemo(() => (
+    <span className='!text-semi-color-text-3 text-[13px]'>
+      {'| '}
+      {t('设计与开发')}{' '}
+      <a
+        href='https://github.com/QuantumNous/new-api'
+        target='_blank'
+        rel='noopener noreferrer'
+        className='!text-semi-color-primary'
+      >
+        New API
+      </a>
+      {' & '}
+      <a
+        href='https://github.com/CNYT8/Nexus-API'
+        target='_blank'
+        rel='noopener noreferrer'
+        className='!text-semi-color-primary'
+      >
+        Nexus-API
+      </a>
+    </span>
+  ), [t]);
 
   const customFooter = useMemo(
     () => (
@@ -188,52 +224,30 @@ const FooterBar = () => {
           </div>
         )}
 
-        <div className='flex flex-col md:flex-row items-center justify-between w-full max-w-[1110px] gap-6'>
+        <div className='grid grid-cols-1 md:grid-cols-3 items-center w-full max-w-[1110px] gap-3'>
           <div className='flex flex-wrap items-center gap-2'>
             <Typography.Text className='text-sm !text-semi-color-text-1'>
               © {currentYear} {systemName}. {t('版权所有')}
             </Typography.Text>
           </div>
 
-          <div className='text-sm'>
-            <span className='!text-semi-color-text-1'>
-              {t('基于')}{' '}
-              <a
-                href='https://github.com/QuantumNous/new-api'
-                target='_blank'
-                rel='noopener noreferrer'
-                className='!text-semi-color-primary font-medium'
-              >
-                New API
-              </a>{' '}
-              {t('二次开发')}
-            </span>
-            <span className='!text-semi-color-text-3 ml-2 text-xs'>
-              {' '}|{' '}
-              {t('设计与开发')}{' '}
-              <a
-                href='https://github.com/QuantumNous/new-api'
-                target='_blank'
-                rel='noopener noreferrer'
-                className='!text-semi-color-primary'
-              >
-                New API
-              </a>
-              {' & '}
-              <a
-                href='https://github.com/CNYT8/Nexus-API'
-                target='_blank'
-                rel='noopener noreferrer'
-                className='!text-semi-color-primary'
-              >
-                Nexus-API
-              </a>
-            </span>
+          <div className='flex justify-center'>{maintenanceTeam}</div>
+
+          <div className='flex justify-center md:justify-end'>
+            {designCredit}
           </div>
         </div>
       </footer>
     ),
-    [logo, systemName, t, currentYear, isDemoSiteMode],
+    [
+      logo,
+      systemName,
+      t,
+      currentYear,
+      isDemoSiteMode,
+      maintenanceTeam,
+      designCredit,
+    ],
   );
 
   useEffect(() => {
@@ -244,45 +258,14 @@ const FooterBar = () => {
     <div className='w-full'>
       {footer ? (
         <footer className='relative h-auto py-4 px-6 md:px-24 w-full flex items-center justify-center overflow-hidden'>
-          <div className='flex flex-col md:flex-row items-center justify-between w-full max-w-[1110px] gap-4'>
+          <div className='grid grid-cols-1 md:grid-cols-3 items-center w-full max-w-[1110px] gap-3'>
             <div
               className='custom-footer na-cb6feafeb3990c78 text-sm !text-semi-color-text-1'
               dangerouslySetInnerHTML={{ __html: footer }}
             ></div>
-            <div className='text-sm flex-shrink-0'>
-              <span className='!text-semi-color-text-1'>
-                {t('基于')}{' '}
-                <a
-                  href='https://github.com/QuantumNous/new-api'
-                  target='_blank'
-                  rel='noopener noreferrer'
-                  className='!text-semi-color-primary font-medium'
-                >
-                  New API
-                </a>{' '}
-                {t('二次开发')}
-              </span>
-              <span className='!text-semi-color-text-3 ml-2 text-xs'>
-                {' '}|{' '}
-                {t('设计与开发')}{' '}
-                <a
-                  href='https://github.com/QuantumNous/new-api'
-                  target='_blank'
-                  rel='noopener noreferrer'
-                  className='!text-semi-color-primary'
-                >
-                  New API
-                </a>
-                {' & '}
-                <a
-                  href='https://github.com/CNYT8/Nexus-API'
-                  target='_blank'
-                  rel='noopener noreferrer'
-                  className='!text-semi-color-primary'
-                >
-                  Nexus-API
-                </a>
-              </span>
+            <div className='flex justify-center'>{maintenanceTeam}</div>
+            <div className='flex justify-center md:justify-end'>
+              {designCredit}
             </div>
           </div>
         </footer>

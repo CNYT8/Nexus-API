@@ -25,6 +25,9 @@ import {
   IllustrationConstructionDark,
 } from '@douyinfe/semi-illustrations';
 import ScrollableContainer from '../common/ui/ScrollableContainer';
+import NexusApiPresetIcon, {
+  isNexusHongKongCloudflarePreset,
+} from '../common/NexusApiPresetIcon';
 
 const ApiInfoPanel = ({
   apiInfoData,
@@ -53,9 +56,13 @@ const ApiInfoPanel = ({
             <React.Fragment key={api.id}>
               <div className='flex p-2 hover:bg-white rounded-lg transition-colors cursor-pointer'>
                 <div className='flex-shrink-0 mr-3'>
-                  <Avatar size='extra-small' color={api.color}>
-                    {api.route.substring(0, 2)}
-                  </Avatar>
+                  {isNexusHongKongCloudflarePreset(api.color) ? (
+                    <NexusApiPresetIcon size={32} />
+                  ) : (
+                    <Avatar size='extra-small' color={api.color}>
+                      {api.route.substring(0, 2)}
+                    </Avatar>
+                  )}
                 </div>
                 <div className='flex-1'>
                   <div className='flex flex-wrap items-center justify-between mb-1 w-full gap-2'>

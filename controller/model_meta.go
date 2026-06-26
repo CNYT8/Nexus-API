@@ -60,6 +60,15 @@ func SearchModelsMeta(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
+func GetModelTags(c *gin.Context) {
+	tags, err := model.GetAllModelTags()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, tags)
+}
+
 // GetModelMeta 根据 ID 获取单条模型信息
 func GetModelMeta(c *gin.Context) {
 	idStr := c.Param("id")

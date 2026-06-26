@@ -71,6 +71,12 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { StatusBadge } from '@/components/status-badge'
+import {
+  NexusApiPresetIcon,
+  NEXUS_HK_CLOUDFLARE_LABEL,
+  NEXUS_HK_CLOUDFLARE_PRESET,
+  isNexusHongKongCloudflarePreset,
+} from '@/components/nexus-api-preset-icon'
 import { SettingsSwitchField } from '../components/settings-form-layout'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
@@ -113,6 +119,10 @@ const colorOptions = [
   { value: 'indigo', label: 'Indigo' },
   { value: 'violet', label: 'Violet' },
   { value: 'slate', label: 'Slate' },
+  {
+    value: NEXUS_HK_CLOUDFLARE_PRESET,
+    label: NEXUS_HK_CLOUDFLARE_LABEL,
+  },
 ]
 
 export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
@@ -273,6 +283,14 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
   }
 
   const getColorClass = (color: string) => getBgColorClass(color)
+  const renderColorMark = (color: string, size = 16) =>
+    isNexusHongKongCloudflarePreset(color) ? (
+      <NexusApiPresetIcon size={size} />
+    ) : size <= 16 ? (
+      <div className={`h-4 w-4 rounded-full ${getColorClass(color)}`} />
+    ) : (
+      <div className={`h-6 w-6 rounded-full ${getColorClass(color)}`} />
+    )
 
   return (
     <SettingsSection title={t('API Addresses')}>
@@ -374,11 +392,11 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
                     </TableCell>
                     <TableCell>
                       <div className='flex items-center gap-2'>
-                        <div
-                          className={`h-4 w-4 rounded-full ${getColorClass(apiInfo.color)}`}
-                        />
-                        <span className='text-sm capitalize'>
-                          {apiInfo.color}
+                        {renderColorMark(apiInfo.color)}
+                        <span className='text-sm'>
+                          {isNexusHongKongCloudflarePreset(apiInfo.color)
+                            ? NEXUS_HK_CLOUDFLARE_LABEL
+                            : apiInfo.color}
                         </span>
                       </div>
                     </TableCell>
@@ -482,9 +500,7 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
                           value: option.value,
                           label: (
                             <div className='flex items-center gap-2'>
-                              <div
-                                className={`h-4 w-4 rounded-full ${getBgColorClass(option.value)}`}
-                              />
+                              {renderColorMark(option.value)}
                               {option.label}
                             </div>
                           ),
@@ -503,9 +519,7 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
                           {colorOptions.map((option) => (
                             <SelectItem key={option.value} value={option.value}>
                               <div className='flex items-center gap-2'>
-                                <div
-                                  className={`h-4 w-4 rounded-full ${getBgColorClass(option.value)}`}
-                                />
+                                {renderColorMark(option.value)}
                                 {option.label}
                               </div>
                             </SelectItem>

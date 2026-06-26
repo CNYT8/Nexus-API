@@ -111,35 +111,6 @@ function serializeStageRules(rules) {
   return cleaned.length === 0 ? '' : JSON.stringify(cleaned);
 }
 
-function buildExampleStageRules() {
-  return [
-    {
-      _id: createStageId(),
-      request_threshold: 12,
-      token_threshold: 300000,
-      allow_checkin: true,
-      min_quota: 50000,
-      max_quota: 50000,
-    },
-    {
-      _id: createStageId(),
-      request_threshold: 5,
-      token_threshold: 0,
-      allow_checkin: true,
-      min_quota: 25000,
-      max_quota: 50000,
-    },
-    {
-      _id: createStageId(),
-      request_threshold: 0,
-      token_threshold: 0,
-      allow_checkin: false,
-      min_quota: 0,
-      max_quota: 0,
-    },
-  ];
-}
-
 function StageRulesEditor({ disabled, rules, onChange, t }) {
   const emit = (nextRules) => {
     onChange(nextRules, serializeStageRules(nextRules));
@@ -525,13 +496,6 @@ export default function SettingsCheckin(props) {
                   }
                 >
                   {t('添加阶段')}
-                </Button>
-                <Button
-                  type='tertiary'
-                  disabled={!stageEnabled}
-                  onClick={() => updateStageRules(buildExampleStageRules())}
-                >
-                  {t('套用示例')}
                 </Button>
               </div>
             </Row>
