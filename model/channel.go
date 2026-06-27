@@ -449,7 +449,11 @@ func BatchInsertChannels(channels []Channel) error {
 			}
 		}
 	}
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	InvalidatePricingCache()
+	return nil
 }
 
 func BatchDeleteChannels(ids []int) error {
@@ -471,7 +475,11 @@ func BatchDeleteChannels(ids []int) error {
 			return err
 		}
 	}
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	InvalidatePricingCache()
+	return nil
 }
 
 func (channel *Channel) GetPriority() int64 {
@@ -868,13 +876,33 @@ func updateChannelUsedQuota(id int, quota int) {
 }
 
 func DeleteChannelByStatus(status int64) (int64, error) {
-	result := DB.Where("status = ?", status).Delete(&Channel{})
-	return result.RowsAffected, result.Error
+	var ids []int
+	if err := DB.Model(&Channel{}).Where("status = ?", status).Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	if err := BatchDeleteChannels(ids); err != nil {
+		return 0, err
+	}
+	return int64(len(ids)), nil
 }
 
 func DeleteDisabledChannel() (int64, error) {
-	result := DB.Where("status = ? or status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).Delete(&Channel{})
-	return result.RowsAffected, result.Error
+	var ids []int
+	if err := DB.Model(&Channel{}).
+		Where("status = ? or status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	if err := BatchDeleteChannels(ids); err != nil {
+		return 0, err
+	}
+	return int64(len(ids)), nil
 }
 
 func GetPaginatedTags(offset int, limit int) ([]*string, error) {
@@ -1050,7 +1078,11 @@ func BatchSetChannelTag(ids []int, tag *string) error {
 	}
 
 	// 提交事务
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	InvalidatePricingCache()
+	return nil
 }
 
 // CountAllChannels returns total channels in DB

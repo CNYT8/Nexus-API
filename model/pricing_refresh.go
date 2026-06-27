@@ -11,4 +11,5 @@ func RefreshPricing() {
 	defer modelSupportEndpointsLock.Unlock()
 
 	updatePricing()
+	InvalidateModelMonitorCache()
 }

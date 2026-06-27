@@ -85,15 +85,45 @@ func TestScoreModelMonitorBucket(t *testing.T) {
 	}
 }
 
+func resetModelMonitorTables(t *testing.T) {
+	t.Helper()
+	require.NoError(t, LOG_DB.Exec("DELETE FROM logs").Error)
+	require.NoError(t, DB.Exec("DELETE FROM channels").Error)
+	require.NoError(t, DB.Exec("DELETE FROM abilities").Error)
+	require.NoError(t, DB.Exec("DELETE FROM models").Error)
+	require.NoError(t, DB.Exec("DELETE FROM vendors").Error)
+	t.Cleanup(func() {
+		_ = LOG_DB.Exec("DELETE FROM logs").Error
+		_ = DB.Exec("DELETE FROM channels").Error
+		_ = DB.Exec("DELETE FROM abilities").Error
+		_ = DB.Exec("DELETE FROM models").Error
+		_ = DB.Exec("DELETE FROM vendors").Error
+		InvalidateModelMonitorCache()
+		InvalidatePricingCache()
+	})
+}
+
 func TestGetModelMonitorSummaryAggregatesRecentLogs(t *testing.T) {
 	InvalidateModelMonitorCache()
 	t.Cleanup(InvalidateModelMonitorCache)
-	require.NoError(t, LOG_DB.Exec("DELETE FROM logs").Error)
-	t.Cleanup(func() {
-		_ = LOG_DB.Exec("DELETE FROM logs").Error
-	})
+	InvalidatePricingCache()
+	t.Cleanup(InvalidatePricingCache)
+	resetModelMonitorTables(t)
 
 	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&Channel{
+		Id:     990,
+		Type:   1,
+		Status: common.ChannelStatusEnabled,
+	}).Error)
+	for _, modelName := range []string{"gpt-monitor-test", "gpt-empty-monitor-test"} {
+		require.NoError(t, DB.Create(&Ability{
+			Group:     "default",
+			Model:     modelName,
+			ChannelId: 990,
+			Enabled:   true,
+		}).Error)
+	}
 	require.NoError(t, LOG_DB.Create(&Log{
 		CreatedAt:        now - 60,
 		Type:             LogTypeConsume,
@@ -151,7 +181,9 @@ func TestGetModelMonitorSummaryAggregatesRecentLogs(t *testing.T) {
 func TestGetModelMonitorSummaryIncludesUnknownEnabledModels(t *testing.T) {
 	InvalidateModelMonitorCache()
 	t.Cleanup(InvalidateModelMonitorCache)
-	truncateTables(t)
+	InvalidatePricingCache()
+	t.Cleanup(InvalidatePricingCache)
+	resetModelMonitorTables(t)
 
 	require.NoError(t, DB.Create(&Channel{
 		Id:     991,
@@ -174,4 +206,96 @@ func TestGetModelMonitorSummaryIncludesUnknownEnabledModels(t *testing.T) {
 	require.Equal(t, "未知状态", summary.Vendors[0].Models[0].StatusText)
 	require.False(t, summary.Vendors[0].Models[0].HasData)
 	require.Equal(t, 0, summary.Vendors[0].Models[0].Score)
+}
+
+func TestGetModelMonitorSummaryExcludesDisabledModelsWithLogs(t *testing.T) {
+	InvalidateModelMonitorCache()
+	t.Cleanup(InvalidateModelMonitorCache)
+	InvalidatePricingCache()
+	t.Cleanup(InvalidatePricingCache)
+	resetModelMonitorTables(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&Channel{
+		Id:     992,
+		Type:   1,
+		Status: common.ChannelStatusEnabled,
+	}).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "active-monitor-test",
+		ChannelId: 992,
+		Enabled:   true,
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		CreatedAt:        now - 60,
+		Type:             LogTypeConsume,
+		ModelName:        "active-monitor-test",
+		PromptTokens:     600,
+		CompletionTokens: 400,
+		UseTime:          2,
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		CreatedAt: now - 60,
+		Type:      LogTypeError,
+		ModelName: "disabled-monitor-test",
+		UseTime:   8,
+	}).Error)
+
+	summary, err := GetModelMonitorSummary()
+	require.NoError(t, err)
+	require.Equal(t, 1, summary.ModelCount)
+	require.Len(t, summary.Vendors, 1)
+	require.Len(t, summary.Vendors[0].Models, 1)
+	require.Equal(t, "active-monitor-test", summary.Vendors[0].Models[0].ModelName)
+	require.True(t, summary.Vendors[0].Models[0].HasData)
+}
+
+func TestGetModelMonitorSummaryExcludesModelsOnDisabledChannels(t *testing.T) {
+	InvalidateModelMonitorCache()
+	t.Cleanup(InvalidateModelMonitorCache)
+	InvalidatePricingCache()
+	t.Cleanup(InvalidatePricingCache)
+	resetModelMonitorTables(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&Channel{
+		Id:     993,
+		Type:   1,
+		Status: common.ChannelStatusEnabled,
+	}).Error)
+	require.NoError(t, DB.Create(&Channel{
+		Id:     994,
+		Type:   1,
+		Status: common.ChannelStatusManuallyDisabled,
+	}).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "active-channel-monitor-test",
+		ChannelId: 993,
+		Enabled:   true,
+	}).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "disabled-channel-monitor-test",
+		ChannelId: 994,
+		Enabled:   true,
+	}).Error)
+	for _, modelName := range []string{"active-channel-monitor-test", "disabled-channel-monitor-test"} {
+		require.NoError(t, LOG_DB.Create(&Log{
+			CreatedAt:        now - 60,
+			Type:             LogTypeConsume,
+			ModelName:        modelName,
+			PromptTokens:     600,
+			CompletionTokens: 400,
+			UseTime:          2,
+		}).Error)
+	}
+
+	summary, err := GetModelMonitorSummary()
+	require.NoError(t, err)
+	require.Equal(t, 1, summary.ModelCount)
+	require.Len(t, summary.Vendors, 1)
+	require.Len(t, summary.Vendors[0].Models, 1)
+	require.Equal(t, "active-channel-monitor-test", summary.Vendors[0].Models[0].ModelName)
 }

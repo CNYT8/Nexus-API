@@ -420,6 +420,22 @@ func GetModelMonitorSummary() (*ModelMonitorSummary, error) {
 
 func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 	since := now - modelMonitorWindowSeconds
+	pricing := GetPricing()
+	vendorByModel := getModelMonitorVendorMap(pricing, GetVendors())
+	activeModels := make([]string, 0, len(pricing))
+	activeModelSet := make(map[string]struct{}, len(pricing))
+
+	for _, item := range pricing {
+		modelName := strings.TrimSpace(item.ModelName)
+		if modelName == "" {
+			continue
+		}
+		if _, ok := activeModelSet[modelName]; ok {
+			continue
+		}
+		activeModelSet[modelName] = struct{}{}
+		activeModels = append(activeModels, modelName)
+	}
 
 	weightSQL := modelMonitorWeightSQL()
 	selectSQL := "model_name, " +
@@ -466,18 +482,23 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 	}
 
 	var rows []row
-	if err := LOG_DB.Model(&Log{}).
-		Select(selectSQL, selectArgs...).
-		Where("created_at >= ? AND model_name <> '' AND type IN ?", since, []int{LogTypeConsume, LogTypeError}).
-		Group("model_name").
-		Find(&rows).Error; err != nil {
-		return nil, err
+	if len(activeModels) > 0 {
+		if err := LOG_DB.Model(&Log{}).
+			Select(selectSQL, selectArgs...).
+			Where("created_at >= ? AND model_name IN ? AND type IN ?", since, activeModels, []int{LogTypeConsume, LogTypeError}).
+			Group("model_name").
+			Find(&rows).Error; err != nil {
+			return nil, err
+		}
 	}
 
 	buckets := make(map[string]modelMonitorBucket)
 	for _, item := range rows {
 		modelName := strings.TrimSpace(item.ModelName)
 		if modelName == "" {
+			continue
+		}
+		if _, ok := activeModelSet[modelName]; !ok {
 			continue
 		}
 		buckets[modelName] = modelMonitorBucket{
@@ -494,8 +515,6 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 		}
 	}
 
-	pricing := GetPricing()
-	vendorByModel := getModelMonitorVendorMap(pricing, GetVendors())
 	vendorMap := make(map[string]*ModelMonitorVendor)
 	seenModels := make(map[string]bool)
 
@@ -511,18 +530,6 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 		}
 		bucket, hasData := buckets[modelName]
 		appendModelMonitorModel(vendorMap, vendor, modelName, bucket, hasData)
-	}
-
-	for modelName, bucket := range buckets {
-		if seenModels[modelName] {
-			continue
-		}
-		seenModels[modelName] = true
-		vendor, ok := vendorByModel[modelName]
-		if !ok || vendor.Name == "" {
-			vendor.Name = modelMonitorVendorFallback(modelName)
-		}
-		appendModelMonitorModel(vendorMap, vendor, modelName, bucket, true)
 	}
 
 	vendors := make([]ModelMonitorVendor, 0, len(vendorMap))

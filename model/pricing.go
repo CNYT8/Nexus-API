@@ -84,6 +84,7 @@ func InvalidatePricingCache() {
 	pricingMap = nil
 	vendorsList = nil
 	lastGetPricingTime = time.Time{}
+	InvalidateModelMonitorCache()
 }
 
 // GetVendors 返回当前定价接口使用到的供应商信息
