@@ -2997,7 +2997,7 @@
     "Policy JSON": "JSON политики",
     "Polling": "Опрос",
     "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "Режим опроса требует Redis и кэш памяти, в противном случае производительность будет значительно снижена",
-    "Poor": "Плохо",
+    "Poor": "Плохой опыт",
     "Port": "Порт",
     "Port must be a positive integer": "Порт должен быть положительным целым числом",
     "Post Delta": "Дельта после расчёта",
@@ -4603,6 +4603,8 @@
     "{{count}} model(s)": "{{count}} model(s)",
     "Enter @ to reference tags used by all models": "Enter @ to reference tags used by all models",
     "Reference existing tags": "Сослаться на существующие теги",
-    "Global model experience scores.": "Глобальные оценки качества моделей."
+    "Global model experience scores.": "Глобальные оценки качества моделей.",
+    "Unstable": "Нестабильно",
+    "Unknown status": "Неизвестное состояние"
   }
 }

@@ -64,6 +64,11 @@ export const STATIC_I18N_KEYS = [
   'Previous-day request count did not meet the check-in requirement',
   'Previous-day usage did not meet the check-in requirement',
   'Nexus-API preset | Hong Kong + Cloudflare',
+  'Excellent',
+  'Good',
+  'Unstable',
+  'Poor',
+  'Unknown status',
 
   // Pricing constants
   'Name',

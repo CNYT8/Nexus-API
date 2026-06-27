@@ -4468,6 +4468,10 @@
     "配置各工具的调用价格（$/1K次调用）。按次计费模型不额外收取工具费用。": "Configure call prices for each tool ($/1K calls). Per-request models do not charge extra tool fees.",
     "阶梯计费": "Tiered billing",
     "音频倍率": "Audio multiplier",
-    "预计费用": "Estimated cost"
+    "预计费用": "Estimated cost",
+    "优秀": "Xuất sắc",
+    "良好": "Tốt",
+    "不稳定": "Không ổn định",
+    "体验较差": "Trải nghiệm kém"
   }
 }

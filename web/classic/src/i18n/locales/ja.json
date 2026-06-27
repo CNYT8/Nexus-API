@@ -3908,6 +3908,10 @@
     "长度": "Length",
     "阶梯计费": "Tiered billing",
     "音频倍率": "Audio multiplier",
-    "预计费用": "Estimated cost"
+    "预计费用": "Estimated cost",
+    "优秀": "優秀",
+    "良好": "良好",
+    "不稳定": "不安定",
+    "体验较差": "体験が低い"
   }
 }

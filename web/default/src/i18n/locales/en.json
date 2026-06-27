@@ -4605,6 +4605,8 @@
     "{{count}} FAQs deleted. Click \"Save Settings\" to apply.": "{{count}} FAQs deleted. Click \"Save Settings\" to apply.",
     "{{count}} announcements deleted. Click \"Save Settings\" to apply.": "{{count}} announcements deleted. Click \"Save Settings\" to apply.",
     "{{count}} groups deleted. Click \"Save Settings\" to apply.": "{{count}} groups deleted. Click \"Save Settings\" to apply.",
-    "{{count}} model(s)": "{{count}} model(s)"
+    "{{count}} model(s)": "{{count}} model(s)",
+    "Unstable": "Unstable",
+    "Unknown status": "Unknown status"
   }
 }

@@ -66,12 +66,20 @@ const barClassName: Record<ModelMonitorStatus, string> = {
 
 const cardClassName: Record<ModelMonitorStatus, string> = {
   excellent:
-    'border-emerald-500/30 border-l-4 bg-emerald-500/[0.06] dark:bg-emerald-500/[0.08]',
-  good: 'border-amber-500/35 border-l-4 bg-amber-500/[0.07] dark:bg-amber-500/[0.08]',
+    'border-border border-l-4 border-l-emerald-500/70 bg-card',
+  good: 'border-border border-l-4 border-l-amber-500/75 bg-card',
   unstable:
-    'border-rose-600/35 border-l-4 bg-rose-500/[0.07] dark:bg-rose-500/[0.09]',
-  poor: 'border-red-600/45 border-l-4 bg-red-600/[0.08] dark:bg-red-600/[0.1]',
+    'border-border border-l-4 border-l-rose-600/75 bg-card',
+  poor: 'border-border border-l-4 border-l-red-600/80 bg-card',
   unknown: 'border-border bg-transparent',
+}
+
+const statusTextKey: Record<ModelMonitorStatus, string> = {
+  excellent: 'Excellent',
+  good: 'Good',
+  unstable: 'Unstable',
+  poor: 'Poor',
+  unknown: 'Unknown status',
 }
 
 function clampScore(score: number): number {
@@ -133,6 +141,7 @@ function ScoreBar(props: { score: number; status?: ModelMonitorStatus }) {
 }
 
 function ModelScoreCard(props: { model: ModelMonitorModel }) {
+  const { t } = useTranslation()
   const status = getMonitorStatus(props.model)
   const score = clampScore(props.model.score)
 
@@ -144,7 +153,7 @@ function ModelScoreCard(props: { model: ModelMonitorModel }) {
             {props.model.model_name}
           </div>
           <div className='text-muted-foreground mt-0.5 text-xs'>
-            {props.model.status_text}
+            {t(statusTextKey[status])}
           </div>
         </div>
         <ScoreBadge score={score} status={status} />
@@ -286,7 +295,7 @@ export function ModelMonitor() {
                           <div className='text-muted-foreground text-xs'>
                             {t('Models')} {vendor.models.length}
                             {' · '}
-                            {vendor.status_text}
+                            {t(statusTextKey[status])}
                           </div>
                         </div>
                       </div>

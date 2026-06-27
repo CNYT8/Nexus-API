@@ -2997,7 +2997,7 @@
     "Policy JSON": "ポリシーJSON",
     "Polling": "ポーリング",
     "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "ポーリングモードにはRedisとメモリキャッシュが必要です。そうでない場合、パフォーマンスが大幅に低下します",
-    "Poor": "悪い",
+    "Poor": "体験が低い",
     "Port": "ポート",
     "Port must be a positive integer": "ポートは正の整数でなければなりません",
     "Post Delta": "事後差額",
@@ -4603,6 +4603,8 @@
     "{{count}} model(s)": "{{count}} model(s)",
     "Enter @ to reference tags used by all models": "Enter @ to reference tags used by all models",
     "Reference existing tags": "既存タグを参照",
-    "Global model experience scores.": "グローバルモデル体験スコア。"
+    "Global model experience scores.": "グローバルモデル体験スコア。",
+    "Unstable": "不安定",
+    "Unknown status": "不明なステータス"
   }
 }

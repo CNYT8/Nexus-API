@@ -2997,7 +2997,7 @@
     "Policy JSON": "JSON de stratégie",
     "Polling": "Sondage",
     "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "Le mode d'interrogation nécessite Redis et un cache mémoire, sinon les performances seront considérablement dégradées",
-    "Poor": "Mauvais",
+    "Poor": "Médiocre",
     "Port": "Port",
     "Port must be a positive integer": "Le port doit être un entier positif",
     "Post Delta": "Delta post-calcul",
@@ -4603,6 +4603,8 @@
     "{{count}} model(s)": "{{count}} model(s)",
     "Enter @ to reference tags used by all models": "Enter @ to reference tags used by all models",
     "Reference existing tags": "Référencer les tags existants",
-    "Global model experience scores.": "Scores globaux d’expérience des modèles."
+    "Global model experience scores.": "Scores globaux d’expérience des modèles.",
+    "Unstable": "Instable",
+    "Unknown status": "Statut inconnu"
   }
 }

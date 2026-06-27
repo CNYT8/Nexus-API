@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -51,10 +52,12 @@ type ModelMonitorSummary struct {
 }
 
 var modelMonitorCache = struct {
-	sync.Mutex
+	sync.RWMutex
 	summary   *ModelMonitorSummary
 	expiresAt int64
 }{}
+
+var modelMonitorBuildGroup singleflight.Group
 
 type modelMonitorBucket struct {
 	weightedRequests         float64
@@ -371,22 +374,48 @@ func InvalidateModelMonitorCache() {
 
 func GetModelMonitorSummary() (*ModelMonitorSummary, error) {
 	now := common.GetTimestamp()
-	modelMonitorCache.Lock()
-	defer modelMonitorCache.Unlock()
+	modelMonitorCache.RLock()
 	if modelMonitorCache.summary != nil && now < modelMonitorCache.expiresAt {
-		return cloneModelMonitorSummary(modelMonitorCache.summary), nil
+		summary := cloneModelMonitorSummary(modelMonitorCache.summary)
+		modelMonitorCache.RUnlock()
+		return summary, nil
 	}
+	staleSummary := cloneModelMonitorSummary(modelMonitorCache.summary)
+	modelMonitorCache.RUnlock()
 
-	summary, err := buildModelMonitorSummary(now)
+	result, err, _ := modelMonitorBuildGroup.Do("summary", func() (interface{}, error) {
+		buildNow := common.GetTimestamp()
+		modelMonitorCache.RLock()
+		if modelMonitorCache.summary != nil && buildNow < modelMonitorCache.expiresAt {
+			summary := cloneModelMonitorSummary(modelMonitorCache.summary)
+			modelMonitorCache.RUnlock()
+			return summary, nil
+		}
+		modelMonitorCache.RUnlock()
+
+		summary, err := buildModelMonitorSummary(buildNow)
+		if err != nil {
+			return nil, err
+		}
+
+		modelMonitorCache.Lock()
+		modelMonitorCache.summary = cloneModelMonitorSummary(summary)
+		modelMonitorCache.expiresAt = buildNow + modelMonitorCacheSeconds
+		modelMonitorCache.Unlock()
+
+		return cloneModelMonitorSummary(summary), nil
+	})
 	if err != nil {
-		if modelMonitorCache.summary != nil {
-			return cloneModelMonitorSummary(modelMonitorCache.summary), nil
+		if staleSummary != nil {
+			return staleSummary, nil
 		}
 		return nil, err
 	}
-	modelMonitorCache.summary = cloneModelMonitorSummary(summary)
-	modelMonitorCache.expiresAt = now + modelMonitorCacheSeconds
-	return summary, nil
+	summary, _ := result.(*ModelMonitorSummary)
+	if summary == nil {
+		return staleSummary, nil
+	}
+	return cloneModelMonitorSummary(summary), nil
 }
 
 func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {

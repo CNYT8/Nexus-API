@@ -1530,7 +1530,7 @@
     "Example:": "Ví dụ:",
     "example.com&#10;blocked-site.com": "example.com\nblocked-site.com",
     "example.com&#10;company.com": "example.com\ncompany.com",
-    "Excellent": "Tuyệt vời",
+    "Excellent": "Xuất sắc",
     "Exchange rate is required": "Cần có tỷ giá",
     "Exchange rate must be greater than 0": "Tỷ giá phải lớn hơn 0",
     "Execute code in a sandbox during the response": "Thực thi mã trong sandbox trong quá trình phản hồi",
@@ -2997,7 +2997,7 @@
     "Policy JSON": "JSON chính sách",
     "Polling": "Thăm dò",
     "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "Chế độ thăm dò yêu cầu Redis và bộ nhớ đệm, nếu không hiệu suất sẽ bị suy giảm đáng kể.",
-    "Poor": "Nghèo",
+    "Poor": "Trải nghiệm kém",
     "Port": "Cảng",
     "Port must be a positive integer": "Cổng phải là số nguyên dương",
     "Post Delta": "Chênh lệch sau",
@@ -4603,6 +4603,8 @@
     "{{count}} model(s)": "{{count}} model(s)",
     "Enter @ to reference tags used by all models": "Enter @ to reference tags used by all models",
     "Reference existing tags": "Tham chiếu thẻ hiện có",
-    "Global model experience scores.": "Điểm trải nghiệm mô hình toàn cục."
+    "Global model experience scores.": "Điểm trải nghiệm mô hình toàn cục.",
+    "Unstable": "Không ổn định",
+    "Unknown status": "Trạng thái không xác định"
   }
 }

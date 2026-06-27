@@ -3009,7 +3009,7 @@
     "Policy JSON": "策略 JSON",
     "Polling": "轮询",
     "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "轮询模式需要 Redis 和内存缓存，否则性能将显著下降",
-    "Poor": "差",
+    "Poor": "体验较差",
     "Port": "端口",
     "Port must be a positive integer": "端口必须为正整数",
     "Post Delta": "结算差额",
@@ -4605,6 +4605,8 @@
     "{{count}} FAQs deleted. Click \"Save Settings\" to apply.": "已删除 {{count}} 个常见问题。点击“保存设置”后生效。",
     "{{count}} announcements deleted. Click \"Save Settings\" to apply.": "已删除 {{count}} 条公告。点击“保存设置”后生效。",
     "{{count}} groups deleted. Click \"Save Settings\" to apply.": "已删除 {{count}} 个分组。点击“保存设置”后生效。",
-    "{{count}} model(s)": "{{count}} 个模型"
+    "{{count}} model(s)": "{{count}} 个模型",
+    "Unstable": "不稳定",
+    "Unknown status": "未知状态"
   }
 }

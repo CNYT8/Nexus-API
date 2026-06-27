@@ -114,16 +114,17 @@ function LegalLinks(props: { leadingSeparator?: boolean }) {
   )
 }
 
-// inline=true returns just the inner span for composition in a parent flex
-// row. inline=false wraps in a centered/right-aligned div (default).
 function ProjectAttribution(props: { currentYear: number; inline?: boolean }) {
   const { t } = useTranslation()
   const content = (
-    <div className='flex w-full flex-wrap items-center justify-center gap-x-5 gap-y-2 text-center text-[13px]'>
-      <span className='text-muted-foreground/45 whitespace-nowrap'>
+    <span className='text-muted-foreground/45 inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1'>
+      <span>
         &copy; {props.currentYear} {t('Nexus-API')}. {t('All rights reserved.')}
       </span>
-      <span className='text-muted-foreground/55 whitespace-nowrap'>
+      <span className='text-muted-foreground/30' aria-hidden='true'>
+        ·
+      </span>
+      <span className='text-muted-foreground/55'>
         {t('Nexus-API maintenance team')}:
         <a
           href='https://dawncloudapi.xyz'
@@ -134,7 +135,10 @@ function ProjectAttribution(props: { currentYear: number; inline?: boolean }) {
           DawnRouter
         </a>
       </span>
-      <span className='text-muted-foreground/70 whitespace-nowrap text-sm'>
+      <span className='text-muted-foreground/30' aria-hidden='true'>
+        ·
+      </span>
+      <span className='text-muted-foreground/70 text-sm'>
         {t('Based on')}{' '}
         <a
           href='https://github.com/QuantumNous/new-api'
@@ -148,7 +152,7 @@ function ProjectAttribution(props: { currentYear: number; inline?: boolean }) {
           {t('with secondary development')}
         </span>
       </span>
-      <span className='text-muted-foreground/55 whitespace-nowrap text-xs'>
+      <span className='text-muted-foreground/55 text-xs'>
         | {t('Designed and Developed by')}{' '}
         <a
           href='https://github.com/QuantumNous/new-api'
@@ -168,13 +172,13 @@ function ProjectAttribution(props: { currentYear: number; inline?: boolean }) {
           {t('Nexus-API')}
         </a>
       </span>
-    </div>
+    </span>
   )
   if (props.inline) {
     return content
   }
   return (
-    <div className='w-full'>
+    <div className='text-center text-xs sm:text-right'>
       {content}
     </div>
   )

@@ -44,29 +44,29 @@ const STATUS_META = {
   excellent: {
     tagColor: 'green',
     progressColor: 'var(--semi-color-success)',
-    panelColor: 'rgba(var(--semi-green-5), 0.08)',
-    panelBorderColor: 'rgba(var(--semi-green-5), 0.36)',
+    panelColor: 'transparent',
+    panelBorderColor: 'var(--semi-color-border)',
     fallbackText: '优秀',
   },
   good: {
     tagColor: 'yellow',
     progressColor: 'var(--semi-color-warning)',
-    panelColor: 'rgba(var(--semi-yellow-5), 0.1)',
-    panelBorderColor: 'rgba(var(--semi-yellow-5), 0.38)',
+    panelColor: 'transparent',
+    panelBorderColor: 'var(--semi-color-border)',
     fallbackText: '良好',
   },
   unstable: {
     tagColor: 'pink',
     progressColor: '#f43f5e',
-    panelColor: 'rgba(244, 63, 94, 0.08)',
-    panelBorderColor: 'rgba(244, 63, 94, 0.42)',
+    panelColor: 'transparent',
+    panelBorderColor: 'var(--semi-color-border)',
     fallbackText: '不稳定',
   },
   poor: {
     tagColor: 'red',
     progressColor: 'var(--semi-color-danger)',
-    panelColor: 'rgba(var(--semi-red-5), 0.1)',
-    panelBorderColor: 'rgba(var(--semi-red-5), 0.5)',
+    panelColor: 'transparent',
+    panelBorderColor: 'var(--semi-color-border)',
     fallbackText: '体验较差',
   },
   unknown: {
@@ -93,6 +93,8 @@ const getItemStatus = (item) => {
 };
 
 const getStatusMeta = (status) => STATUS_META[status] || STATUS_META.unknown;
+
+const getStatusText = (status) => getStatusMeta(status).fallbackText;
 
 const clampScore = (score) => Math.min(100, Math.max(0, Number(score) || 0));
 
@@ -167,7 +169,7 @@ const ModelRow = ({ model, t }) => {
       </div>
       <div className='flex items-center justify-between gap-3 md:justify-end'>
         <Tag color={meta.tagColor} shape='circle'>
-          {t(model.status_text || meta.fallbackText)}
+          {t(getStatusText(status))}
         </Tag>
         <ModelScoreBar model={model} />
       </div>
@@ -204,7 +206,7 @@ const VendorBlock = ({ vendor, open, onToggle, t }) => {
               {vendor.name || t('未知供应商')}
             </Text>
             <Tag color={meta.tagColor} shape='circle'>
-              {t(vendor.status_text || meta.fallbackText)}
+              {t(getStatusText(status))}
             </Tag>
           </div>
           <Space spacing={8} wrap>

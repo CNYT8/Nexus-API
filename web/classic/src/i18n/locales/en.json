@@ -4042,6 +4042,10 @@
     "这里配置 Waffo 下展示给用户的 Card、Apple Pay、Google Pay 等子支付方式。": "Configure the Card, Apple Pay, Google Pay, and other sub-payment methods shown to users under Waffo.",
     "配置各工具的调用价格（$/1K次调用）。按次计费模型不额外收取工具费用。": "Configure call prices for each tool ($/1K calls). Per-request models do not charge extra tool fees.",
     "长度": "Length",
-    "音频倍率": "Audio multiplier"
+    "音频倍率": "Audio multiplier",
+    "优秀": "Excellent",
+    "良好": "Good",
+    "不稳定": "Unstable",
+    "体验较差": "Poor"
   }
 }
