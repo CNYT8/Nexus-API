@@ -63,6 +63,7 @@ export const STATIC_I18N_KEYS = [
   'Users whose previous-day token usage does not exceed this value cannot check in',
   'Previous-day request count did not meet the check-in requirement',
   'Previous-day usage did not meet the check-in requirement',
+  'Nexus-API preset | Hong Kong + Cloudflare',
 
   // Pricing constants
   'Name',

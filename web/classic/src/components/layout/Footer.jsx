@@ -40,7 +40,7 @@ const FooterBar = () => {
 
   const currentYear = new Date().getFullYear();
   const maintenanceTeam = useMemo(() => (
-    <span className='!text-semi-color-text-2 text-[13px]'>
+    <span className='!text-semi-color-text-2 text-[13px] whitespace-nowrap'>
       {t('Nexus-API维护团队')}:
       <a
         href='https://dawncloudapi.xyz'
@@ -52,8 +52,24 @@ const FooterBar = () => {
       </a>
     </span>
   ), [t]);
+  const developmentCredit = useMemo(() => (
+    <span className='!text-semi-color-text-2 text-sm whitespace-nowrap'>
+      {t('基于')}{' '}
+      <a
+        href='https://github.com/QuantumNous/new-api'
+        target='_blank'
+        rel='noopener noreferrer'
+        className='!text-semi-color-primary font-medium'
+      >
+        New API
+      </a>
+      <span className='!text-semi-color-text-2 ml-1'>
+        {t('二次开发')}
+      </span>
+    </span>
+  ), [t]);
   const designCredit = useMemo(() => (
-    <span className='!text-semi-color-text-3 text-[13px]'>
+    <span className='!text-semi-color-text-3 text-xs whitespace-nowrap'>
       {'| '}
       {t('设计与开发')}{' '}
       <a
@@ -224,16 +240,17 @@ const FooterBar = () => {
           </div>
         )}
 
-        <div className='grid grid-cols-1 md:grid-cols-3 items-center w-full max-w-[1110px] gap-3'>
-          <div className='flex flex-wrap items-center gap-2'>
+        <div className='flex flex-wrap items-center justify-center w-full max-w-[1110px] gap-x-5 gap-y-2 text-center'>
+          <div className='flex min-w-fit flex-wrap items-center justify-center gap-2'>
             <Typography.Text className='text-sm !text-semi-color-text-1'>
               © {currentYear} {systemName}. {t('版权所有')}
             </Typography.Text>
           </div>
 
-          <div className='flex justify-center'>{maintenanceTeam}</div>
+          <div className='flex min-w-fit justify-center'>{maintenanceTeam}</div>
 
-          <div className='flex justify-center md:justify-end'>
+          <div className='flex min-w-fit items-baseline justify-center gap-2'>
+            {developmentCredit}
             {designCredit}
           </div>
         </div>
@@ -246,6 +263,7 @@ const FooterBar = () => {
       currentYear,
       isDemoSiteMode,
       maintenanceTeam,
+      developmentCredit,
       designCredit,
     ],
   );
@@ -258,13 +276,14 @@ const FooterBar = () => {
     <div className='w-full'>
       {footer ? (
         <footer className='relative h-auto py-4 px-6 md:px-24 w-full flex items-center justify-center overflow-hidden'>
-          <div className='grid grid-cols-1 md:grid-cols-3 items-center w-full max-w-[1110px] gap-3'>
+          <div className='flex flex-wrap items-center justify-center w-full max-w-[1110px] gap-x-5 gap-y-2 text-center'>
             <div
-              className='custom-footer na-cb6feafeb3990c78 text-sm !text-semi-color-text-1'
+              className='custom-footer na-cb6feafeb3990c78 min-w-fit text-sm !text-semi-color-text-1'
               dangerouslySetInnerHTML={{ __html: footer }}
             ></div>
-            <div className='flex justify-center'>{maintenanceTeam}</div>
-            <div className='flex justify-center md:justify-end'>
+            <div className='flex min-w-fit justify-center'>{maintenanceTeam}</div>
+            <div className='flex min-w-fit items-baseline justify-center gap-2'>
+              {developmentCredit}
               {designCredit}
             </div>
           </div>

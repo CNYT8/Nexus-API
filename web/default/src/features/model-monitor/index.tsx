@@ -256,9 +256,9 @@ export function ModelMonitor() {
                 <Badge variant='secondary'>
                   {t('Best Score')} {summary.best_score}
                 </Badge>
-                <span className='text-muted-foreground flex items-center gap-1 text-xs'>
+                <span className='text-muted-foreground flex items-baseline gap-1 text-xs'>
                   <span>{t('每1分钟动态更新数据')}</span>
-                  <span className='text-[11.5px] leading-5'>
+                  <span className='text-[11px] leading-4 opacity-70'>
                     {t('下次更新时间:')} {formatRefreshClock(nextRefreshAt)}
                   </span>
                 </span>

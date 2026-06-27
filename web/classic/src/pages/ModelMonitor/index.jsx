@@ -332,13 +332,12 @@ const ModelMonitor = () => {
         <Space spacing={4} wrap>
           <Text type='tertiary' size='small'>
             {t('每1分钟动态更新数据')}
-          </Text>
-          <Text
-            type='tertiary'
-            size='small'
-            style={{ fontSize: 11.5, lineHeight: 1.25 }}
-          >
-            {t('下次更新时间:')} {formatRefreshClock(nextRefreshAt)}
+            <span
+              className='ml-1 inline-block align-baseline'
+              style={{ fontSize: 11, opacity: 0.72 }}
+            >
+              {t('下次更新时间:')} {formatRefreshClock(nextRefreshAt)}
+            </span>
           </Text>
         </Space>
       </Space>

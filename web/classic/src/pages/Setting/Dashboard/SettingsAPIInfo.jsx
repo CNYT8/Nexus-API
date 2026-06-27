@@ -89,7 +89,7 @@ const SettingsAPIInfo = ({ options, refresh }) => {
     { value: 'grey', label: 'grey' },
     {
       value: NEXUS_HK_CLOUDFLARE_PRESET,
-      label: NEXUS_HK_CLOUDFLARE_LABEL,
+      label: t(NEXUS_HK_CLOUDFLARE_LABEL),
       preset: true,
     },
   ];

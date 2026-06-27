@@ -119,11 +119,11 @@ function LegalLinks(props: { leadingSeparator?: boolean }) {
 function ProjectAttribution(props: { currentYear: number; inline?: boolean }) {
   const { t } = useTranslation()
   const content = (
-    <div className='grid w-full grid-cols-1 items-center gap-2 text-center text-[13px] sm:grid-cols-3'>
-      <span className='text-muted-foreground/45 sm:text-left'>
+    <div className='flex w-full flex-wrap items-center justify-center gap-x-5 gap-y-2 text-center text-[13px]'>
+      <span className='text-muted-foreground/45 whitespace-nowrap'>
         &copy; {props.currentYear} {t('Nexus-API')}. {t('All rights reserved.')}
       </span>
-      <span className='text-muted-foreground/55'>
+      <span className='text-muted-foreground/55 whitespace-nowrap'>
         {t('Nexus-API maintenance team')}:
         <a
           href='https://dawncloudapi.xyz'
@@ -134,7 +134,21 @@ function ProjectAttribution(props: { currentYear: number; inline?: boolean }) {
           DawnRouter
         </a>
       </span>
-      <span className='text-muted-foreground/55 sm:text-right'>
+      <span className='text-muted-foreground/70 whitespace-nowrap text-sm'>
+        {t('Based on')}{' '}
+        <a
+          href='https://github.com/QuantumNous/new-api'
+          target='_blank'
+          rel='noopener noreferrer'
+          className='text-foreground/75 hover:text-foreground font-medium transition-colors'
+        >
+          {t('New API')}
+        </a>
+        <span className='text-muted-foreground/70 ml-1'>
+          {t('with secondary development')}
+        </span>
+      </span>
+      <span className='text-muted-foreground/55 whitespace-nowrap text-xs'>
         | {t('Designed and Developed by')}{' '}
         <a
           href='https://github.com/QuantumNous/new-api'

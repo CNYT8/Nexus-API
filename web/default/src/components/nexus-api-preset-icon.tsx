@@ -17,9 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useId } from 'react'
+import { useTranslation } from 'react-i18next'
 
 export const NEXUS_HK_CLOUDFLARE_PRESET = 'nexus-hk-cloudflare'
-export const NEXUS_HK_CLOUDFLARE_LABEL = 'Nexus-API预设｜🇭🇰香港+Cloudflare'
+export const NEXUS_HK_CLOUDFLARE_LABEL =
+  'Nexus-API preset | Hong Kong + Cloudflare'
 
 export function isNexusHongKongCloudflarePreset(color?: string) {
   return color === NEXUS_HK_CLOUDFLARE_PRESET
@@ -30,6 +32,7 @@ function sanitizeId(id: string) {
 }
 
 export function NexusApiPresetIcon(props: { size?: number }) {
+  const { t } = useTranslation()
   const size = props.size ?? 24
   const svgId = sanitizeId(useId())
   const frameId = `nexus-hk-cf-frame-${svgId}`
@@ -46,7 +49,7 @@ export function NexusApiPresetIcon(props: { size?: number }) {
         height={size}
         viewBox='0 0 40 40'
         role='img'
-        aria-label={NEXUS_HK_CLOUDFLARE_LABEL}
+        aria-label={t(NEXUS_HK_CLOUDFLARE_LABEL)}
       >
         <defs>
           <linearGradient id={frameId} x1='0' y1='0' x2='1' y2='1'>
@@ -78,24 +81,32 @@ export function NexusApiPresetIcon(props: { size?: number }) {
           strokeWidth='2'
         />
         <g filter={`url(#${shadowId})`}>
-          <rect x='5' y='7' width='19' height='19' rx='5' fill='#de2910' />
-          <g transform='translate(14.5 16.5)'>
+          <rect x='4.5' y='5' width='25.5' height='17' rx='3.5' fill='#de2910' />
+          <g transform='translate(17.25 13.5) scale(0.78)'>
             {[0, 72, 144, 216, 288].map((angle) => (
-              <path
-                key={angle}
-                d='M0 -7 C2.4 -6 3.6 -3.6 2.2 -1.5 C1.2 0 0.1 0.4 -1.6 -0.5 C-3.1 -1.4 -3 -4.4 0 -7Z'
-                fill='white'
-                transform={`rotate(${angle})`}
-              />
+              <g key={angle} transform={`rotate(${angle})`}>
+                <path
+                  d='M0 -8.5 C3 -7.4 4.3 -4.7 2.9 -2.3 C1.7 -0.4 0.4 0.3 -1.6 -0.5 C-3.5 -1.3 -3.7 -5.2 0 -8.5Z'
+                  fill='white'
+                />
+                <circle cx='1.45' cy='-5.1' r='0.7' fill='#de2910' />
+                <path
+                  d='M0.55 -7.1 C1.8 -6 2.2 -4.6 1.7 -3'
+                  fill='none'
+                  stroke='#de2910'
+                  strokeLinecap='round'
+                  strokeWidth='0.5'
+                />
+              </g>
             ))}
-            <circle cx='0' cy='0' r='1.2' fill='#de2910' />
+            <circle cx='0' cy='0' r='0.9' fill='#de2910' />
           </g>
           <path
-            d='M17.2 26.2h12.9c3.1 0 5.7-2.1 5.7-4.8 0-2.4-2-4.4-4.8-4.7-.9-3.2-3.7-5.4-7.1-5.4-3.1 0-5.8 1.9-6.9 4.7-2.7.4-4.8 2.5-4.8 5 0 2.9 2.2 5.2 5 5.2Z'
+            d='M20.2 30.2h10.5c3 0 5.4-1.9 5.4-4.3 0-2.2-1.9-3.9-4.5-4.2-.9-2.7-3.3-4.6-6.2-4.6-2.6 0-4.8 1.5-5.8 3.8-2.3.3-4.2 2.1-4.2 4.3 0 2.8 2 5 4.8 5Z'
             fill={`url(#${cloudId})`}
           />
           <path
-            d='M19.1 24.2h11.1c2 0 3.6-1.2 3.8-2.9.1-.8-.5-1.6-1.4-1.8-.8-.2-1.6.1-2.3.6-1.1-1-2.7-1.5-4.3-1.1-1.5.3-2.6 1.2-3.2 2.4-1.5-.6-3.4-.2-4.5.8-.8.8-.4 2 .8 2Z'
+            d='M21.6 27.8h8.8c1.9 0 3.4-1.1 3.5-2.5.1-.7-.5-1.4-1.3-1.6-.7-.1-1.5.1-2.1.5-1-.8-2.4-1.2-3.8-.9-1.3.3-2.3 1-2.8 2.1-1.3-.5-3-.2-3.9.7-.8.7-.2 1.7 1.6 1.7Z'
             fill='#fff7ed'
             opacity='0.8'
           />

@@ -395,7 +395,7 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
                         {renderColorMark(apiInfo.color)}
                         <span className='text-sm'>
                           {isNexusHongKongCloudflarePreset(apiInfo.color)
-                            ? NEXUS_HK_CLOUDFLARE_LABEL
+                            ? t(NEXUS_HK_CLOUDFLARE_LABEL)
                             : apiInfo.color}
                         </span>
                       </div>
@@ -501,7 +501,9 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
                           label: (
                             <div className='flex items-center gap-2'>
                               {renderColorMark(option.value)}
-                              {option.label}
+                              {option.value === NEXUS_HK_CLOUDFLARE_PRESET
+                                ? t(option.label)
+                                : option.label}
                             </div>
                           ),
                         })),
@@ -520,7 +522,9 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
                             <SelectItem key={option.value} value={option.value}>
                               <div className='flex items-center gap-2'>
                                 {renderColorMark(option.value)}
-                                {option.label}
+                                {option.value === NEXUS_HK_CLOUDFLARE_PRESET
+                                  ? t(option.label)
+                                  : option.label}
                               </div>
                             </SelectItem>
                           ))}
@@ -557,8 +561,10 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
             <AlertDialogTitle>{t('Are you sure?')}</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget === 'single'
-                ? 'This API shortcut will be removed from the list.'
-                : `${selectedIds.length} API shortcuts will be removed from the list.`}
+                ? t('This API shortcut will be removed from the list.')
+                : t('{{count}} API shortcuts will be removed from the list.', {
+                    count: selectedIds.length,
+                  })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
