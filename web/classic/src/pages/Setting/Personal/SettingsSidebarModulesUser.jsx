@@ -403,10 +403,10 @@ export default function SettingsSidebarModulesUser() {
           <div className='flex justify-between items-center mb-4 p-4 bg-gray-50 rounded-xl border border-gray-200'>
             <div>
               <div className='font-semibold text-base text-gray-900 mb-1'>
-                {section.title}
+                {t(section.title)}
               </div>
               <Text className='text-xs text-gray-600'>
-                {section.description}
+                {t(section.description)}
               </Text>
             </div>
             <Switch
@@ -432,10 +432,10 @@ export default function SettingsSidebarModulesUser() {
                   <div className='flex justify-between items-center h-full'>
                     <div className='flex-1 text-left'>
                       <div className='font-semibold text-sm text-gray-900 mb-1'>
-                        {module.title}
+                        {t(module.title)}
                       </div>
                       <Text className='text-xs text-gray-600 leading-relaxed block'>
-                        {module.description}
+                        {t(module.description)}
                       </Text>
                     </div>
                     <div className='ml-4'>

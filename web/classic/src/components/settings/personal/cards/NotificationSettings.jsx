@@ -555,9 +555,9 @@ const NotificationSettings = ({
                           <CodeViewer
                             content={{
                               type: 'quota_exceed',
-                              title: '额度预警通知',
+                              title: t('额度预警通知'),
                               content:
-                                '您的额度即将用尽，当前剩余额度为 {{value}}',
+                                t('您的额度即将用尽，当前剩余额度为 {{value}}'),
                               values: ['$0.99'],
                               timestamp: 1739950503,
                             }}
@@ -856,7 +856,7 @@ const NotificationSettings = ({
                         >
                           <div>
                             <div className='font-semibold text-base text-gray-900 mb-1'>
-                              {section.title}
+                              {t(section.title)}
                             </div>
                             <Typography.Text
                               type='secondary'
@@ -867,7 +867,7 @@ const NotificationSettings = ({
                                 color: 'var(--semi-color-text-2)',
                               }}
                             >
-                              {section.description}
+                              {t(section.description)}
                             </Typography.Text>
                           </div>
                           <Switch
@@ -907,7 +907,7 @@ const NotificationSettings = ({
                                   <div className='flex justify-between items-center h-full'>
                                     <div className='flex-1 text-left'>
                                       <div className='font-semibold text-sm text-gray-900 mb-1'>
-                                        {module.title}
+                                        {t(module.title)}
                                       </div>
                                       <Typography.Text
                                         type='secondary'
@@ -920,7 +920,7 @@ const NotificationSettings = ({
                                           marginTop: '4px',
                                         }}
                                       >
-                                        {module.description}
+                                        {t(module.description)}
                                       </Typography.Text>
                                     </div>
                                     <div className='ml-4'>

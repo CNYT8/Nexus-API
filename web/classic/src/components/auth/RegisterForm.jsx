@@ -184,7 +184,7 @@ const RegisterForm = () => {
 
   const onSubmitWeChatVerificationCode = async () => {
     if (turnstileEnabled && turnstileToken === '') {
-      showInfo('请稍后几秒重试，Turnstile 正在检查用户环境！');
+      showInfo(t('请稍后几秒重试，Turnstile 正在检查用户环境！'));
       return;
     }
     setWechatCodeSubmitLoading(true);
@@ -199,13 +199,13 @@ const RegisterForm = () => {
         setUserData(data);
         updateAPI();
         navigate('/');
-        showSuccess('登录成功！');
+        showSuccess(t('登录成功！'));
         setShowWeChatLoginModal(false);
       } else {
         showError(message);
       }
     } catch (error) {
-      showError('登录失败，请重试');
+      showError(t('登录失败，请重试'));
     } finally {
       setWechatCodeSubmitLoading(false);
     }
@@ -217,16 +217,16 @@ const RegisterForm = () => {
 
   async function handleSubmit(e) {
     if (password.length < 8) {
-      showInfo('密码长度不得小于 8 位！');
+      showInfo(t('密码长度不得小于 8 位！'));
       return;
     }
     if (password !== password2) {
-      showInfo('两次输入的密码不一致');
+      showInfo(t('两次输入的密码不一致'));
       return;
     }
     if (username && password) {
       if (turnstileEnabled && turnstileToken === '') {
-        showInfo('请稍后几秒重试，Turnstile 正在检查用户环境！');
+        showInfo(t('请稍后几秒重试，Turnstile 正在检查用户环境！'));
         return;
       }
       setRegisterLoading(true);
@@ -242,12 +242,12 @@ const RegisterForm = () => {
         const { success, message } = res.data;
         if (success) {
           navigate('/login');
-          showSuccess('注册成功！');
+          showSuccess(t('注册成功！'));
         } else {
           showError(message);
         }
       } catch (error) {
-        showError('注册失败，请重试');
+        showError(t('注册失败，请重试'));
       } finally {
         setRegisterLoading(false);
       }
@@ -257,7 +257,7 @@ const RegisterForm = () => {
   const sendVerificationCode = async () => {
     if (inputs.email === '') return;
     if (turnstileEnabled && turnstileToken === '') {
-      showInfo('请稍后几秒重试，Turnstile 正在检查用户环境！');
+      showInfo(t('请稍后几秒重试，Turnstile 正在检查用户环境！'));
       return;
     }
     setVerificationCodeLoading(true);
@@ -267,13 +267,13 @@ const RegisterForm = () => {
       );
       const { success, message } = res.data;
       if (success) {
-        showSuccess('验证码发送成功，请检查你的邮箱！');
+        showSuccess(t('验证码发送成功，请检查你的邮箱！'));
         setDisableButton(true); // 发送成功后禁用按钮，开始倒计时
       } else {
         showError(message);
       }
     } catch (error) {
-      showError('发送验证码失败，请重试');
+      showError(t('发送验证码失败，请重试'));
     } finally {
       setVerificationCodeLoading(false);
     }
@@ -379,7 +379,7 @@ const RegisterForm = () => {
       if (success) {
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
-        showSuccess('登录成功！');
+        showSuccess(t('登录成功！'));
         setUserData(data);
         updateAPI();
         navigate('/');
@@ -387,7 +387,7 @@ const RegisterForm = () => {
         showError(message);
       }
     } catch (error) {
-      showError('登录失败，请重试');
+      showError(t('登录失败，请重试'));
     }
   };
 
@@ -745,7 +745,7 @@ const RegisterForm = () => {
         }}
       >
         <div className='flex flex-col items-center'>
-          <img src={status.wechat_qrcode} alt='微信二维码' className='mb-4' />
+          <img src={status.wechat_qrcode} alt={t('微信二维码')} className='mb-4' />
         </div>
 
         <div className='text-center mb-4'>
@@ -781,11 +781,30 @@ const RegisterForm = () => {
         style={{ top: '50%', left: '-120px' }}
       />
       <div className='w-full max-w-sm mt-[60px]'>
-        {showEmailRegister ||
-        !hasOAuthRegisterOptions
-          ? renderEmailRegisterForm()
-          : renderOAuthOptions()}
-        {renderWeChatLoginModal()}
+        {status.register_enabled === false ? (
+          <div className='flex flex-col items-center'>
+            <div className='w-full max-w-md'>
+              <div className='flex items-center justify-center mb-6 gap-2'>
+                <img src={logo} alt='Logo' className='h-10 rounded-full' />
+                <Title heading={3} className='!text-gray-800'>
+                  {systemName}
+                </Title>
+              </div>
+              <Card className='border-0 !rounded-2xl overflow-hidden'>
+                <div className='flex min-h-[320px] items-center justify-center px-8 py-12 text-center'>
+                  <Title heading={4} style={{ marginBottom: 0 }}>
+                    {t('管理员关闭了新用户注册')}
+                  </Title>
+                </div>
+              </Card>
+            </div>
+          </div>
+        ) : showEmailRegister || !hasOAuthRegisterOptions ? (
+          renderEmailRegisterForm()
+        ) : (
+          renderOAuthOptions()
+        )}
+        {status.register_enabled !== false && renderWeChatLoginModal()}
 
         {turnstileEnabled && (
           <div className='flex justify-center mt-6'>

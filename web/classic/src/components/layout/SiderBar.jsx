@@ -276,7 +276,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           updateRouterMapWithChats(chats);
         }
       } catch (e) {
-        showError('聊天数据解析失败');
+        showError(t('聊天数据解析失败'));
       }
     }
   }, []);

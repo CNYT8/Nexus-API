@@ -1131,9 +1131,9 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
         .filter(([, config]) => config.group === templateGroupKey)
         .map(([value, config]) => ({
           value,
-          label: config.label,
+          label: t(config.label),
         })),
-    [templateGroupKey],
+    [templateGroupKey, t],
   );
 
   useEffect(() => {
@@ -1520,22 +1520,84 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     }
   };
 
+  const translatedFieldGuideTargetOptions = useMemo(
+    () =>
+      FIELD_GUIDE_TARGET_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+      })),
+    [t],
+  );
+
+  const translatedFieldGuideSections = useMemo(
+    () =>
+      BUILTIN_FIELD_SECTIONS.map((section) => ({
+        ...section,
+        title: t(section.title),
+        fields: section.fields.map((field) => ({
+          ...field,
+          label: t(field.label),
+          tip: field.tip ? t(field.tip) : field.tip,
+        })),
+      })),
+    [t],
+  );
+
+
+  const translatedTemplateGroupOptions = useMemo(
+    () =>
+      TEMPLATE_GROUP_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+      })),
+    [t],
+  );
+
+  const translatedOperationModeOptions = useMemo(
+    () =>
+      OPERATION_MODE_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+      })),
+    [t],
+  );
+
+  const translatedConditionModeOptions = useMemo(
+    () =>
+      CONDITION_MODE_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+      })),
+    [t],
+  );
+
+  const translatedSyncTargetTypeOptions = useMemo(
+    () =>
+      SYNC_TARGET_TYPE_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+      })),
+    [t],
+  );
+
   const filteredFieldGuideSections = useMemo(() => {
     const keyword = fieldGuideKeyword.trim().toLowerCase();
     if (!keyword) {
-      return BUILTIN_FIELD_SECTIONS;
+      return translatedFieldGuideSections;
     }
-    return BUILTIN_FIELD_SECTIONS.map((section) => ({
-      ...section,
-      fields: section.fields.filter((field) =>
-        [field.key, field.label, field.tip]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-          .includes(keyword),
-      ),
-    })).filter((section) => section.fields.length > 0);
-  }, [fieldGuideKeyword]);
+    return translatedFieldGuideSections
+      .map((section) => ({
+        ...section,
+        fields: section.fields.filter((field) =>
+          [field.key, field.label, field.tip]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+            .includes(keyword),
+        ),
+      }))
+      .filter((section) => section.fields.length > 0);
+  }, [fieldGuideKeyword, translatedFieldGuideSections]);
 
   const fieldGuideActionLabel = useMemo(() => {
     if (fieldGuideTarget === 'from') return t('填入来源');
@@ -1927,7 +1989,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
               <Tag color='grey'>{t('模板')}</Tag>
               <Select
                 value={templateGroupKey}
-                optionList={TEMPLATE_GROUP_OPTIONS}
+                optionList={translatedTemplateGroupOptions}
                 onChange={(nextValue) =>
                   setTemplateGroupKey(nextValue || 'basic')
                 }
@@ -2231,7 +2293,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                 </Text>
                                 <Select
                                   value={mode}
-                                  optionList={OPERATION_MODE_OPTIONS}
+                                  optionList={translatedOperationModeOptions}
                                   onChange={(nextMode) =>
                                     updateOperation(selectedOperation.id, {
                                       mode: nextMode,
@@ -2734,9 +2796,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                                       </Text>
                                                       <Select
                                                         value={rule.mode}
-                                                        optionList={
-                                                          CONDITION_MODE_OPTIONS
-                                                        }
+                                                        optionList={translatedConditionModeOptions}
                                                         style={{ width: '100%' }}
                                                         onChange={(nextValue) =>
                                                           updatePruneRule(
@@ -2912,7 +2972,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                     <div className='flex gap-2'>
                                       <Select
                                         value={syncFromTarget?.type || 'json'}
-                                        optionList={SYNC_TARGET_TYPE_OPTIONS}
+                                        optionList={translatedSyncTargetTypeOptions}
                                         style={{ width: 120 }}
                                         onChange={(nextType) =>
                                           updateOperation(
@@ -2950,7 +3010,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                     <div className='flex gap-2'>
                                       <Select
                                         value={syncToTarget?.type || 'json'}
-                                        optionList={SYNC_TARGET_TYPE_OPTIONS}
+                                        optionList={translatedSyncTargetTypeOptions}
                                         style={{ width: 120 }}
                                         onChange={(nextType) =>
                                           updateOperation(
@@ -3184,9 +3244,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                               </Text>
                                               <Select
                                                 value={condition.mode}
-                                                optionList={
-                                                  CONDITION_MODE_OPTIONS
-                                                }
+                                                optionList={translatedConditionModeOptions}
                                                 onChange={(nextValue) =>
                                                   updateCondition(
                                                     selectedOperation.id,
@@ -3397,7 +3455,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
               />
               <Select
                 value={fieldGuideTarget}
-                optionList={FIELD_GUIDE_TARGET_OPTIONS}
+                optionList={translatedFieldGuideTargetOptions}
                 onChange={(nextValue) =>
                   setFieldGuideTarget(nextValue || 'path')
                 }

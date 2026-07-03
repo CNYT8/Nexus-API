@@ -99,6 +99,12 @@ const OP_TAG_MAP = {
   [OP_APPEND]: { color: 'blue', label: '追加' },
 };
 
+const getTranslatedOpOptions = (t) =>
+  Object.entries(OP_TAG_MAP).map(([value, item]) => ({
+    value,
+    label: t(item.label),
+  }));
+
 function UsableGroupSection({ groupName, items, opOptions, onUpdate, onRemove, onAdd, t }) {
   const [open, setOpen] = useState(false);
 
@@ -160,7 +166,7 @@ function UsableGroupSection({ groupName, items, opOptions, onUpdate, onRemove, o
                 style={{ width: 120 }}
                 renderSelectedItem={(optionNode) => {
                   const info = OP_TAG_MAP[optionNode.value] || {};
-                  return <Tag size='small' color={info.color}>{optionNode.label}</Tag>;
+                  return <Tag size='small' color={info.color}>{t(optionNode.label)}</Tag>;
                 }}
               />
               <Input

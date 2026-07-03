@@ -290,7 +290,7 @@ function ConditionRow({ cond, onChange, onRemove, t }) {
       >
         {VAR_OPTIONS.map((v) => (
           <Select.Option key={v.value} value={v.value}>
-            {v.label}
+            {t(v.label)}
           </Select.Option>
         ))}
       </Select>
@@ -863,7 +863,7 @@ function PresetSection({ applyPreset, t }) {
             </Tag>
             {g.presets.map((p) => (
               <Button key={p.key} size='small' theme='light' onClick={() => applyPreset(p)}>
-                {p.label}
+                {t(p.label)}
               </Button>
             ))}
           </div>
@@ -1082,7 +1082,7 @@ function RuleConditionRow({ cond, onChange, onRemove, t }) {
           placeholder={t('时区')}
         >
           {COMMON_TIMEZONES.map((tz) => (
-            <Select.Option key={tz.value} value={tz.value}>{tz.label}</Select.Option>
+            <Select.Option key={tz.value} value={tz.value}>{t(tz.label)}</Select.Option>
           ))}
         </Select>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>

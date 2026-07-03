@@ -94,7 +94,7 @@ const getItemStatus = (item) => {
 
 const getStatusMeta = (status) => STATUS_META[status] || STATUS_META.unknown;
 
-const getStatusText = (status) => getStatusMeta(status).fallbackText;
+const getStatusText = (status, t) => t(getStatusMeta(status).fallbackText);
 
 const clampScore = (score) => Math.min(100, Math.max(0, Number(score) || 0));
 
@@ -169,7 +169,7 @@ const ModelRow = ({ model, t }) => {
       </div>
       <div className='flex items-center justify-between gap-3 md:justify-end'>
         <Tag color={meta.tagColor} shape='circle'>
-          {t(getStatusText(status))}
+          {getStatusText(status, t)}
         </Tag>
         <ModelScoreBar model={model} />
       </div>
@@ -206,7 +206,7 @@ const VendorBlock = ({ vendor, open, onToggle, t }) => {
               {vendor.name || t('未知供应商')}
             </Text>
             <Tag color={meta.tagColor} shape='circle'>
-              {t(getStatusText(status))}
+              {getStatusText(status, t)}
             </Tag>
           </div>
           <Space spacing={8} wrap>

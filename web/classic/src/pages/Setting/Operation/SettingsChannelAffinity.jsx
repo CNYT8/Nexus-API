@@ -75,6 +75,18 @@ const KEY_SOURCE_TYPES = [
   { label: 'gjson', value: 'gjson' },
 ];
 
+const getTranslatedKeySourceTypes = (t) =>
+  KEY_SOURCE_TYPES.map((option) => ({
+    ...option,
+    label: t(option.label),
+  }));
+
+const getTranslatedContextKeyPresets = (t) =>
+  CONTEXT_KEY_PRESETS.map((preset) => ({
+    ...preset,
+    label: t(preset.label),
+  }));
+
 const CONTEXT_KEY_PRESETS = [
   { key: 'id', label: 'id（用户 ID）' },
   { key: 'token_id', label: 'token_id' },
@@ -1356,7 +1368,7 @@ export default function SettingsChannelAffinity(props) {
             <div style={{ marginTop: 6 }}>
               {(CONTEXT_KEY_PRESETS || []).map((x) => (
                 <Tag key={x.key} style={{ marginRight: 6, marginBottom: 6 }}>
-                  {x.label}
+                  {t(x.label)}
                 </Tag>
               ))}
             </div>
@@ -1369,7 +1381,7 @@ export default function SettingsChannelAffinity(props) {
                 render: (_, __, idx) => (
                   <Select
                     style={{ width: 160 }}
-                    optionList={KEY_SOURCE_TYPES}
+                    optionList={getTranslatedKeySourceTypes(t)}
                     value={(
                       editingRule?.key_sources?.[idx]?.type || 'gjson'
                     ).trim()}

@@ -227,7 +227,7 @@ export default function SettingsHeaderNavModules(props) {
                         marginBottom: '4px',
                       }}
                     >
-                      {module.title}
+                      {t(module.title)}
                     </div>
                     <Text
                       type='secondary'
@@ -239,7 +239,7 @@ export default function SettingsHeaderNavModules(props) {
                         display: 'block',
                       }}
                     >
-                      {module.description}
+                      {t(module.description)}
                     </Text>
                   </div>
                   <div style={{ marginLeft: '16px' }}>

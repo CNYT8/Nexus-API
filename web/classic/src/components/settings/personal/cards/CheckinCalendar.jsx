@@ -141,7 +141,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
       } else {
         if (!token && shouldTriggerTurnstile(message)) {
           if (!turnstileSiteKey) {
-            showError('Turnstile is enabled but site key is empty.');
+            showError(t('Turnstile is enabled but site key is empty.'));
             return;
           }
           setTurnstileModalVisible(true);

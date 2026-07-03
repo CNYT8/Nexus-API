@@ -327,7 +327,7 @@ export async function onCustomOAuthClicked(provider, options = {}) {
         provider.authorization_endpoint,
       );
       showError(
-        'OAuth 配置错误：授权端点必须是完整的 URL（以 http:// 或 https:// 开头）',
+        t('OAuth 配置错误：授权端点必须是完整的 URL（以 http:// 或 https:// 开头）'),
       );
       return;
     }
@@ -344,7 +344,7 @@ export async function onCustomOAuthClicked(provider, options = {}) {
     redirectToOAuthUrl(authUrl);
   } catch (error) {
     console.error('Failed to initiate custom OAuth:', error);
-    showError('OAuth 登录失败：' + (error.message || '未知错误'));
+    showError(t('OAuth 登录失败：') + (error.message || t('未知错误')));
   }
 }
 

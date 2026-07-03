@@ -109,6 +109,8 @@ export function SignUpForm({
     status?.oauth_register_enabled ??
     status?.data?.oauth_register_enabled ??
     true
+  const registerEnabled =
+    status?.register_enabled ?? status?.data?.register_enabled ?? true
   const hasWeChatLogin = Boolean(status?.wechat_login)
   const turnstileReady = !isTurnstileEnabled || Boolean(turnstileToken)
 
@@ -236,6 +238,14 @@ export function SignUpForm({
         className={cn('grid gap-4', className)}
         {...props}
       >
+        {!registerEnabled ? (
+          <div className='flex min-h-56 items-center justify-center rounded-lg border border-border/60 bg-muted/30 px-6 py-10 text-center'>
+            <p className='text-xl font-semibold tracking-normal text-foreground sm:text-2xl'>
+              {t('管理员关闭了新用户注册')}
+            </p>
+          </div>
+        ) : (
+          <>
         {/* Username Field */}
         <FormField
           control={form.control}
@@ -383,7 +393,7 @@ export function SignUpForm({
         )}
       </form>
 
-      {hasWeChatLogin && (
+      {registerEnabled && hasWeChatLogin && (
         <Dialog
           open={isWeChatDialogOpen}
           onOpenChange={handleWeChatDialogChange}

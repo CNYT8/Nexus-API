@@ -59,6 +59,12 @@ const nameRuleOptions = [
   { label: '后缀名称匹配', value: 3 },
 ];
 
+const getTranslatedNameRuleOptions = (t) =>
+  nameRuleOptions.map((option) => ({
+    ...option,
+    label: t(option.label),
+  }));
+
 const normalizeTags = (tags) => {
   if (!Array.isArray(tags)) return [];
   return [

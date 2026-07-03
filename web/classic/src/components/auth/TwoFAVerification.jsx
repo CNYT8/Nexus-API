@@ -36,15 +36,15 @@ const TwoFAVerification = ({ onSuccess, onBack, isModal = false }) => {
 
   const handleSubmit = async () => {
     if (!verificationCode) {
-      showError('请输入验证码');
+      showError(t('请输入验证码'));
       return;
     }
     // Validate code format
     if (useBackupCode && verificationCode.length !== 8) {
-      showError('备用码必须是8位');
+      showError(t('备用码必须是8位'));
       return;
     } else if (!useBackupCode && !/^\d{6}$/.test(verificationCode)) {
-      showError('验证码必须是6位数字');
+      showError(t('验证码必须是6位数字'));
       return;
     }
 
@@ -64,7 +64,7 @@ const TwoFAVerification = ({ onSuccess, onBack, isModal = false }) => {
         showError(res.data.message);
       }
     } catch (error) {
-      showError('验证失败，请重试');
+      showError(t('验证失败，请重试'));
     } finally {
       setLoading(false);
     }

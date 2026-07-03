@@ -335,9 +335,7 @@ const ModelTestModal = ({
             closeIcon={null}
             icon={<IconInfoCircle />}
             className='!rounded-lg mb-2'
-            description={t(
-              '说明：本页测试为非流式请求；若渠道仅支持流式返回，可能出现测试失败，请以实际使用为准。',
-            )}
+            description={t('说明：本页测试为非流式请求；若渠道仅支持流式返回，可能出现测试失败，请以实际使用为准。')}
           />
 
           {/* 搜索与操作按钮 */}

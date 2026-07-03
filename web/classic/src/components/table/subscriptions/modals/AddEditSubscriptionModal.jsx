@@ -64,6 +64,12 @@ const resetPeriodOptions = [
   { value: 'custom', label: '自定义(秒)' },
 ];
 
+const getTranslatedOptionList = (options, t) =>
+  options.map((option) => ({
+    ...option,
+    label: t(option.label),
+  }));
+
 const AddEditSubscriptionModal = ({
   visible,
   handleClose,
@@ -411,7 +417,7 @@ const AddEditSubscriptionModal = ({
                       >
                         {durationUnitOptions.map((o) => (
                           <Select.Option key={o.value} value={o.value}>
-                            {o.label}
+                            {t(o.label)}
                           </Select.Option>
                         ))}
                       </Form.Select>
@@ -471,7 +477,7 @@ const AddEditSubscriptionModal = ({
                       >
                         {resetPeriodOptions.map((o) => (
                           <Select.Option key={o.value} value={o.value}>
-                            {o.label}
+                            {t(o.label)}
                           </Select.Option>
                         ))}
                       </Form.Select>
