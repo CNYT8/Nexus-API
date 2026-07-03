@@ -43,7 +43,7 @@ const FooterBar = () => {
     <span className='text-[13px] whitespace-nowrap !text-semi-color-text-2'>
       {t('Nexus-API维护团队')}:
       <a
-        href='https://dawncloudapi.xyz'
+        href='https://dawnrouter.shop'
         target='_blank'
         rel='noopener noreferrer'
         className='!text-semi-color-primary font-medium ml-1'
@@ -238,17 +238,19 @@ const FooterBar = () => {
           </div>
         )}
 
-        <div className='flex flex-col md:flex-row items-center justify-between w-full max-w-[1110px] gap-4'>
+        <div className='grid w-full max-w-[1110px] grid-cols-1 gap-4 md:grid-cols-[1fr_auto_1fr] md:items-center'>
           <div className='flex flex-wrap items-center justify-center md:justify-start gap-2'>
             <Typography.Text className='text-sm !text-semi-color-text-1'>
               © {currentYear} {systemName}. {t('版权所有')}
             </Typography.Text>
           </div>
 
-          <div className='flex flex-wrap items-center justify-center gap-x-4 gap-y-1'>
+          <div className='flex flex-wrap items-center justify-center gap-x-4 gap-y-1 md:-ml-3'>
             {maintenanceTeam}
+          </div>
 
-            <span className='flex flex-wrap items-baseline justify-center gap-x-1 gap-y-1'>
+          <div className='flex justify-center md:justify-end'>
+            <span className='flex flex-wrap items-baseline justify-center md:justify-end gap-x-1 gap-y-1'>
               {developmentCredit}
               {designCredit}
             </span>

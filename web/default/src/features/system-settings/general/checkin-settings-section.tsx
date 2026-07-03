@@ -265,7 +265,9 @@ export function CheckinSettingsSection({
                       />
                     </FormControl>
                     <FormDescription>
-                      {t('Minimum quota amount awarded for check-in')}
+                      {t(
+                        'Default minimum quota used when no stage rule overrides it'
+                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -287,7 +289,9 @@ export function CheckinSettingsSection({
                       />
                     </FormControl>
                     <FormDescription>
-                      {t('Maximum quota amount awarded for check-in')}
+                      {t(
+                        'Default maximum quota used when no stage rule overrides it'
+                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

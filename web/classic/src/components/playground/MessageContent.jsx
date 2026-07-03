@@ -335,7 +335,7 @@ const MessageContent = ({
                   typeof textContent.text === 'string' &&
                   textContent.text.trim() !== '' && (
                     <div
-                      className={`prose prose-xs sm:prose-sm prose-gray max-w-none overflow-x-auto text-xs sm:text-sm ${message.role === 'user' ? 'user-message' : ''}`}
+                      className={`playground-message prose prose-sm prose-gray max-w-none overflow-x-auto text-sm leading-relaxed sm:leading-7 ${message.role === 'user' ? 'user-message' : 'assistant-message font-serif'}`}
                     >
                       <MarkdownRenderer
                         content={textContent.text}
@@ -376,7 +376,7 @@ const MessageContent = ({
                 }
 
                 return (
-                  <div className='prose prose-xs sm:prose-sm prose-gray max-w-none overflow-x-auto text-xs sm:text-sm'>
+                  <div className='playground-message assistant-message font-serif prose prose-sm prose-gray max-w-none overflow-x-auto text-sm leading-relaxed sm:leading-7'>
                     <MarkdownRenderer
                       content={finalDisplayableFinalContent}
                       className=''
@@ -389,7 +389,7 @@ const MessageContent = ({
             } else {
               return (
                 <div
-                  className={`prose prose-xs sm:prose-sm prose-gray max-w-none overflow-x-auto text-xs sm:text-sm ${message.role === 'user' ? 'user-message' : ''}`}
+                  className={`playground-message prose prose-sm prose-gray max-w-none overflow-x-auto text-sm leading-relaxed sm:leading-7 ${message.role === 'user' ? 'user-message' : 'assistant-message font-serif'}`}
                 >
                   <MarkdownRenderer
                     content={message.content}

@@ -142,27 +142,21 @@ func updatePricing() {
 	for _, m := range prefixList {
 		for _, pricingModel := range enableAbilities {
 			if strings.HasPrefix(pricingModel.Model, m.ModelName) {
-				if _, exists := metaMap[pricingModel.Model]; !exists {
-					metaMap[pricingModel.Model] = m
-				}
+				metaMap[pricingModel.Model] = mergeMatchedModelMeta(metaMap[pricingModel.Model], m)
 			}
 		}
 	}
 	for _, m := range suffixList {
 		for _, pricingModel := range enableAbilities {
 			if strings.HasSuffix(pricingModel.Model, m.ModelName) {
-				if _, exists := metaMap[pricingModel.Model]; !exists {
-					metaMap[pricingModel.Model] = m
-				}
+				metaMap[pricingModel.Model] = mergeMatchedModelMeta(metaMap[pricingModel.Model], m)
 			}
 		}
 	}
 	for _, m := range containsList {
 		for _, pricingModel := range enableAbilities {
 			if strings.Contains(pricingModel.Model, m.ModelName) {
-				if _, exists := metaMap[pricingModel.Model]; !exists {
-					metaMap[pricingModel.Model] = m
-				}
+				metaMap[pricingModel.Model] = mergeMatchedModelMeta(metaMap[pricingModel.Model], m)
 			}
 		}
 	}
@@ -357,6 +351,34 @@ func updatePricing() {
 	modelEnableGroupsLock.Unlock()
 
 	lastGetPricingTime = time.Now()
+}
+
+func mergeMatchedModelMeta(current *Model, matched *Model) *Model {
+	if matched == nil {
+		return current
+	}
+	if current == nil {
+		return matched
+	}
+	if current.VendorID == 0 && matched.VendorID != 0 {
+		current.VendorID = matched.VendorID
+	}
+	if current.Description == "" && matched.Description != "" {
+		current.Description = matched.Description
+	}
+	if current.Icon == "" && matched.Icon != "" {
+		current.Icon = matched.Icon
+	}
+	if current.Tags == "" && matched.Tags != "" {
+		current.Tags = matched.Tags
+	}
+	if strings.TrimSpace(current.Endpoints) == "" && strings.TrimSpace(matched.Endpoints) != "" {
+		current.Endpoints = matched.Endpoints
+	}
+	if current.Status == 0 && matched.Status != 0 {
+		current.Status = matched.Status
+	}
+	return current
 }
 
 // GetSupportedEndpointMap 返回全局端点到路径的映射

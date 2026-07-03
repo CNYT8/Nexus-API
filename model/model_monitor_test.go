@@ -299,3 +299,66 @@ func TestGetModelMonitorSummaryExcludesModelsOnDisabledChannels(t *testing.T) {
 	require.Len(t, summary.Vendors[0].Models, 1)
 	require.Equal(t, "active-channel-monitor-test", summary.Vendors[0].Models[0].ModelName)
 }
+
+func TestGetModelMonitorSummaryKeepsMatchedModelsUnderOriginalVendor(t *testing.T) {
+	InvalidateModelMonitorCache()
+	t.Cleanup(InvalidateModelMonitorCache)
+	InvalidatePricingCache()
+	t.Cleanup(InvalidatePricingCache)
+	resetModelMonitorTables(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&Vendor{
+		Id:     1201,
+		Name:   "OpenAI",
+		Status: 1,
+		Icon:   "OpenAI",
+	}).Error)
+	require.NoError(t, DB.Create(&Model{
+		Id:        1201,
+		ModelName: "gpt-4o",
+		VendorID:  1201,
+		Status:    1,
+		NameRule:  NameRuleExact,
+		Tags:      "stable,flagship",
+	}).Error)
+	require.NoError(t, DB.Create(&Model{
+		Id:        1202,
+		ModelName: "gpt-4o",
+		VendorID:  1201,
+		Status:    1,
+		NameRule:  NameRulePrefix,
+		Tags:      "tagged,derived",
+	}).Error)
+	require.NoError(t, DB.Create(&Channel{
+		Id:     995,
+		Type:   1,
+		Status: common.ChannelStatusEnabled,
+	}).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     "gpt-4o@tagged",
+		ChannelId: 995,
+		Enabled:   true,
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		CreatedAt:        now - 60,
+		Type:             LogTypeConsume,
+		ModelName:        "gpt-4o@tagged",
+		PromptTokens:     600,
+		CompletionTokens: 400,
+		UseTime:          2,
+	}).Error)
+
+	summary, err := GetModelMonitorSummary()
+	require.NoError(t, err)
+	require.Len(t, summary.Vendors, 1)
+	require.Equal(t, "OpenAI", summary.Vendors[0].Name)
+	require.Len(t, summary.Vendors[0].Models, 1)
+	require.Equal(t, "gpt-4o@tagged", summary.Vendors[0].Models[0].ModelName)
+	pricingByModel := make(map[string]Pricing)
+	for _, item := range GetPricing() {
+		pricingByModel[item.ModelName] = item
+	}
+	require.Equal(t, 1201, pricingByModel["gpt-4o@tagged"].VendorID)
+}

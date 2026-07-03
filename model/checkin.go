@@ -96,7 +96,7 @@ func getCheckinConditionStatusWithQuota(userId int, setting *operation_setting.C
 	}
 	if err := LOG_DB.Model(&Log{}).
 		Select("COUNT(*) AS request_count, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS token_count").
-		Where("user_id = ? AND type = ? AND created_at >= ? AND created_at < ?", userId, LogTypeConsume, startAt.Unix(), endAt.Unix()).
+		Where("user_id = ? AND type = ? AND quota > 0 AND created_at >= ? AND created_at < ?", userId, LogTypeConsume, startAt.Unix(), endAt.Unix()).
 		Scan(&usage).Error; err != nil {
 		return nil, 0, 0, err
 	}
@@ -106,23 +106,44 @@ func getCheckinConditionStatusWithQuota(userId int, setting *operation_setting.C
 
 	if len(setting.StageRules) > 0 {
 		status.StageMode = true
+		matched := false
+		bestIndex := -1
+		bestPriority := -1
+		bestAllowCheckin := false
+		bestMinQuota := 0
+		bestMaxQuota := 0
+		bestRequestThreshold := 0
+		bestTokenThreshold := 0
 		for index, rule := range setting.StageRules {
 			if !checkinStageRuleMatches(rule, usage.RequestCount, usage.TokenCount) {
 				continue
 			}
-			status.MatchedStage = index
-			status.RequestThreshold = rule.RequestThreshold
-			status.TokenThreshold = rule.TokenThreshold
+			matched = true
 			stageMinQuota, stageMaxQuota := normalizeCheckinQuotaRange(rule.MinQuota, rule.MaxQuota)
-			status.StageMinQuota = stageMinQuota
-			status.StageMaxQuota = stageMaxQuota
-			if !rule.AllowCheckin {
+			priority := checkinStageRulePriority(rule)
+			if !matched || priority > bestPriority || (priority == bestPriority && index > bestIndex) {
+				bestIndex = index
+				bestPriority = priority
+				bestAllowCheckin = rule.AllowCheckin
+				bestMinQuota = stageMinQuota
+				bestMaxQuota = stageMaxQuota
+				bestRequestThreshold = rule.RequestThreshold
+				bestTokenThreshold = rule.TokenThreshold
+			}
+		}
+		if matched {
+			status.MatchedStage = bestIndex
+			status.RequestThreshold = bestRequestThreshold
+			status.TokenThreshold = bestTokenThreshold
+			status.StageMinQuota = bestMinQuota
+			status.StageMaxQuota = bestMaxQuota
+			if !bestAllowCheckin {
 				status.Eligible = false
 				status.Reason = "stage_disabled"
 				status.Message = "当前阶段无法签到"
 				return status, 0, 0, nil
 			}
-			return status, stageMinQuota, stageMaxQuota, nil
+			return status, bestMinQuota, bestMaxQuota, nil
 		}
 		status.Eligible = false
 		status.Reason = "stage_no_match"
@@ -144,6 +165,20 @@ func getCheckinConditionStatusWithQuota(userId int, setting *operation_setting.C
 	}
 
 	return status, minQuota, maxQuota, nil
+}
+
+func checkinStageRulePriority(rule operation_setting.CheckinStageRule) int {
+	priority := 0
+	if rule.RequestThreshold > 0 {
+		priority += rule.RequestThreshold * 1000000
+	}
+	if rule.TokenThreshold > 0 {
+		priority += rule.TokenThreshold
+	}
+	if !rule.AllowCheckin {
+		priority += 1
+	}
+	return priority
 }
 
 func checkinStageRuleMatches(rule operation_setting.CheckinStageRule, requestCount int64, tokenCount int64) bool {

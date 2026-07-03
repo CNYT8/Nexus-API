@@ -40,7 +40,7 @@ const NEXUS_API_RELEASES_URL = 'https://github.com/CNYT8/Nexus-API/releases';
 const NEXUS_API_LATEST_RELEASE_API =
   'https://api.github.com/repos/CNYT8/Nexus-API/releases/latest';
 const NEW_API_BASE_RELEASE = {
-  tag_name: 'v1.0.0-rc.15(部分补丁)',
+  tag_name: 'v1.0.1-rc.1',
   html_url: 'https://github.com/QuantumNous/new-api/releases/tag/v1.0.0-rc.15',
 };
 const NEXUS_DEFAULT_FRONTEND_ENABLED = false;

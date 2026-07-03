@@ -161,7 +161,7 @@ function StageRulesEditor({ disabled, rules, onChange, t }) {
       <div className='flex items-center justify-between gap-2'>
         <Text strong>{t('阶段规则')}</Text>
         <Text type='tertiary' size='small'>
-          {t('从上到下匹配，首个命中阶段生效')}
+          {t('从上到下匹配，命中最高阶段规则')}
         </Text>
       </div>
       {rules.length === 0 ? (
@@ -433,7 +433,7 @@ export default function SettingsCheckin(props) {
                 <Form.InputNumber
                   field={'checkin_setting.min_quota'}
                   label={t('默认最小额度')}
-                  placeholder={t('未启用阶段签到时使用')}
+                  placeholder={t('阶段未命中时作为默认额度')}
                   onChange={handleFieldChange('checkin_setting.min_quota')}
                   min={0}
                   disabled={!checkinEnabled}
@@ -443,7 +443,7 @@ export default function SettingsCheckin(props) {
                 <Form.InputNumber
                   field={'checkin_setting.max_quota'}
                   label={t('默认最大额度')}
-                  placeholder={t('未启用阶段签到时使用')}
+                  placeholder={t('阶段未命中时作为默认额度')}
                   onChange={handleFieldChange('checkin_setting.max_quota')}
                   min={0}
                   disabled={!checkinEnabled}

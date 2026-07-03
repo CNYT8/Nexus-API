@@ -82,23 +82,23 @@ func TestCheckinConditionStatusRejectsEqualTokenThreshold(t *testing.T) {
 	require.Equal(t, int64(100), status.TokenCount)
 }
 
-func TestCheckinStageStatusUsesFirstMatchedRule(t *testing.T) {
+func TestCheckinStageStatusUsesHighestMatchedRule(t *testing.T) {
 	truncateTables(t)
 	userId := 1005
 	setting := &operation_setting.CheckinSetting{
 		ConditionEnabled: true,
 		StageRules: []operation_setting.CheckinStageRule{
 			{
+				RequestThreshold: 5,
+				AllowCheckin:     true,
+				MinQuota:         25000,
+				MaxQuota:         50000,
+			},
+			{
 				RequestThreshold: 12,
 				TokenThreshold:   300000,
 				AllowCheckin:     true,
 				MinQuota:         50000,
-				MaxQuota:         50000,
-			},
-			{
-				RequestThreshold: 5,
-				AllowCheckin:     true,
-				MinQuota:         25000,
 				MaxQuota:         50000,
 			},
 		},
@@ -112,11 +112,45 @@ func TestCheckinStageStatusUsesFirstMatchedRule(t *testing.T) {
 	status, minQuota, maxQuota, err := getCheckinConditionStatusWithQuota(userId, setting)
 	require.NoError(t, err)
 	require.True(t, status.Eligible)
-	require.Equal(t, 0, status.MatchedStage)
+	require.Equal(t, 1, status.MatchedStage)
 	require.Equal(t, 50000, minQuota)
 	require.Equal(t, 50000, maxQuota)
 	require.Equal(t, int64(13), status.RequestCount)
 	require.Equal(t, int64(400009), status.TokenCount)
+}
+
+func TestCheckinConditionStatusIgnoresZeroQuotaConsumeLogs(t *testing.T) {
+	truncateTables(t)
+	userId := 1008
+	setting := &operation_setting.CheckinSetting{
+		ConditionEnabled: true,
+		RequestThreshold: 1,
+		TokenThreshold:   100,
+	}
+
+	yesterday := time.Now().AddDate(0, 0, -1)
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId:           userId,
+		CreatedAt:        time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 12, 0, 0, 0, time.Local).Unix(),
+		Type:             LogTypeConsume,
+		Quota:            0,
+		PromptTokens:     200,
+		CompletionTokens: 100,
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId:           userId,
+		CreatedAt:        time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 12, 1, 0, 0, time.Local).Unix(),
+		Type:             LogTypeError,
+		PromptTokens:     999,
+		CompletionTokens: 999,
+	}).Error)
+
+	status, err := GetCheckinConditionStatus(userId, setting)
+	require.NoError(t, err)
+	require.False(t, status.Eligible)
+	require.Equal(t, int64(0), status.RequestCount)
+	require.Equal(t, int64(0), status.TokenCount)
+	require.Equal(t, "request_count", status.Reason)
 }
 
 func TestCheckinStageStatusCanDenyLowUsage(t *testing.T) {
@@ -180,6 +214,7 @@ func createYesterdayConsumeLogs(t *testing.T, userId int, tokenCounts ...int) {
 			UserId:           userId,
 			CreatedAt:        time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 12, index, 0, 0, time.Local).Unix(),
 			Type:             LogTypeConsume,
+			Quota:            1,
 			PromptTokens:     tokens,
 			CompletionTokens: 0,
 		}).Error)

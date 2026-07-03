@@ -1,16 +1,41 @@
 /* 基础markdown样式 */
 .markdown-body {
   font-family: inherit;
-  line-height: 1.6;
+  line-height: 1.75;
   color: var(--semi-color-text-0);
   overflow-wrap: break-word;
   word-wrap: break-word;
   word-break: break-word;
 }
 
+.assistant-message {
+  color: var(--semi-color-text-0);
+}
+
+.assistant-message .markdown-body {
+  font-family: Georgia, 'Times New Roman', 'Noto Serif SC', serif;
+  line-height: 1.75;
+}
+
+.playground-message {
+  font-size: 0.95rem;
+}
+
+.playground-message .markdown-body p,
+.playground-message .markdown-body li,
+.playground-message .markdown-body blockquote {
+  line-height: 1.75;
+}
+
 /* 用户消息样式 - 白色字体适配蓝色背景 */
 .user-message {
   color: white !important;
+}
+
+.playground-message.user-message {
+  background-color: var(--semi-color-fill-0);
+  border-radius: 1.5rem;
+  padding: 0.75rem 0.95rem;
 }
 
 .user-message .markdown-body {
@@ -444,6 +469,6 @@ pre:hover .copy-code-button {
 }
 
 .animate-fade-in {
-  animation: fade-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: fade-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
   will-change: opacity, transform;
 }
