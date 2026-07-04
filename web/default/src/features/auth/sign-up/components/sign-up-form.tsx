@@ -241,7 +241,7 @@ export function SignUpForm({
         {!registerEnabled ? (
           <div className='flex min-h-56 items-center justify-center rounded-lg border border-border/60 bg-muted/30 px-6 py-10 text-center'>
             <p className='text-xl font-semibold tracking-normal text-foreground sm:text-2xl'>
-              {t('管理员关闭了新用户注册')}
+              {t('New user registration has been disabled by administrator')}
             </p>
           </div>
         ) : (

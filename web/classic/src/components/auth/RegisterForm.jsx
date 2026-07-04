@@ -791,10 +791,21 @@ const RegisterForm = () => {
                 </Title>
               </div>
               <Card className='border-0 !rounded-2xl overflow-hidden'>
-                <div className='flex min-h-[320px] items-center justify-center px-8 py-12 text-center'>
+                <div className='flex min-h-[320px] flex-col items-center justify-center px-8 py-12 text-center'>
                   <Title heading={4} style={{ marginBottom: 0 }}>
                     {t('管理员关闭了新用户注册')}
                   </Title>
+                  <div className='mt-6 text-center text-sm'>
+                    <Text>
+                      {t('已有账户？')}{' '}
+                      <Link
+                        to='/login'
+                        className='text-blue-600 hover:text-blue-800 font-medium'
+                      >
+                        {t('登录')}
+                      </Link>
+                    </Text>
+                  </div>
                 </div>
               </Card>
             </div>

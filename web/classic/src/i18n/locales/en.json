@@ -659,6 +659,7 @@
     "允许回调（会泄露服务器 IP 地址）": "Allow callback (will leak server IP address)",
     "允许在 Stripe 支付中输入促销码": "Allow entering promotion codes during Stripe checkout",
     "允许新用户注册": "Allow new user registration",
+    "管理员关闭了新用户注册": "New user registration has been disabled by administrator",
     "允许的 Origins": "Allowed Origins",
     "允许的IP，一行一个，不填写则不限制": "Allowed IPs, one per line, not filled in means no restrictions",
     "允许的端口": "Allowed Ports",
