@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	membership_setting "github.com/QuantumNous/new-api/setting/membership_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -609,6 +610,9 @@ func handleConfigUpdate(key, value string) (bool, error) {
 
 	if configName == "checkin_setting" && configKey == "stage_rules" {
 		return true, operation_setting.UpdateCheckinStageRulesByJSONString(value)
+	}
+	if configName == "membership_setting" && configKey == "tiers" {
+		return true, membership_setting.UpdateTiersByJSONString(value)
 	}
 
 	// 更新配置

@@ -36,6 +36,7 @@ export const GLOBAL_SIDEBAR_DEFAULT_CONFIG = {
     enabled: true,
     topup: true,
     personal: true,
+    membership: false,
   },
 };
 
@@ -109,6 +110,11 @@ export const GLOBAL_SIDEBAR_SECTION_CONFIGS = [
         title: '个人设置',
         description: '个人信息设置',
       },
+      {
+        key: 'membership',
+        title: '会员中心',
+        description: '会员等级和权益',
+      },
     ],
   },
 ];
@@ -117,6 +123,21 @@ const deepClone = (value) => JSON.parse(JSON.stringify(value));
 
 export const cloneGlobalSidebarAdminConfig = () =>
   deepClone(GLOBAL_SIDEBAR_DEFAULT_CONFIG);
+
+export const applyMembershipSidebarGate = (config, membershipEnabled) => {
+  const nextConfig = deepClone(config || cloneGlobalSidebarAdminConfig());
+  nextConfig.personal = {
+    enabled: true,
+    topup: true,
+    personal: true,
+    ...(nextConfig.personal || {}),
+    membership: membershipEnabled === true,
+  };
+  if (membershipEnabled === true) {
+    nextConfig.personal.enabled = true;
+  }
+  return nextConfig;
+};
 
 export const mergeGlobalSidebarAdminConfig = (savedConfig) => {
   const merged = cloneGlobalSidebarAdminConfig();

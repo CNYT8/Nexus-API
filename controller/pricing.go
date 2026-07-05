@@ -51,6 +51,7 @@ func GetPricing(c *gin.Context) {
 				if ok {
 					groupRatio[g] = ratio
 				}
+				groupRatio[g], _ = model.ApplyMembershipDiscount(userId.(int), g, groupRatio[g])
 			}
 		}
 	}

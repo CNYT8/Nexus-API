@@ -34,6 +34,8 @@ export const useUsersData = () => {
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
   const [searching, setSearching] = useState(false);
   const [groupOptions, setGroupOptions] = useState([]);
+  const [membershipEnabled, setMembershipEnabled] = useState(false);
+  const [membershipTierOptions, setMembershipTierOptions] = useState([]);
   const [userCount, setUserCount] = useState(0);
 
   // Modal states
@@ -252,6 +254,27 @@ export const useUsersData = () => {
     }
   };
 
+  const fetchMembershipTiers = async () => {
+    try {
+      const res = await API.get('/api/membership/admin/tiers');
+      if (!res.data.success) {
+        return;
+      }
+      const tiers = res.data.data?.tiers || [];
+      setMembershipEnabled(res.data.data?.enabled === true);
+      setMembershipTierOptions(
+        tiers
+          .filter((tier) => tier.enabled !== false)
+          .map((tier) => ({
+            label: tier.name,
+            value: tier.id,
+          })),
+      );
+    } catch (error) {
+      showError(t('会员等级加载失败'));
+    }
+  };
+
   // Modal control functions
   const closeAddUser = () => {
     setShowAddUser(false);
@@ -272,6 +295,7 @@ export const useUsersData = () => {
         showError(reason);
       });
     fetchGroups().then();
+    fetchMembershipTiers().then();
   }, []);
 
   return {
@@ -283,6 +307,8 @@ export const useUsersData = () => {
     userCount,
     searching,
     groupOptions,
+    membershipEnabled,
+    membershipTierOptions,
 
     // Modal state
     showAddUser,

@@ -39,24 +39,46 @@ import {
 import {
   compareObjects,
   API,
+  getCurrencyConfig,
   showError,
   showSuccess,
   showWarning,
 } from '../../../helpers';
+import {
+  displayAmountToQuota,
+  quotaToDisplayAmount,
+} from '../../../helpers/quota';
 import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
 
 let stageIdSeed = 0;
 const createStageId = () => `checkin_stage_${++stageIdSeed}`;
+const amountPrecision = 6;
+const amountStep = 0.000001;
+
+const quotaToAmountValue = (quota) =>
+  Number(quotaToDisplayAmount(quota || 0).toFixed(amountPrecision));
+
+const amountToQuotaValue = (amount) => displayAmountToQuota(amount || 0);
 
 const defaultStageRule = () => ({
   _id: createStageId(),
   request_threshold: 0,
   token_threshold: 0,
   allow_checkin: true,
-  min_quota: 0,
-  max_quota: 0,
+  min_amount: 0,
+  max_amount: 0,
+});
+
+const getDefaultInputs = () => ({
+  'checkin_setting.enabled': false,
+  'checkin_setting.condition_enabled': false,
+  'checkin_setting.request_threshold': 0,
+  'checkin_setting.token_threshold': 0,
+  'checkin_setting.stage_rules': '',
+  'checkin_setting.min_quota': quotaToAmountValue(1000),
+  'checkin_setting.max_quota': quotaToAmountValue(10000),
 });
 
 function parseStageRules(value) {
@@ -73,8 +95,14 @@ function parseStageRules(value) {
       request_threshold: Number(rule.request_threshold) || 0,
       token_threshold: Number(rule.token_threshold) || 0,
       allow_checkin: rule.allow_checkin !== false,
-      min_quota: rule.allow_checkin === false ? 0 : Number(rule.min_quota) || 0,
-      max_quota: rule.allow_checkin === false ? 0 : Number(rule.max_quota) || 0,
+      min_amount:
+        rule.allow_checkin === false
+          ? 0
+          : quotaToAmountValue(Number(rule.min_quota) || 0),
+      max_amount:
+        rule.allow_checkin === false
+          ? 0
+          : quotaToAmountValue(Number(rule.max_quota) || 0),
     }));
   } catch {
     return [];
@@ -83,19 +111,22 @@ function parseStageRules(value) {
 
 function serializeStageRules(rules) {
   const cleaned = rules
-    .map((rule) => ({
-      request_threshold: Math.max(0, Number(rule.request_threshold) || 0),
-      token_threshold: Math.max(0, Number(rule.token_threshold) || 0),
-      allow_checkin: rule.allow_checkin !== false,
-      min_quota:
-        rule.allow_checkin === false
-          ? 0
-          : Math.max(0, Number(rule.min_quota) || 0),
-      max_quota:
-        rule.allow_checkin === false
-          ? 0
-          : Math.max(0, Number(rule.max_quota) || 0),
-    }))
+    .map((rule) => {
+      const allowCheckin = rule.allow_checkin !== false;
+      const minQuota = allowCheckin
+        ? Math.max(0, amountToQuotaValue(rule.min_amount))
+        : 0;
+      const maxQuota = allowCheckin
+        ? Math.max(0, amountToQuotaValue(rule.max_amount))
+        : 0;
+      return {
+        request_threshold: Math.max(0, Number(rule.request_threshold) || 0),
+        token_threshold: Math.max(0, Number(rule.token_threshold) || 0),
+        allow_checkin: allowCheckin,
+        min_quota: minQuota,
+        max_quota: maxQuota,
+      };
+    })
     .filter(
       (rule) =>
         rule.request_threshold > 0 ||
@@ -112,6 +143,7 @@ function serializeStageRules(rules) {
 }
 
 function StageRulesEditor({ disabled, rules, onChange, t }) {
+  const currencySymbol = getCurrencyConfig().symbol;
   const emit = (nextRules) => {
     onChange(nextRules, serializeStageRules(nextRules));
   };
@@ -131,8 +163,8 @@ function StageRulesEditor({ disabled, rules, onChange, t }) {
           ? {
               ...rule,
               allow_checkin: allowCheckin,
-              min_quota: allowCheckin ? rule.min_quota : 0,
-              max_quota: allowCheckin ? rule.max_quota : 0,
+              min_amount: allowCheckin ? rule.min_amount : 0,
+              max_amount: allowCheckin ? rule.max_amount : 0,
             }
           : rule,
       ),
@@ -245,32 +277,38 @@ function StageRulesEditor({ disabled, rules, onChange, t }) {
             </div>
             <div className='flex flex-col gap-1' style={{ flex: 1 }}>
               <Text type='tertiary' size='small'>
-                {t('最小额度')}
+                {t('最小金额')}
               </Text>
               <InputNumber
                 size='small'
-                value={rule.min_quota}
+                value={rule.min_amount}
                 min={0}
+                precision={amountPrecision}
+                step={amountStep}
+                prefix={currencySymbol}
                 disabled={disabled || !rule.allow_checkin}
-                placeholder={t('最小额度')}
+                placeholder={t('最小金额')}
                 onChange={(value) =>
-                  updateRule(rule._id, 'min_quota', value || 0)
+                  updateRule(rule._id, 'min_amount', value || 0)
                 }
                 style={{ width: '100%' }}
               />
             </div>
             <div className='flex flex-col gap-1' style={{ flex: 1 }}>
               <Text type='tertiary' size='small'>
-                {t('最大额度')}
+                {t('最大金额')}
               </Text>
               <InputNumber
                 size='small'
-                value={rule.max_quota}
+                value={rule.max_amount}
                 min={0}
+                precision={amountPrecision}
+                step={amountStep}
+                prefix={currencySymbol}
                 disabled={disabled || !rule.allow_checkin}
-                placeholder={t('最大额度')}
+                placeholder={t('最大金额')}
                 onChange={(value) =>
-                  updateRule(rule._id, 'max_quota', value || 0)
+                  updateRule(rule._id, 'max_amount', value || 0)
                 }
                 style={{ width: '100%' }}
               />
@@ -298,15 +336,7 @@ function StageRulesEditor({ disabled, rules, onChange, t }) {
 export default function SettingsCheckin(props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
-  const [inputs, setInputs] = useState({
-    'checkin_setting.enabled': false,
-    'checkin_setting.condition_enabled': false,
-    'checkin_setting.request_threshold': 0,
-    'checkin_setting.token_threshold': 0,
-    'checkin_setting.stage_rules': '',
-    'checkin_setting.min_quota': 1000,
-    'checkin_setting.max_quota': 10000,
-  });
+  const [inputs, setInputs] = useState(getDefaultInputs());
   const [stageRules, setStageRules] = useState([]);
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -334,7 +364,12 @@ export default function SettingsCheckin(props) {
     if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
     const requestQueue = updateArray.map((item) => {
       let value = '';
-      if (typeof inputs[item.key] === 'boolean') {
+      if (
+        item.key === 'checkin_setting.min_quota' ||
+        item.key === 'checkin_setting.max_quota'
+      ) {
+        value = String(amountToQuotaValue(inputs[item.key]));
+      } else if (typeof inputs[item.key] === 'boolean') {
         value = String(inputs[item.key]);
       } else {
         value = String(inputs[item.key]);
@@ -365,14 +400,19 @@ export default function SettingsCheckin(props) {
   }
 
   useEffect(() => {
+    const defaultInputs = getDefaultInputs();
     const currentInputs = {};
     for (let key in props.options) {
-      if (Object.keys(inputs).includes(key)) {
-        currentInputs[key] = props.options[key];
+      if (Object.keys(defaultInputs).includes(key)) {
+        currentInputs[key] =
+          key === 'checkin_setting.min_quota' ||
+          key === 'checkin_setting.max_quota'
+            ? quotaToAmountValue(props.options[key])
+            : props.options[key];
       }
     }
     const mergedInputs = {
-      ...inputs,
+      ...defaultInputs,
       ...currentInputs,
     };
     setInputs(mergedInputs);
@@ -416,7 +456,7 @@ export default function SettingsCheckin(props) {
                   field={'checkin_setting.condition_enabled'}
                   label={t('启用阶段签到')}
                   extraText={t(
-                    '按前一天调用次数或 Token 用量命中阶段，可设置固定额度、随机额度或无法签到',
+                    '按前一天调用次数或 Token 用量命中阶段，可设置固定金额、随机金额或无法签到',
                   )}
                   size='default'
                   checkedText='｜'
@@ -432,8 +472,11 @@ export default function SettingsCheckin(props) {
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.InputNumber
                   field={'checkin_setting.min_quota'}
-                  label={t('默认最小额度')}
-                  placeholder={t('阶段未命中时作为默认额度')}
+                  label={t('默认最小金额')}
+                  prefix={getCurrencyConfig().symbol}
+                  placeholder={t('无阶段规则时作为默认签到金额')}
+                  precision={amountPrecision}
+                  step={amountStep}
                   onChange={handleFieldChange('checkin_setting.min_quota')}
                   min={0}
                   disabled={!checkinEnabled}
@@ -442,8 +485,11 @@ export default function SettingsCheckin(props) {
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.InputNumber
                   field={'checkin_setting.max_quota'}
-                  label={t('默认最大额度')}
-                  placeholder={t('阶段未命中时作为默认额度')}
+                  label={t('默认最大金额')}
+                  prefix={getCurrencyConfig().symbol}
+                  placeholder={t('无阶段规则时作为默认签到金额')}
+                  precision={amountPrecision}
+                  step={amountStep}
                   onChange={handleFieldChange('checkin_setting.max_quota')}
                   min={0}
                   disabled={!checkinEnabled}

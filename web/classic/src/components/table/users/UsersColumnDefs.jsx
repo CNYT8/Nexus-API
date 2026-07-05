@@ -201,6 +201,18 @@ const renderInviteInfo = (text, record, t) => {
 };
 
 /**
+ * Render membership tier
+ */
+const renderMembership = (text, record, t) => {
+  const membershipName = record.membership_name || t('无');
+  return (
+    <Tag color={record.membership_tier_id ? 'yellow' : 'white'} shape='circle'>
+      {membershipName}
+    </Tag>
+  );
+};
+
+/**
  * Render operations column
  */
 const renderOperations = (
@@ -316,8 +328,9 @@ export const getUsersColumns = ({
   showResetPasskeyModal,
   showResetTwoFAModal,
   showUserSubscriptionsModal,
+  membershipEnabled,
 }) => {
-  return [
+  const columns = [
     {
       title: 'ID',
       dataIndex: 'id',
@@ -345,6 +358,15 @@ export const getUsersColumns = ({
         return <div>{renderGroup(text)}</div>;
       },
     },
+    ...(membershipEnabled
+      ? [
+          {
+            title: t('会员阶级'),
+            dataIndex: 'membership_name',
+            render: (text, record, index) => renderMembership(text, record, t),
+          },
+        ]
+      : []),
     {
       title: t('角色'),
       dataIndex: 'role',
@@ -387,4 +409,5 @@ export const getUsersColumns = ({
         }),
     },
   ];
+  return columns;
 };

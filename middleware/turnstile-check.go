@@ -17,6 +17,10 @@ type turnstileCheckResponse struct {
 func TurnstileCheck() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if common.TurnstileCheckEnabled {
+			if c.Request.URL.Path == "/api/user/register" && !common.RegisterEnabled {
+				c.Next()
+				return
+			}
 			session := sessions.Default(c)
 			turnstileChecked := session.Get("turnstile")
 			if turnstileChecked != nil {

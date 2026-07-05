@@ -282,6 +282,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	} else {
 		finalGroupRatio = groupRatio
 	}
+	finalGroupRatio, _ = model.ApplyMembershipDiscount(task.UserId, group, finalGroupRatio)
 
 	// 计算 OtherRatios 乘积（视频折扣、时长等）
 	otherMultiplier := 1.0

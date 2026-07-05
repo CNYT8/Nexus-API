@@ -140,20 +140,25 @@ const RegisterForm = () => {
       status.telegram_oauth ||
       hasCustomOAuthProviders,
   );
+  const registerEnabled = status.register_enabled !== false;
 
   const [showEmailVerification, setShowEmailVerification] = useState(false);
 
   useEffect(() => {
     setShowEmailVerification(!!status?.email_verification);
-    if (status?.turnstile_check) {
+    if (registerEnabled && status?.turnstile_check) {
       setTurnstileEnabled(true);
       setTurnstileSiteKey(status.turnstile_site_key);
+    } else {
+      setTurnstileEnabled(false);
+      setTurnstileSiteKey('');
+      setTurnstileToken('');
     }
 
     // 从 status 获取用户协议和隐私政策的启用状态
     setHasUserAgreement(status?.user_agreement_enabled || false);
     setHasPrivacyPolicy(status?.privacy_policy_enabled || false);
-  }, [status]);
+  }, [registerEnabled, status]);
 
   useEffect(() => {
     let countdownInterval = null;
@@ -781,7 +786,7 @@ const RegisterForm = () => {
         style={{ top: '50%', left: '-120px' }}
       />
       <div className='w-full max-w-sm mt-[60px]'>
-        {status.register_enabled === false ? (
+        {!registerEnabled ? (
           <div className='flex flex-col items-center'>
             <div className='w-full max-w-md'>
               <div className='flex items-center justify-center mb-6 gap-2'>
@@ -815,7 +820,7 @@ const RegisterForm = () => {
         ) : (
           renderOAuthOptions()
         )}
-        {status.register_enabled !== false && renderWeChatLoginModal()}
+        {registerEnabled && renderWeChatLoginModal()}
 
         {turnstileEnabled && (
           <div className='flex justify-center mt-6'>

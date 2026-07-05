@@ -29,6 +29,7 @@ import {
   Typography,
 } from '@douyinfe/semi-ui';
 import {
+  applyMembershipSidebarGate,
   cloneGlobalSidebarAdminConfig,
   GLOBAL_SIDEBAR_SECTION_CONFIGS,
   mergeGlobalSidebarAdminConfig,
@@ -42,6 +43,7 @@ export default function SettingsSidebarModulesAdmin(props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [statusState, statusDispatch] = useContext(StatusContext);
+  const membershipEnabled = statusState?.status?.membership_enabled === true;
 
   const [sidebarModulesAdmin, setSidebarModulesAdmin] = useState(() =>
     cloneGlobalSidebarAdminConfig(),
@@ -72,25 +74,35 @@ export default function SettingsSidebarModulesAdmin(props) {
   }
 
   function resetSidebarModules() {
-    setSidebarModulesAdmin(cloneGlobalSidebarAdminConfig());
+    setSidebarModulesAdmin(
+      applyMembershipSidebarGate(
+        cloneGlobalSidebarAdminConfig(),
+        membershipEnabled,
+      ),
+    );
     showSuccess(t('已重置为默认配置'));
   }
 
   async function onSubmit() {
     setLoading(true);
+    const nextSidebarModulesAdmin = applyMembershipSidebarGate(
+      sidebarModulesAdmin,
+      membershipEnabled,
+    );
     try {
       const res = await API.put('/api/option/', {
         key: 'SidebarModulesAdmin',
-        value: JSON.stringify(sidebarModulesAdmin),
+        value: JSON.stringify(nextSidebarModulesAdmin),
       });
       const { success, message } = res.data;
       if (success) {
         showSuccess(t('保存成功'));
+        setSidebarModulesAdmin(nextSidebarModulesAdmin);
         statusDispatch({
           type: 'set',
           payload: {
-            ...statusState.status,
-            SidebarModulesAdmin: JSON.stringify(sidebarModulesAdmin),
+            ...(statusState?.status || {}),
+            SidebarModulesAdmin: JSON.stringify(nextSidebarModulesAdmin),
           },
         });
 
@@ -111,15 +123,30 @@ export default function SettingsSidebarModulesAdmin(props) {
     if (props.options && props.options.SidebarModulesAdmin) {
       try {
         const modules = JSON.parse(props.options.SidebarModulesAdmin);
-        setSidebarModulesAdmin(mergeGlobalSidebarAdminConfig(modules));
+        setSidebarModulesAdmin(
+          applyMembershipSidebarGate(
+            mergeGlobalSidebarAdminConfig(modules),
+            membershipEnabled,
+          ),
+        );
       } catch (error) {
-        setSidebarModulesAdmin(cloneGlobalSidebarAdminConfig());
+        setSidebarModulesAdmin(
+          applyMembershipSidebarGate(
+            cloneGlobalSidebarAdminConfig(),
+            membershipEnabled,
+          ),
+        );
       }
       return;
     }
 
-    setSidebarModulesAdmin(cloneGlobalSidebarAdminConfig());
-  }, [props.options]);
+    setSidebarModulesAdmin(
+      applyMembershipSidebarGate(
+        cloneGlobalSidebarAdminConfig(),
+        membershipEnabled,
+      ),
+    );
+  }, [membershipEnabled, props.options]);
 
   return (
     <Card>
@@ -220,10 +247,19 @@ export default function SettingsSidebarModulesAdmin(props) {
                       </div>
                       <div style={{ marginLeft: '16px' }}>
                         <Switch
-                          checked={sidebarModulesAdmin[section.key]?.[module.key]}
+                          checked={
+                            section.key === 'personal' &&
+                            module.key === 'membership'
+                              ? membershipEnabled
+                              : sidebarModulesAdmin[section.key]?.[module.key]
+                          }
                           onChange={handleModuleChange(section.key, module.key)}
                           size='default'
-                          disabled={!sidebarModulesAdmin[section.key]?.enabled}
+                          disabled={
+                            (section.key === 'personal' &&
+                              module.key === 'membership') ||
+                            !sidebarModulesAdmin[section.key]?.enabled
+                          }
                         />
                       </div>
                     </div>

@@ -95,6 +95,7 @@ const EditUserModal = (props) => {
     quota: 0,
     quota_amount: 0,
     group: 'default',
+    membership_tier_id: '',
     remark: '',
   });
 
@@ -152,6 +153,9 @@ const EditUserModal = (props) => {
     let payload = { ...values };
     delete payload.quota;
     delete payload.quota_amount;
+    if (!props.membershipEnabled) {
+      delete payload.membership_tier_id;
+    }
     if (userId) {
       payload.id = parseInt(userId);
     }
@@ -375,7 +379,9 @@ const EditUserModal = (props) => {
                     </div>
 
                     <Row gutter={12}>
-                      <Col span={24}>
+                      <Col
+                        span={props.membershipEnabled && !isMobile ? 12 : 24}
+                      >
                         <Form.Select
                           field='group'
                           label={t('分组')}
@@ -386,6 +392,22 @@ const EditUserModal = (props) => {
                           rules={[{ required: true, message: t('请选择分组') }]}
                         />
                       </Col>
+
+                      {props.membershipEnabled && (
+                        <Col span={isMobile ? 24 : 12}>
+                          <Form.Select
+                            field='membership_tier_id'
+                            label={t('会员阶级')}
+                            placeholder={t('请选择会员阶级')}
+                            optionList={[
+                              { label: t('无'), value: '' },
+                              ...(props.membershipTierOptions || []),
+                            ]}
+                            showClear
+                            search
+                          />
+                        </Col>
+                      )}
 
                       <Col span={10}>
                         <Form.InputNumber
@@ -420,7 +442,10 @@ const EditUserModal = (props) => {
                             ? `▾ ${t('收起原生额度输入')}`
                             : `▸ ${t('使用原生额度输入')}`}
                         </div>
-                        <div style={{ display: showQuotaInput ? 'block' : 'none' }} className='mt-2'>
+                        <div
+                          style={{ display: showQuotaInput ? 'block' : 'none' }}
+                          className='mt-2'
+                        >
                           <Form.InputNumber
                             field='quota'
                             label={t('额度')}

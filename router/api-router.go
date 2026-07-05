@@ -33,6 +33,8 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/home_page_content", controller.GetHomePageContent)
 		apiRouter.GET("/pricing", middleware.HeaderNavModuleAuth("pricing"), controller.GetPricing)
 		apiRouter.GET("/model_monitor", middleware.UserAuth(), controller.GetModelMonitor)
+		apiRouter.GET("/membership/self", middleware.UserAuth(), controller.GetMembershipSelf)
+		apiRouter.GET("/membership/admin/tiers", middleware.AdminAuth(), controller.AdminGetMembershipTiers)
 		perfMetricsRoute := apiRouter.Group("/perf-metrics")
 		perfMetricsRoute.Use(middleware.HeaderNavModulePublicOrUserAuth("pricing"))
 		{

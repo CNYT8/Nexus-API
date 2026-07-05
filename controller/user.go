@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -280,6 +281,7 @@ func GetAllUsers(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	model.AttachUserMemberships(users)
 
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(users)
@@ -309,6 +311,7 @@ func SearchUsers(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	model.AttachUserMemberships(users)
 
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(users)
@@ -336,6 +339,7 @@ func GetUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
 		return
 	}
+	model.AttachUserMemberships([]*model.User{user})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -488,6 +492,12 @@ func GetSelf(c *gin.Context) {
 		"sidebar_modules":   sidebarModules,
 		"permissions":       permissions,
 	}
+	if summary, err := model.BuildMembershipSummary(user.Id); err == nil {
+		responseData["membership_tier_id"] = summary.TierId
+		responseData["membership_name"] = summary.TierName
+		responseData["membership_source"] = summary.Source
+		responseData["membership_cumulative_amount"] = summary.CumulativeAmount
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -554,10 +564,25 @@ func GetUserModels(c *gin.Context) {
 
 func UpdateUser(c *gin.Context) {
 	var updatedUser model.User
-	err := json.NewDecoder(c.Request.Body).Decode(&updatedUser)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	err = json.Unmarshal(body, &updatedUser)
 	if err != nil || updatedUser.Id == 0 {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
+	}
+	var rawPayload map[string]json.RawMessage
+	_ = json.Unmarshal(body, &rawPayload)
+	membershipTierRaw, membershipTierProvided := rawPayload["membership_tier_id"]
+	membershipTierId := ""
+	if membershipTierProvided && string(membershipTierRaw) != "null" {
+		if err := json.Unmarshal(membershipTierRaw, &membershipTierId); err != nil {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
 	}
 	if updatedUser.Password == "" {
 		updatedUser.Password = "$I_LOVE_U" // make Validator happy :)
@@ -583,10 +608,23 @@ func UpdateUser(c *gin.Context) {
 	if updatedUser.Password == "$I_LOVE_U" {
 		updatedUser.Password = "" // rollback to what it should be
 	}
+	if membershipTierProvided {
+		membershipTierId = strings.TrimSpace(membershipTierId)
+		if err := model.ValidateMembershipTierId(membershipTierId); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
 	updatePassword := updatedUser.Password != ""
 	if err := updatedUser.Edit(updatePassword); err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if membershipTierProvided {
+		if err := model.SetUserMembershipTier(updatedUser.Id, membershipTierId, model.MembershipSourceManual); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	recordManageAuditFor(c, updatedUser.Id, "user.update", map[string]interface{}{
 		"username": originUser.Username,

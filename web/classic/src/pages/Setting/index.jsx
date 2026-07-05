@@ -36,6 +36,7 @@ import {
   Activity,
   ShieldAlert,
   ShieldCheck,
+  Crown,
 } from 'lucide-react';
 
 import SystemSetting from '../../components/settings/SystemSetting';
@@ -49,6 +50,7 @@ import RatioSetting from '../../components/settings/RatioSetting';
 import ChatsSetting from '../../components/settings/ChatsSetting';
 import DrawingSetting from '../../components/settings/DrawingSetting';
 import PaymentSetting from '../../components/settings/PaymentSetting';
+import MembershipSetting from '../../components/settings/MembershipSetting';
 import ModelDeploymentSetting from '../../components/settings/ModelDeploymentSetting';
 import PerformanceSetting from '../../components/settings/PerformanceSetting';
 import ErrorMaskSetting from '../../components/settings/ErrorMaskSetting';
@@ -121,6 +123,16 @@ const Setting = () => {
       ),
       content: <PaymentSetting />,
       itemKey: 'payment',
+    });
+    panes.push({
+      tab: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <Crown size={18} />
+          {t('会员设置')}
+        </span>
+      ),
+      content: <MembershipSetting />,
+      itemKey: 'membership',
     });
     panes.push({
       tab: (

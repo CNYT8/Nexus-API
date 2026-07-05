@@ -19,7 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect, useMemo, useContext, useRef } from 'react';
 import { StatusContext } from '../../context/Status';
-import { mergeGlobalSidebarAdminConfig } from '../../constants/sidebarModules';
+import {
+  applyMembershipSidebarGate,
+  mergeGlobalSidebarAdminConfig,
+} from '../../constants/sidebarModules';
 import {
   API,
   createSelfRequestGuard,
@@ -88,18 +91,23 @@ export const useSidebar = () => {
     instanceIdRef.current = `sidebar-${Date.now()}-${randomPart}`;
   }
 
+  const membershipEnabled = statusState?.status?.membership_enabled === true;
+
   // 获取管理员配置
   const adminConfig = useMemo(() => {
+    let nextConfig;
     if (statusState?.status?.SidebarModulesAdmin) {
       try {
         const config = JSON.parse(statusState.status.SidebarModulesAdmin);
-        return mergeAdminConfig(config);
+        nextConfig = mergeAdminConfig(config);
       } catch (error) {
-        return mergeAdminConfig(null);
+        nextConfig = mergeAdminConfig(null);
       }
+    } else {
+      nextConfig = mergeAdminConfig(null);
     }
-    return mergeAdminConfig(null);
-  }, [statusState?.status?.SidebarModulesAdmin]);
+    return applyMembershipSidebarGate(nextConfig, membershipEnabled);
+  }, [membershipEnabled, statusState?.status?.SidebarModulesAdmin]);
 
   // 加载用户配置的通用方法
   const loadUserConfig = async ({ withLoading } = {}) => {

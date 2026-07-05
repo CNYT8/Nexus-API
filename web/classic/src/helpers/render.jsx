@@ -81,6 +81,7 @@ import {
   Package,
   Server,
   CalendarClock,
+  Crown,
 } from 'lucide-react';
 import {
   SiAtlassian,
@@ -140,6 +141,8 @@ export function getLucideIcon(key, selected = false) {
       return <CheckSquare {...commonProps} color={iconColor} />;
     case 'topup':
       return <CreditCard {...commonProps} color={iconColor} />;
+    case 'membership':
+      return <Crown {...commonProps} color={iconColor} />;
     case 'channel':
       return <Layers {...commonProps} color={iconColor} />;
     case 'redemption':

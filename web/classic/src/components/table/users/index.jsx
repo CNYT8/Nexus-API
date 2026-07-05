@@ -51,6 +51,8 @@ const UsersPage = () => {
     activePage,
     pageSize,
     groupOptions,
+    membershipEnabled,
+    membershipTierOptions,
     loading,
     searching,
 
@@ -75,6 +77,8 @@ const UsersPage = () => {
         visible={showEditUser}
         handleClose={closeEditUser}
         editingUser={editingUser}
+        membershipEnabled={membershipEnabled}
+        membershipTierOptions={membershipTierOptions}
       />
 
       <CardPro

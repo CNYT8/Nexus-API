@@ -48,6 +48,7 @@ import {
   mergeAdminConfig,
   useSidebar,
 } from '../../../../hooks/common/useSidebar';
+import { applyMembershipSidebarGate } from '../../../../constants/sidebarModules';
 
 const NotificationSettings = ({
   t,
@@ -58,6 +59,7 @@ const NotificationSettings = ({
 }) => {
   const formApiRef = useRef(null);
   const [statusState] = useContext(StatusContext);
+  const membershipEnabled = statusState?.status?.membership_enabled === true;
   const [userState] = useContext(UserContext);
   const isAdminOrRoot = (userState?.user?.role || 0) >= 10;
 
@@ -163,10 +165,11 @@ const NotificationSettings = ({
         detail: true,
         token: true,
         log: true,
+        model_monitor: true,
         midjourney: true,
         task: true,
       },
-      personal: { enabled: true, topup: true, personal: true },
+      personal: { enabled: true, topup: true, personal: true, membership: true },
       admin: {
         enabled: true,
         channel: true,
@@ -191,12 +194,27 @@ const NotificationSettings = ({
             const adminConf = JSON.parse(
               statusState.status.SidebarModulesAdmin,
             );
-            setAdminConfig(mergeAdminConfig(adminConf));
+            setAdminConfig(
+              applyMembershipSidebarGate(
+                mergeAdminConfig(adminConf),
+                membershipEnabled,
+              ),
+            );
           } catch (error) {
-            setAdminConfig(mergeAdminConfig(null));
+            setAdminConfig(
+              applyMembershipSidebarGate(
+                mergeAdminConfig(null),
+                membershipEnabled,
+              ),
+            );
           }
         } else {
-          setAdminConfig(mergeAdminConfig(null));
+          setAdminConfig(
+            applyMembershipSidebarGate(
+              mergeAdminConfig(null),
+              membershipEnabled,
+            ),
+          );
         }
 
         // 获取用户个人配置
@@ -216,7 +234,7 @@ const NotificationSettings = ({
     };
 
     loadSidebarConfigs();
-  }, [statusState]);
+  }, [membershipEnabled, statusState]);
 
   // 初始化表单值
   useEffect(() => {
@@ -289,6 +307,11 @@ const NotificationSettings = ({
           key: 'personal',
           title: t('个人设置'),
           description: t('个人信息设置'),
+        },
+        {
+          key: 'membership',
+          title: t('会员中心'),
+          description: t('会员等级和权益'),
         },
       ],
     },

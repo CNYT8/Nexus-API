@@ -33,6 +33,7 @@ import { StatusContext } from '../../../context/Status';
 import { UserContext } from '../../../context/User';
 import { useUserPermissions } from '../../../hooks/common/useUserPermissions';
 import { mergeAdminConfig, useSidebar } from '../../../hooks/common/useSidebar';
+import { applyMembershipSidebarGate } from '../../../constants/sidebarModules';
 import { Settings } from 'lucide-react';
 
 const { Text } = Typography;
@@ -41,6 +42,7 @@ export default function SettingsSidebarModulesUser() {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [statusState] = useContext(StatusContext);
+  const membershipEnabled = statusState?.status?.membership_enabled === true;
 
   // 使用后端权限验证替代前端角色判断
   const {
@@ -84,6 +86,7 @@ export default function SettingsSidebarModulesUser() {
         detail: isSidebarModuleAllowed('console', 'detail'),
         token: isSidebarModuleAllowed('console', 'token'),
         log: isSidebarModuleAllowed('console', 'log'),
+        model_monitor: isSidebarModuleAllowed('console', 'model_monitor'),
         midjourney: isSidebarModuleAllowed('console', 'midjourney'),
         task: isSidebarModuleAllowed('console', 'task'),
       };
@@ -95,6 +98,7 @@ export default function SettingsSidebarModulesUser() {
         enabled: true,
         topup: isSidebarModuleAllowed('personal', 'topup'),
         personal: isSidebarModuleAllowed('personal', 'personal'),
+        membership: isSidebarModuleAllowed('personal', 'membership'),
       };
     }
 
@@ -202,11 +206,17 @@ export default function SettingsSidebarModulesUser() {
             const adminConf = JSON.parse(
               statusState.status.SidebarModulesAdmin,
             );
-            const mergedAdminConf = mergeAdminConfig(adminConf);
+            const mergedAdminConf = applyMembershipSidebarGate(
+              mergeAdminConfig(adminConf),
+              membershipEnabled,
+            );
             setAdminConfig(mergedAdminConf);
             console.log('加载管理员边栏配置:', mergedAdminConf);
           } catch (error) {
-            const mergedAdminConf = mergeAdminConfig(null);
+            const mergedAdminConf = applyMembershipSidebarGate(
+              mergeAdminConfig(null),
+              membershipEnabled,
+            );
             setAdminConfig(mergedAdminConf);
             console.log(
               '加载管理员边栏配置失败，使用默认配置:',
@@ -214,7 +224,10 @@ export default function SettingsSidebarModulesUser() {
             );
           }
         } else {
-          const mergedAdminConf = mergeAdminConfig(null);
+          const mergedAdminConf = applyMembershipSidebarGate(
+            mergeAdminConfig(null),
+            membershipEnabled,
+          );
           setAdminConfig(mergedAdminConf);
           console.log('管理员边栏配置缺失，使用默认配置:', mergedAdminConf);
         }
@@ -268,7 +281,8 @@ export default function SettingsSidebarModulesUser() {
       loadConfigs();
     }
   }, [
-    statusState,
+    membershipEnabled,
+    statusState?.status?.SidebarModulesAdmin,
     permissionsLoading,
     hasSidebarSettingsPermission,
     isSidebarSectionAllowed,
@@ -312,6 +326,11 @@ export default function SettingsSidebarModulesUser() {
         { key: 'token', title: t('令牌管理'), description: t('API令牌管理') },
         { key: 'log', title: t('使用日志'), description: t('API使用记录') },
         {
+          key: 'model_monitor',
+          title: t('模型监控'),
+          description: t('全局模型体验评分'),
+        },
+        {
           key: 'midjourney',
           title: t('绘图日志'),
           description: t('绘图任务记录'),
@@ -329,6 +348,11 @@ export default function SettingsSidebarModulesUser() {
           key: 'personal',
           title: t('个人设置'),
           description: t('个人信息设置'),
+        },
+        {
+          key: 'membership',
+          title: t('会员中心'),
+          description: t('会员等级和权益'),
         },
       ],
     },

@@ -58,6 +58,9 @@ type User struct {
 	RegisterIp       string         `json:"register_ip" gorm:"type:varchar(64);default:'';column:register_ip"`
 	LastLoginIp      string         `json:"last_login_ip" gorm:"type:varchar(64);default:'';column:last_login_ip"`
 	LastApiIp        string         `json:"last_api_ip" gorm:"type:varchar(64);default:'';column:last_api_ip"`
+	MembershipTierId string         `json:"membership_tier_id" gorm:"-:all"`
+	MembershipName   string         `json:"membership_name" gorm:"-:all"`
+	MembershipSource string         `json:"membership_source" gorm:"-:all"`
 }
 
 func (user *User) ToBaseUser() *UserBase {

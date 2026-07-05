@@ -61,6 +61,8 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 		groupRatioInfo.GroupRatio = ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
 	}
 
+	groupRatioInfo.GroupRatio, _ = model.ApplyMembershipDiscount(relayInfo.UserId, relayInfo.UsingGroup, groupRatioInfo.GroupRatio)
+
 	return groupRatioInfo
 }
 
