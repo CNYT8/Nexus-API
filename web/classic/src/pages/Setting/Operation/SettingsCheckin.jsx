@@ -193,7 +193,7 @@ function StageRulesEditor({ disabled, rules, onChange, t }) {
       <div className='flex items-center justify-between gap-2'>
         <Text strong>{t('阶段规则')}</Text>
         <Text type='tertiary' size='small'>
-          {t('从上到下匹配，命中最高阶段规则')}
+          {t('按阈值命中最高阶段，顺序仅在同级时生效')}
         </Text>
       </div>
       {rules.length === 0 ? (

@@ -19,10 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useEffect, useState } from 'react';
 import { Card, Spin } from '@douyinfe/semi-ui';
+import { useTranslation } from 'react-i18next';
 import SettingsErrorMask from '../../pages/Setting/ErrorMask/SettingsErrorMask';
 import { API, showError, toBoolean } from '../../helpers';
 
 const ErrorMaskSetting = () => {
+  const { t } = useTranslation();
   let [inputs, setInputs] = useState({
     'error_mask_setting.enabled': false,
     'error_mask_setting.rules': '',

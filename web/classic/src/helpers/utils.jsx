@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { Toast, Pagination } from '@douyinfe/semi-ui';
 import { toastConstants, BILLING_PRICING_VARS, BILLING_VAR_REGEX } from '../constants';
+import i18next from 'i18next';
 import React from 'react';
 import { toast } from 'react-toastify';
 import {

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   API,
@@ -80,6 +80,13 @@ const EditUserModal = (props) => {
   const [inputs, setInputs] = useState(null);
 
   const isEdit = Boolean(userId);
+  const membershipTierOptions = useMemo(
+    () => [
+      { label: t('无'), value: '' },
+      ...(props.membershipTierOptions || []),
+    ],
+    [props.membershipTierOptions, t],
+  );
 
   const getInitValues = () => ({
     username: '',
@@ -399,10 +406,7 @@ const EditUserModal = (props) => {
                             field='membership_tier_id'
                             label={t('会员阶级')}
                             placeholder={t('请选择会员阶级')}
-                            optionList={[
-                              { label: t('无'), value: '' },
-                              ...(props.membershipTierOptions || []),
-                            ]}
+                            optionList={membershipTierOptions}
                             showClear
                             search
                           />

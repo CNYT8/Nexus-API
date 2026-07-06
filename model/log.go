@@ -96,6 +96,7 @@ func StripChannelRestrictedAdminLogFields(logs []*Log) {
 		}
 		log.ChannelId = 0
 		log.ChannelName = ""
+		log.ModelName = ""
 		if strings.TrimSpace(log.Other) == "" {
 			continue
 		}

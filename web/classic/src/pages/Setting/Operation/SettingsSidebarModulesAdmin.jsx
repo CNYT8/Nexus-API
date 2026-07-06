@@ -242,7 +242,19 @@ export default function SettingsSidebarModulesAdmin(props) {
                             display: 'block',
                           }}
                         >
-                          {t(module.description)}
+                          <span>{t(module.description)}</span>
+                          {section.key === 'personal' &&
+                            module.key === 'membership' && (
+                              <span
+                                style={{
+                                  marginLeft: 8,
+                                  color: 'var(--semi-color-text-2)',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {t('只能通过会员设置开关')}
+                              </span>
+                            )}
                         </Text>
                       </div>
                       <div style={{ marginLeft: '16px' }}>

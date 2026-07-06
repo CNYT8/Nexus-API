@@ -50,33 +50,34 @@ func RulesJSONString() string {
 }
 
 func UpdateRulesByJSONString(jsonStr string) error {
-	if strings.TrimSpace(jsonStr) == "" {
-		errorMaskSetting.Rules = nil
-		return nil
-	}
-	var rules []ErrorMaskRule
-	if err := common.UnmarshalJsonStr(jsonStr, &rules); err != nil {
+	rules, err := ParseRulesJSONString(jsonStr)
+	if err != nil {
 		return err
 	}
 	errorMaskSetting.Rules = rules
 	return nil
 }
 
-func CheckRules(jsonStr string) error {
+func ParseRulesJSONString(jsonStr string) ([]ErrorMaskRule, error) {
 	if strings.TrimSpace(jsonStr) == "" {
-		return nil
+		return nil, nil
 	}
 	var rules []ErrorMaskRule
 	if err := common.UnmarshalJsonStr(jsonStr, &rules); err != nil {
-		return err
+		return nil, err
 	}
 	for _, r := range rules {
 		if r.Status != 0 && (r.Status < 100 || r.Status > 599) {
-			return errors.New("error_mask rule status must be 0 or in [100,599]")
+			return nil, errors.New("error_mask rule status must be 0 or in [100,599]")
 		}
 		if strings.TrimSpace(r.Replacement) == "" {
-			return errors.New("error_mask rule replacement must not be empty")
+			return nil, errors.New("error_mask rule replacement must not be empty")
 		}
 	}
-	return nil
+	return rules, nil
+}
+
+func CheckRules(jsonStr string) error {
+	_, err := ParseRulesJSONString(jsonStr)
+	return err
 }

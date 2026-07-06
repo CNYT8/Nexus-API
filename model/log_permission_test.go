@@ -12,6 +12,7 @@ func TestStripChannelRestrictedAdminLogFields(t *testing.T) {
 		{
 			ChannelId:   7,
 			ChannelName: "private-channel",
+			ModelName:   "private-model",
 			Other: common.MapToJsonStr(map[string]interface{}{
 				"channel_id":          7,
 				"channel_name":        "private-channel",
@@ -33,6 +34,7 @@ func TestStripChannelRestrictedAdminLogFields(t *testing.T) {
 
 	require.Equal(t, 0, logs[0].ChannelId)
 	require.Empty(t, logs[0].ChannelName)
+	require.Empty(t, logs[0].ModelName)
 	other, err := common.StrToMap(logs[0].Other)
 	require.NoError(t, err)
 	require.NotContains(t, other, "channel_id")

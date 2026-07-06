@@ -173,24 +173,32 @@ func GetTierDiscount(tierId string, group string) (Tier, float64, bool) {
 	return tier, normalizeDiscount(discount), true
 }
 
-func UpdateTiersByJSONString(jsonStr string) error {
+func ParseTiersJSONString(jsonStr string) ([]Tier, error) {
 	var tiers []Tier
 	if strings.TrimSpace(jsonStr) == "" {
 		tiers = []Tier{}
 	} else if err := json.Unmarshal([]byte(jsonStr), &tiers); err != nil {
-		return err
+		return nil, err
 	}
 	seen := make(map[string]bool, len(tiers))
 	for _, tier := range tiers {
 		id := strings.TrimSpace(tier.Id)
 		if id == "" {
-			return errors.New("membership tier id is empty")
+			return nil, errors.New("membership tier id is empty")
 		}
 		if seen[id] {
-			return errors.New("membership tier id duplicated: " + id)
+			return nil, errors.New("membership tier id duplicated: " + id)
 		}
 		seen[id] = true
 	}
-	membershipSetting.Tiers = NormalizeTiers(tiers)
+	return NormalizeTiers(tiers), nil
+}
+
+func UpdateTiersByJSONString(jsonStr string) error {
+	tiers, err := ParseTiersJSONString(jsonStr)
+	if err != nil {
+		return err
+	}
+	membershipSetting.Tiers = tiers
 	return nil
 }

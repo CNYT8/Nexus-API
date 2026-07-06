@@ -250,16 +250,16 @@ const MembershipSetting = () => {
     setSaving(true);
     try {
       let res = await API.put('/api/option/', {
-        key: 'membership_setting.enabled',
-        value: String(enabled),
+        key: 'membership_setting.tiers',
+        value: JSON.stringify(normalizedTiers),
       });
       if (!res.data.success) {
         showError(res.data.message);
         return;
       }
       res = await API.put('/api/option/', {
-        key: 'membership_setting.tiers',
-        value: JSON.stringify(normalizedTiers),
+        key: 'membership_setting.enabled',
+        value: String(enabled),
       });
       if (!res.data.success) {
         showError(res.data.message);
@@ -288,7 +288,14 @@ const MembershipSetting = () => {
           text={t('会员设置')}
           extraText={t('按累计充值金额解锁会员等级，并为指定分组应用折扣')}
         >
-          <div className='mb-4 flex items-center justify-between rounded-lg border p-4'>
+          <div
+            className='mb-4 flex items-center justify-between p-4'
+            style={{
+              backgroundColor: 'var(--semi-color-bg-2)',
+              border: '1px solid var(--semi-color-border)',
+              borderRadius: 6,
+            }}
+          >
             <div className='flex items-center gap-3'>
               <Crown size={20} />
               <div>
@@ -312,7 +319,15 @@ const MembershipSetting = () => {
 
           <div className='space-y-3'>
             {sortedTiers.map((tier) => (
-              <Card key={tier.id} bodyStyle={{ padding: 16 }}>
+              <Card
+                key={tier.id}
+                bodyStyle={{ padding: 16 }}
+                style={{
+                  backgroundColor: 'var(--semi-color-bg-2)',
+                  borderColor: 'var(--semi-color-border)',
+                  borderRadius: 6,
+                }}
+              >
                 <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
                   <Space wrap>
                     <Tag color={tier.enabled ? 'blue' : 'grey'} shape='circle'>

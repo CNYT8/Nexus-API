@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	error_mask_setting "github.com/QuantumNous/new-api/setting/error_mask_setting"
 	membership_setting "github.com/QuantumNous/new-api/setting/membership_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
@@ -209,19 +210,37 @@ func SyncOptions(frequency int) {
 }
 
 func UpdateOption(key string, value string) error {
+	if err := validateOptionBeforeSave(key, value); err != nil {
+		return err
+	}
 	// Save to database first
 	option := Option{
 		Key: key,
 	}
 	// https://gorm.io/docs/update.html#Save-All-Fields
-	DB.FirstOrCreate(&option, Option{Key: key})
+	if err := DB.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+		return err
+	}
 	option.Value = value
 	// Save is a combination function.
 	// If save value does not contain primary key, it will execute Create,
 	// otherwise it will execute Update (with all fields).
-	DB.Save(&option)
+	if err := DB.Save(&option).Error; err != nil {
+		return err
+	}
 	// Update OptionMap
 	return updateOptionMap(key, value)
+}
+
+func validateOptionBeforeSave(key string, value string) error {
+	if key == "membership_setting.tiers" {
+		_, err := membership_setting.ParseTiersJSONString(value)
+		return err
+	}
+	if key == "error_mask_setting.rules" {
+		return error_mask_setting.CheckRules(value)
+	}
+	return nil
 }
 
 // UpdateOptionsBulk persists multiple key/value pairs in a single database
@@ -232,6 +251,11 @@ func UpdateOption(key string, value string) error {
 func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
+	}
+	for k, v := range values {
+		if err := validateOptionBeforeSave(k, v); err != nil {
+			return err
+		}
 	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		for k, v := range values {
@@ -260,6 +284,15 @@ func UpdateOptionsBulk(values map[string]string) error {
 func updateOptionMap(key string, value string) (err error) {
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
+
+	if handled, err := handleStrictConfigUpdate(key, value); handled {
+		if err != nil {
+			return err
+		}
+		common.OptionMap[key] = value
+		return nil
+	}
+
 	common.OptionMap[key] = value
 
 	// 检查是否是模型配置 - 使用更规范的方式处理
@@ -592,6 +625,19 @@ func updateOptionMap(key string, value string) (err error) {
 	return err
 }
 
+func handleStrictConfigUpdate(key, value string) (bool, error) {
+	switch key {
+	case "checkin_setting.stage_rules":
+		return true, operation_setting.UpdateCheckinStageRulesByJSONString(value)
+	case "error_mask_setting.rules":
+		return true, error_mask_setting.UpdateRulesByJSONString(value)
+	case "membership_setting.tiers":
+		return true, membership_setting.UpdateTiersByJSONString(value)
+	default:
+		return false, nil
+	}
+}
+
 // handleConfigUpdate 处理分层配置更新，返回是否已处理
 func handleConfigUpdate(key, value string) (bool, error) {
 	parts := strings.SplitN(key, ".", 2)
@@ -606,13 +652,6 @@ func handleConfigUpdate(key, value string) (bool, error) {
 	cfg := config.GlobalConfig.Get(configName)
 	if cfg == nil {
 		return false, nil // 未注册的配置
-	}
-
-	if configName == "checkin_setting" && configKey == "stage_rules" {
-		return true, operation_setting.UpdateCheckinStageRulesByJSONString(value)
-	}
-	if configName == "membership_setting" && configKey == "tiers" {
-		return true, membership_setting.UpdateTiersByJSONString(value)
 	}
 
 	// 更新配置
