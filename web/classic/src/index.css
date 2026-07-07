@@ -516,6 +516,20 @@ body[theme-mode='warm'] .sidebar-nav-item-selected {
   color: var(--semi-color-primary);
 }
 
+.sbg-badge svg {
+  display: block;
+}
+
+.sbg-badge-amber {
+  background-color: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.sbg-badge-active.sbg-badge-amber {
+  background-color: rgba(245, 158, 11, 0.22);
+  color: #92400e;
+}
+
 /* ---- SelectableButtonGroup color variants ---- */
 .sbg-variant-violet {
   --semi-color-primary: #6d28d9;

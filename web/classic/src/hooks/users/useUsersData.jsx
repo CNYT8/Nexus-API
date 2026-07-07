@@ -49,6 +49,7 @@ export const useUsersData = () => {
   const formInitValues = {
     searchKeyword: '',
     searchGroup: '',
+    searchMembershipTier: '',
   };
 
   // Form API reference
@@ -60,6 +61,9 @@ export const useUsersData = () => {
     return {
       searchKeyword: formValues.searchKeyword || '',
       searchGroup: formValues.searchGroup || '',
+      searchMembershipTier: membershipEnabled
+        ? formValues.searchMembershipTier || ''
+        : '',
     };
   };
 
@@ -93,23 +97,38 @@ export const useUsersData = () => {
     pageSize,
     searchKeyword = null,
     searchGroup = null,
+    searchMembershipTier = null,
   ) => {
     // If no parameters passed, get values from form
-    if (searchKeyword === null || searchGroup === null) {
+    if (
+      searchKeyword === null ||
+      searchGroup === null ||
+      searchMembershipTier === null
+    ) {
       const formValues = getFormValues();
       searchKeyword = formValues.searchKeyword;
       searchGroup = formValues.searchGroup;
+      searchMembershipTier = formValues.searchMembershipTier;
     }
 
-    if (searchKeyword === '' && searchGroup === '') {
+    if (
+      searchKeyword === '' &&
+      searchGroup === '' &&
+      searchMembershipTier === ''
+    ) {
       // If keyword is blank, load files instead
       await loadUsers(startIdx, pageSize);
       return;
     }
     setSearching(true);
-    const res = await API.get(
-      `/api/user/search?keyword=${searchKeyword}&group=${searchGroup}&p=${startIdx}&page_size=${pageSize}`,
-    );
+    const params = new URLSearchParams({
+      keyword: searchKeyword,
+      group: searchGroup,
+      membership_tier_id: searchMembershipTier,
+      p: String(startIdx),
+      page_size: String(pageSize),
+    });
+    const res = await API.get(`/api/user/search?${params.toString()}`);
     const { success, message, data } = res.data;
     if (success) {
       const newPageData = data.items;
@@ -193,11 +212,22 @@ export const useUsersData = () => {
   // Handle page change
   const handlePageChange = (page) => {
     setActivePage(page);
-    const { searchKeyword, searchGroup } = getFormValues();
-    if (searchKeyword === '' && searchGroup === '') {
+    const { searchKeyword, searchGroup, searchMembershipTier } =
+      getFormValues();
+    if (
+      searchKeyword === '' &&
+      searchGroup === '' &&
+      searchMembershipTier === ''
+    ) {
       loadUsers(page, pageSize).then();
     } else {
-      searchUsers(page, pageSize, searchKeyword, searchGroup).then();
+      searchUsers(
+        page,
+        pageSize,
+        searchKeyword,
+        searchGroup,
+        searchMembershipTier,
+      ).then();
     }
   };
 
@@ -206,11 +236,25 @@ export const useUsersData = () => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
-    loadUsers(activePage, size)
-      .then()
-      .catch((reason) => {
-        showError(reason);
-      });
+    const { searchKeyword, searchGroup, searchMembershipTier } =
+      getFormValues();
+    if (
+      searchKeyword === '' &&
+      searchGroup === '' &&
+      searchMembershipTier === ''
+    ) {
+      loadUsers(1, size)
+        .then()
+        .catch((reason) => {
+          showError(reason);
+        });
+    } else {
+      searchUsers(1, size, searchKeyword, searchGroup, searchMembershipTier)
+        .then()
+        .catch((reason) => {
+          showError(reason);
+        });
+    }
   };
 
   // Handle table row styling for disabled/deleted users
@@ -228,11 +272,22 @@ export const useUsersData = () => {
 
   // Refresh data
   const refresh = async (page = activePage) => {
-    const { searchKeyword, searchGroup } = getFormValues();
-    if (searchKeyword === '' && searchGroup === '') {
+    const { searchKeyword, searchGroup, searchMembershipTier } =
+      getFormValues();
+    if (
+      searchKeyword === '' &&
+      searchGroup === '' &&
+      searchMembershipTier === ''
+    ) {
       await loadUsers(page, pageSize);
     } else {
-      await searchUsers(page, pageSize, searchKeyword, searchGroup);
+      await searchUsers(
+        page,
+        pageSize,
+        searchKeyword,
+        searchGroup,
+        searchMembershipTier,
+      );
     }
   };
 

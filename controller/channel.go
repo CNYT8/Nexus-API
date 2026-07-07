@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/common/codexkey"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
@@ -500,18 +501,20 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 	if channel.Type == constant.ChannelTypeCodex {
 		trimmedKey := strings.TrimSpace(channel.Key)
 		if isAdd || trimmedKey != "" {
-			if !strings.HasPrefix(trimmedKey, "{") {
+			if !strings.HasPrefix(trimmedKey, "{") && !strings.HasPrefix(trimmedKey, "[") {
 				return fmt.Errorf("Codex key must be a valid JSON object")
 			}
-			var keyMap map[string]any
-			if err := common.Unmarshal([]byte(trimmedKey), &keyMap); err != nil {
+			keys, err := codexkey.ParseMany(trimmedKey)
+			if err != nil {
 				return fmt.Errorf("Codex key must be a valid JSON object")
 			}
-			if v, ok := keyMap["access_token"]; !ok || v == nil || strings.TrimSpace(fmt.Sprintf("%v", v)) == "" {
-				return fmt.Errorf("Codex key JSON must include access_token")
-			}
-			if v, ok := keyMap["account_id"]; !ok || v == nil || strings.TrimSpace(fmt.Sprintf("%v", v)) == "" {
-				return fmt.Errorf("Codex key JSON must include account_id")
+			for _, key := range keys {
+				if strings.TrimSpace(key.AccessToken) == "" {
+					return fmt.Errorf("Codex key JSON must include access_token")
+				}
+				if strings.TrimSpace(key.AccountID) == "" {
+					return fmt.Errorf("Codex key JSON must include account_id")
+				}
 			}
 		}
 	}
@@ -590,6 +593,22 @@ func getVertexArrayKeys(keys string) ([]string, error) {
 	return cleanKeys, nil
 }
 
+func getCodexConfigKeys(raw string) ([]string, error) {
+	return codexkey.NormalizeAndEncodeMany(raw, time.Now().UTC().Format(time.RFC3339))
+}
+
+func getCodexConfigIdentity(raw string) string {
+	key, err := codexkey.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return strings.TrimSpace(raw)
+	}
+	identity := codexkey.Identity(*key)
+	if strings.TrimSpace(identity) == "" {
+		return strings.TrimSpace(raw)
+	}
+	return identity
+}
+
 func AddChannel(c *gin.Context) {
 	addChannelRequest := AddChannelRequest{}
 	err := c.ShouldBindJSON(&addChannelRequest)
@@ -613,7 +632,21 @@ func AddChannel(c *gin.Context) {
 	case "multi_to_single":
 		addChannelRequest.Channel.ChannelInfo.IsMultiKey = true
 		addChannelRequest.Channel.ChannelInfo.MultiKeyMode = addChannelRequest.MultiKeyMode
-		if addChannelRequest.Channel.Type == constant.ChannelTypeVertexAi && addChannelRequest.Channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
+		if addChannelRequest.Channel.ChannelInfo.MultiKeyMode == "" {
+			addChannelRequest.Channel.ChannelInfo.MultiKeyMode = constant.MultiKeyModeRandom
+		}
+		if addChannelRequest.Channel.Type == constant.ChannelTypeCodex {
+			codexKeys, err := getCodexConfigKeys(addChannelRequest.Channel.Key)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": err.Error(),
+				})
+				return
+			}
+			addChannelRequest.Channel.ChannelInfo.MultiKeySize = len(codexKeys)
+			addChannelRequest.Channel.Key = strings.Join(codexKeys, "\n")
+		} else if addChannelRequest.Channel.Type == constant.ChannelTypeVertexAi && addChannelRequest.Channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
 			array, err := getVertexArrayKeys(addChannelRequest.Channel.Key)
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{
@@ -638,7 +671,24 @@ func AddChannel(c *gin.Context) {
 		}
 		keys = []string{addChannelRequest.Channel.Key}
 	case "batch":
-		if addChannelRequest.Channel.Type == constant.ChannelTypeVertexAi && addChannelRequest.Channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
+		if addChannelRequest.Channel.Type == constant.ChannelTypeCodex {
+			codexKeys, err := getCodexConfigKeys(addChannelRequest.Channel.Key)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": err.Error(),
+				})
+				return
+			}
+			addChannelRequest.Channel.ChannelInfo.IsMultiKey = len(codexKeys) > 1
+			addChannelRequest.Channel.ChannelInfo.MultiKeyMode = addChannelRequest.MultiKeyMode
+			if addChannelRequest.Channel.ChannelInfo.MultiKeyMode == "" {
+				addChannelRequest.Channel.ChannelInfo.MultiKeyMode = constant.MultiKeyModeRandom
+			}
+			addChannelRequest.Channel.ChannelInfo.MultiKeySize = len(codexKeys)
+			addChannelRequest.Channel.Key = strings.Join(codexKeys, "\n")
+			keys = []string{addChannelRequest.Channel.Key}
+		} else if addChannelRequest.Channel.Type == constant.ChannelTypeVertexAi && addChannelRequest.Channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
 			// multi json
 			keys, err = getVertexArrayKeys(addChannelRequest.Channel.Key)
 			if err != nil {
@@ -652,6 +702,24 @@ func AddChannel(c *gin.Context) {
 			keys = strings.Split(addChannelRequest.Channel.Key, "\n")
 		}
 	case "single":
+		if addChannelRequest.Channel.Type == constant.ChannelTypeCodex {
+			codexKeys, err := getCodexConfigKeys(addChannelRequest.Channel.Key)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": err.Error(),
+				})
+				return
+			}
+			if len(codexKeys) > 1 {
+				addChannelRequest.Channel.ChannelInfo.IsMultiKey = true
+				addChannelRequest.Channel.ChannelInfo.MultiKeyMode = constant.MultiKeyModeRandom
+				addChannelRequest.Channel.ChannelInfo.MultiKeySize = len(codexKeys)
+				addChannelRequest.Channel.Key = strings.Join(codexKeys, "\n")
+			} else {
+				addChannelRequest.Channel.Key = codexKeys[0]
+			}
+		}
 		keys = []string{addChannelRequest.Channel.Key}
 	default:
 		c.JSON(http.StatusOK, gin.H{
@@ -900,6 +968,24 @@ func UpdateChannel(c *gin.Context) {
 		channel.ChannelInfo.MultiKeyMode = constant.MultiKeyMode(*channel.MultiKeyMode)
 	}
 
+	if channel.Type == constant.ChannelTypeCodex && strings.TrimSpace(channel.Key) != "" {
+		codexKeys, err := getCodexConfigKeys(channel.Key)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+		channel.Key = strings.Join(codexKeys, "\n")
+		if len(codexKeys) > 1 {
+			channel.ChannelInfo.IsMultiKey = true
+			if channel.ChannelInfo.MultiKeyMode == "" {
+				channel.ChannelInfo.MultiKeyMode = constant.MultiKeyModeRandom
+			}
+		}
+	}
+
 	// 处理多key模式下的密钥追加/覆盖逻辑
 	if channel.KeyMode != nil && channel.ChannelInfo.IsMultiKey {
 		switch *channel.KeyMode {
@@ -925,7 +1011,9 @@ func UpdateChannel(c *gin.Context) {
 				}
 
 				// 处理 Vertex AI 的特殊情况
-				if channel.Type == constant.ChannelTypeVertexAi && channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
+				if channel.Type == constant.ChannelTypeCodex {
+					newKeys = strings.Split(strings.Trim(channel.Key, "\n"), "\n")
+				} else if channel.Type == constant.ChannelTypeVertexAi && channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
 					// 尝试解析新密钥为JSON数组
 					if strings.HasPrefix(strings.TrimSpace(channel.Key), "[") {
 						array, err := getVertexArrayKeys(channel.Key)
@@ -953,12 +1041,19 @@ func UpdateChannel(c *gin.Context) {
 				}
 
 				seen := make(map[string]struct{}, len(existingKeys)+len(newKeys))
+				identityOf := func(key string) string {
+					normalized := strings.TrimSpace(key)
+					if channel.Type == constant.ChannelTypeCodex {
+						return getCodexConfigIdentity(normalized)
+					}
+					return normalized
+				}
 				for _, key := range existingKeys {
 					normalized := strings.TrimSpace(key)
 					if normalized == "" {
 						continue
 					}
-					seen[normalized] = struct{}{}
+					seen[identityOf(normalized)] = struct{}{}
 				}
 				dedupedNewKeys := make([]string, 0, len(newKeys))
 				for _, key := range newKeys {
@@ -966,10 +1061,11 @@ func UpdateChannel(c *gin.Context) {
 					if normalized == "" {
 						continue
 					}
-					if _, ok := seen[normalized]; ok {
+					identity := identityOf(normalized)
+					if _, ok := seen[identity]; ok {
 						continue
 					}
-					seen[normalized] = struct{}{}
+					seen[identity] = struct{}{}
 					dedupedNewKeys = append(dedupedNewKeys, normalized)
 				}
 
@@ -1258,11 +1354,42 @@ type MultiKeyStatusResponse struct {
 }
 
 type KeyStatus struct {
-	Index        int    `json:"index"`
-	Status       int    `json:"status"` // 1: enabled, 2: disabled
-	DisabledTime int64  `json:"disabled_time,omitempty"`
-	Reason       string `json:"reason,omitempty"`
-	KeyPreview   string `json:"key_preview"` // first 10 chars of key for identification
+	Index          int    `json:"index"`
+	Status         int    `json:"status"` // 1: enabled, 2: disabled
+	DisabledTime   int64  `json:"disabled_time,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+	KeyPreview     string `json:"key_preview"` // first 10 chars of key for identification
+	AccountEmail   string `json:"account_email,omitempty"`
+	AccountID      string `json:"account_id,omitempty"`
+	AccountPlan    string `json:"account_plan,omitempty"`
+	AccountUserID  string `json:"account_user_id,omitempty"`
+	AccountExpired string `json:"account_expired,omitempty"`
+	ImportedAt     string `json:"imported_at,omitempty"`
+	IsCodexConfig  bool   `json:"is_codex_config,omitempty"`
+}
+
+func buildCodexKeyStatus(key string) KeyStatus {
+	oauthKey, err := codexkey.Parse(strings.TrimSpace(key))
+	if err != nil {
+		return KeyStatus{}
+	}
+	preview := strings.TrimSpace(oauthKey.Email)
+	if preview == "" {
+		preview = strings.TrimSpace(oauthKey.AccountID)
+	}
+	if preview == "" {
+		preview = "Codex"
+	}
+	return KeyStatus{
+		KeyPreview:     preview,
+		AccountEmail:   strings.TrimSpace(oauthKey.Email),
+		AccountID:      strings.TrimSpace(oauthKey.AccountID),
+		AccountPlan:    strings.TrimSpace(oauthKey.PlanType),
+		AccountUserID:  strings.TrimSpace(oauthKey.UserID),
+		AccountExpired: strings.TrimSpace(oauthKey.Expired),
+		ImportedAt:     strings.TrimSpace(oauthKey.ImportedAt),
+		IsCodexConfig:  true,
+	}
 }
 
 // ManageMultiKeys handles multi-key management operations
@@ -1350,12 +1477,27 @@ func ManageMultiKeys(c *gin.Context) {
 				keyPreview = key[:10] + "..."
 			}
 
+			codexStatus := KeyStatus{}
+			if channel.Type == constant.ChannelTypeCodex {
+				codexStatus = buildCodexKeyStatus(key)
+				if codexStatus.KeyPreview != "" {
+					keyPreview = codexStatus.KeyPreview
+				}
+			}
+
 			allKeyStatusList = append(allKeyStatusList, KeyStatus{
-				Index:        i,
-				Status:       status,
-				DisabledTime: disabledTime,
-				Reason:       reason,
-				KeyPreview:   keyPreview,
+				Index:          i,
+				Status:         status,
+				DisabledTime:   disabledTime,
+				Reason:         reason,
+				KeyPreview:     keyPreview,
+				AccountEmail:   codexStatus.AccountEmail,
+				AccountID:      codexStatus.AccountID,
+				AccountPlan:    codexStatus.AccountPlan,
+				AccountUserID:  codexStatus.AccountUserID,
+				AccountExpired: codexStatus.AccountExpired,
+				ImportedAt:     codexStatus.ImportedAt,
+				IsCodexConfig:  codexStatus.IsCodexConfig,
 			})
 		}
 

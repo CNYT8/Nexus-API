@@ -295,6 +295,17 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 			return
 		}
 
+		// TokenAuthReadOnly keeps quota/expiry-limited tokens readable for logs and metadata.
+		// Only explicitly disabled tokens are blocked.
+		if token.Status == common.TokenStatusDisabled {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgTokenStatusUnavailable),
+			})
+			c.Abort()
+			return
+		}
+
 		userCache, err := model.GetUserCache(token.UserId)
 		if err != nil {
 			common.SysLog(fmt.Sprintf("TokenAuthReadOnly GetUserCache error for user %d: %v", token.UserId, err))

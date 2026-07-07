@@ -197,6 +197,7 @@ export const processGroupsData = (data, userGroup) => {
       info.desc.length > 20 ? info.desc.substring(0, 20) + '...' : info.desc,
     value: group,
     ratio: info.ratio,
+    membership_discount: info.membership_discount,
     fullLabel: info.desc,
   }));
 

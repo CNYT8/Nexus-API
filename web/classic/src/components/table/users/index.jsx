@@ -106,6 +106,8 @@ const UsersPage = () => {
               activePage={activePage}
               pageSize={pageSize}
               groupOptions={groupOptions}
+              membershipEnabled={membershipEnabled}
+              membershipTierOptions={membershipTierOptions}
               loading={loading}
               searching={searching}
               t={t}

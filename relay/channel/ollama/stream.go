@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -25,15 +26,10 @@ type ollamaChatStreamChunk struct {
 	CreatedAt string `json:"created_at"`
 	// chat
 	Message *struct {
-		Role      string          `json:"role"`
-		Content   string          `json:"content"`
-		Thinking  json.RawMessage `json:"thinking"`
-		ToolCalls []struct {
-			Function struct {
-				Name      string      `json:"name"`
-				Arguments interface{} `json:"arguments"`
-			} `json:"function"`
-		} `json:"tool_calls"`
+		Role      string           `json:"role"`
+		Content   string           `json:"content"`
+		Thinking  json.RawMessage  `json:"thinking"`
+		ToolCalls []OllamaToolCall `json:"tool_calls"`
 	} `json:"message"`
 	// generate
 	Response           string `json:"response"`
@@ -45,6 +41,39 @@ type ollamaChatStreamChunk struct {
 	EvalCount          int    `json:"eval_count"`
 	PromptEvalDuration int64  `json:"prompt_eval_duration"`
 	EvalDuration       int64  `json:"eval_duration"`
+}
+
+func ollamaToolCallsToOpenAI(toolCalls []OllamaToolCall, startIndex int, includeIndex bool) ([]dto.ToolCallResponse, int) {
+	if len(toolCalls) == 0 {
+		return nil, startIndex
+	}
+	result := make([]dto.ToolCallResponse, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		var argBytes []byte
+		var err error
+		if tc.Function.Arguments == nil {
+			argBytes = []byte("{}")
+		} else {
+			argBytes, err = common.Marshal(tc.Function.Arguments)
+			if err != nil || len(argBytes) == 0 {
+				argBytes = []byte("{}")
+			}
+		}
+		tr := dto.ToolCallResponse{
+			ID:   fmt.Sprintf("call_%d", startIndex),
+			Type: "function",
+			Function: dto.FunctionResponse{
+				Name:      tc.Function.Name,
+				Arguments: string(argBytes),
+			},
+		}
+		if includeIndex {
+			tr.SetIndex(startIndex)
+		}
+		startIndex++
+		result = append(result, tr)
+	}
+	return result, startIndex
 }
 
 func toUnix(ts string) int64 {
@@ -88,7 +117,7 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			continue
 		}
 		var chunk ollamaChatStreamChunk
-		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
+		if err := common.Unmarshal([]byte(line), &chunk); err != nil {
 			logger.LogError(c, "ollama stream json decode error: "+err.Error()+" line="+line)
 			return usage, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
@@ -123,7 +152,7 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 				if raw != "" && raw != "null" {
 					// Unmarshal the JSON string to get the actual content without quotes
 					var thinkingContent string
-					if err := json.Unmarshal(chunk.Message.Thinking, &thinkingContent); err == nil {
+					if err := common.Unmarshal(chunk.Message.Thinking, &thinkingContent); err == nil {
 						delta.Choices[0].Delta.SetReasoningContent(thinkingContent)
 					} else {
 						// Fallback to raw string if it's not a JSON string
@@ -133,16 +162,7 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			}
 			// tool calls
 			if chunk.Message != nil && len(chunk.Message.ToolCalls) > 0 {
-				delta.Choices[0].Delta.ToolCalls = make([]dto.ToolCallResponse, 0, len(chunk.Message.ToolCalls))
-				for _, tc := range chunk.Message.ToolCalls {
-					// arguments -> string
-					argBytes, _ := json.Marshal(tc.Function.Arguments)
-					toolId := fmt.Sprintf("call_%d", toolCallIndex)
-					tr := dto.ToolCallResponse{ID: toolId, Type: "function", Function: dto.FunctionResponse{Name: tc.Function.Name, Arguments: string(argBytes)}}
-					tr.SetIndex(toolCallIndex)
-					toolCallIndex++
-					delta.Choices[0].Delta.ToolCalls = append(delta.Choices[0].Delta.ToolCalls, tr)
-				}
+				delta.Choices[0].Delta.ToolCalls, toolCallIndex = ollamaToolCallsToOpenAI(chunk.Message.ToolCalls, toolCallIndex, true)
 			}
 			if data, err := common.Marshal(delta); err == nil {
 				_ = helper.StringData(c, string(data))
@@ -157,6 +177,9 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		finishReason := chunk.DoneReason
 		if finishReason == "" {
 			finishReason = "stop"
+		}
+		if toolCallIndex > 0 {
+			finishReason = constant.FinishReasonToolCalls
 		}
 		// emit stop delta
 		if stop := helper.GenerateStopResponse(responseId, created, model, finishReason); stop != nil {
@@ -198,6 +221,8 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 		reasoningBuilder strings.Builder
 		lastChunk        ollamaChatStreamChunk
 		parsedAny        bool
+		toolCallIndex    int
+		toolCalls        []dto.ToolCallResponse
 	)
 	for _, ln := range lines {
 		ln = strings.TrimSpace(ln)
@@ -205,7 +230,7 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 			continue
 		}
 		var ck ollamaChatStreamChunk
-		if err := json.Unmarshal([]byte(ln), &ck); err != nil {
+		if err := common.Unmarshal([]byte(ln), &ck); err != nil {
 			if len(lines) == 1 {
 				return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 			}
@@ -218,7 +243,7 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 			if raw != "" && raw != "null" {
 				// Unmarshal the JSON string to get the actual content without quotes
 				var thinkingContent string
-				if err := json.Unmarshal(ck.Message.Thinking, &thinkingContent); err == nil {
+				if err := common.Unmarshal(ck.Message.Thinking, &thinkingContent); err == nil {
 					reasoningBuilder.WriteString(thinkingContent)
 				} else {
 					// Fallback to raw string if it's not a JSON string
@@ -231,11 +256,16 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 		} else if ck.Response != "" {
 			aggContent.WriteString(ck.Response)
 		}
+		if ck.Message != nil && len(ck.Message.ToolCalls) > 0 {
+			var converted []dto.ToolCallResponse
+			converted, toolCallIndex = ollamaToolCallsToOpenAI(ck.Message.ToolCalls, toolCallIndex, false)
+			toolCalls = append(toolCalls, converted...)
+		}
 	}
 
 	if !parsedAny {
 		var single ollamaChatStreamChunk
-		if err := json.Unmarshal(body, &single); err != nil {
+		if err := common.Unmarshal(body, &single); err != nil {
 			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
 		lastChunk = single
@@ -245,7 +275,7 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 				if raw != "" && raw != "null" {
 					// Unmarshal the JSON string to get the actual content without quotes
 					var thinkingContent string
-					if err := json.Unmarshal(single.Message.Thinking, &thinkingContent); err == nil {
+					if err := common.Unmarshal(single.Message.Thinking, &thinkingContent); err == nil {
 						reasoningBuilder.WriteString(thinkingContent)
 					} else {
 						// Fallback to raw string if it's not a JSON string
@@ -254,6 +284,11 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 				}
 			}
 			aggContent.WriteString(single.Message.Content)
+			if len(single.Message.ToolCalls) > 0 {
+				var converted []dto.ToolCallResponse
+				converted, toolCallIndex = ollamaToolCallsToOpenAI(single.Message.ToolCalls, toolCallIndex, false)
+				toolCalls = append(toolCalls, converted...)
+			}
 		} else {
 			aggContent.WriteString(single.Response)
 		}
@@ -270,8 +305,16 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	if finishReason == "" {
 		finishReason = "stop"
 	}
+	if len(toolCalls) > 0 {
+		finishReason = constant.FinishReasonToolCalls
+	}
 
 	msg := dto.Message{Role: "assistant", Content: contentPtr(content)}
+	if len(toolCalls) > 0 {
+		if rawToolCalls, err := common.Marshal(toolCalls); err == nil {
+			msg.ToolCalls = rawToolCalls
+		}
+	}
 	if rc := reasoningBuilder.String(); rc != "" {
 		msg.ReasoningContent = &rc
 	}

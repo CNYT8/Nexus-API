@@ -127,6 +127,306 @@ const PARAM_OVERRIDE_OPERATIONS_TEMPLATE = {
   ],
 };
 
+const isPlainObject = (value) =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const getStringAtPath = (source, path) => {
+  let current = source;
+  for (const key of path) {
+    if (!isPlainObject(current) || !(key in current)) {
+      return '';
+    }
+    current = current[key];
+  }
+  return typeof current === 'string' ? current.trim() : '';
+};
+
+const firstStringAtPaths = (source, paths) => {
+  for (const path of paths) {
+    const value = getStringAtPath(source, path);
+    if (value) {
+      return value;
+    }
+  }
+  return '';
+};
+
+const decodeCodexJWTClaims = (token) => {
+  const parts = String(token || '')
+    .trim()
+    .split('.');
+  if (parts.length !== 3 || typeof atob !== 'function') {
+    return null;
+  }
+  try {
+    const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const decoded = atob(padded);
+    const claims = JSON.parse(decoded);
+    return isPlainObject(claims) ? claims : null;
+  } catch {
+    return null;
+  }
+};
+
+const getCodexJWTAccountID = (token) => {
+  const claims = decodeCodexJWTClaims(token);
+  const auth = claims?.['https://api.openai.com/auth'];
+  if (!isPlainObject(auth)) {
+    return '';
+  }
+  return typeof auth.chatgpt_account_id === 'string'
+    ? auth.chatgpt_account_id.trim()
+    : '';
+};
+
+const getCodexJWTEmail = (token) => {
+  const claims = decodeCodexJWTClaims(token);
+  return typeof claims?.email === 'string' ? claims.email.trim() : '';
+};
+
+const getCodexJWTExpiry = (token) => {
+  const claims = decodeCodexJWTClaims(token);
+  const exp = Number(claims?.exp);
+  if (!Number.isFinite(exp) || exp <= 0) {
+    return '';
+  }
+  return new Date(exp * 1000).toISOString();
+};
+
+const codexAccessTokenPaths = [
+  ['access_token'],
+  ['accessToken'],
+  ['token'],
+  ['tokens', 'access_token'],
+  ['tokens', 'accessToken'],
+  ['credentials', 'access_token'],
+  ['credentials', 'accessToken'],
+  ['credentials', 'token'],
+];
+
+const hasCodexTokenSignal = (source) =>
+  isPlainObject(source) && firstStringAtPaths(source, codexAccessTokenPaths) !== '';
+
+const firstCodexAccountSource = (accounts) => {
+  if (!Array.isArray(accounts)) {
+    return null;
+  }
+  for (const account of accounts) {
+    if (!isPlainObject(account)) {
+      continue;
+    }
+    const platform = firstStringAtPaths(account, [['platform']]).toLowerCase();
+    const accountType = firstStringAtPaths(account, [['type']]).toLowerCase();
+    if (platform && platform !== 'openai') {
+      continue;
+    }
+    if (accountType && accountType !== 'oauth' && accountType !== 'codex') {
+      continue;
+    }
+    if (hasCodexTokenSignal(account)) {
+      return account;
+    }
+  }
+  return null;
+};
+
+const selectCodexKeySource = (source) => {
+  if (hasCodexTokenSignal(source)) {
+    return source;
+  }
+  const account =
+    firstCodexAccountSource(source?.accounts) ||
+    firstCodexAccountSource(source?.Accounts) ||
+    firstCodexAccountSource(source?.data?.accounts) ||
+    firstCodexAccountSource(source?.data?.Accounts);
+  return account || source;
+};
+
+const collectCodexKeySources = (source) => {
+  if (!isPlainObject(source)) {
+    return [];
+  }
+  if (hasCodexTokenSignal(source)) {
+    return [source];
+  }
+  const values = [];
+  const appendAccounts = (accounts) => {
+    if (Array.isArray(accounts)) {
+      values.push(...accounts);
+    }
+  };
+  appendAccounts(source.accounts);
+  appendAccounts(source.Accounts);
+  appendAccounts(source.configs);
+  appendAccounts(source.Configs);
+  appendAccounts(source.items);
+  appendAccounts(source.Items);
+  appendAccounts(source.keys);
+  appendAccounts(source.Keys);
+  appendAccounts(source.data?.accounts);
+  appendAccounts(source.data?.Accounts);
+  appendAccounts(source.data?.configs);
+  appendAccounts(source.data?.Configs);
+  appendAccounts(source.data?.items);
+  appendAccounts(source.data?.Items);
+  appendAccounts(source.data?.keys);
+  appendAccounts(source.data?.Keys);
+  if (Array.isArray(source.data)) {
+    values.push(...source.data);
+  }
+
+  const result = [];
+  for (const value of values) {
+    if (!isPlainObject(value)) {
+      continue;
+    }
+    if (hasCodexTokenSignal(value)) {
+      result.push(value);
+      continue;
+    }
+    result.push(...collectCodexKeySources(value));
+  }
+  return result;
+};
+
+const normalizeCodexKeyJSON = (source) => {
+  const selected = selectCodexKeySource(source);
+  const normalized = {
+    type: 'codex',
+    access_token: firstStringAtPaths(selected, codexAccessTokenPaths),
+    refresh_token: firstStringAtPaths(selected, [
+      ['refresh_token'],
+      ['refreshToken'],
+      ['tokens', 'refresh_token'],
+      ['tokens', 'refreshToken'],
+      ['credentials', 'refresh_token'],
+      ['credentials', 'refreshToken'],
+    ]),
+    id_token: firstStringAtPaths(selected, [
+      ['id_token'],
+      ['idToken'],
+      ['tokens', 'id_token'],
+      ['tokens', 'idToken'],
+      ['credentials', 'id_token'],
+      ['credentials', 'idToken'],
+    ]),
+    account_id: firstStringAtPaths(selected, [
+      ['account_id'],
+      ['accountId'],
+      ['chatgpt_account_id'],
+      ['chatgptAccountId'],
+      ['tokens', 'account_id'],
+      ['tokens', 'accountId'],
+      ['tokens', 'chatgpt_account_id'],
+      ['tokens', 'chatgptAccountId'],
+      ['account', 'id'],
+      ['account', 'account_id'],
+      ['account', 'accountId'],
+      ['account', 'chatgpt_account_id'],
+      ['account', 'chatgptAccountId'],
+      ['credentials', 'account_id'],
+      ['credentials', 'accountId'],
+      ['credentials', 'chatgpt_account_id'],
+      ['credentials', 'chatgptAccountId'],
+    ]),
+    last_refresh: firstStringAtPaths(selected, [
+      ['last_refresh'],
+      ['lastRefresh'],
+      ['credentials', 'last_refresh'],
+      ['credentials', 'lastRefresh'],
+    ]),
+    email: firstStringAtPaths(selected, [
+      ['email'],
+      ['user', 'email'],
+      ['credentials', 'email'],
+    ]),
+    user_id: firstStringAtPaths(selected, [
+      ['user_id'],
+      ['userId'],
+      ['chatgpt_user_id'],
+      ['chatgptUserId'],
+      ['user', 'id'],
+      ['credentials', 'user_id'],
+      ['credentials', 'userId'],
+      ['credentials', 'chatgpt_user_id'],
+      ['credentials', 'chatgptUserId'],
+    ]),
+    plan_type: firstStringAtPaths(selected, [
+      ['plan_type'],
+      ['planType'],
+      ['chatgpt_plan_type'],
+      ['chatgptPlanType'],
+      ['account', 'plan_type'],
+      ['account', 'planType'],
+      ['credentials', 'plan_type'],
+      ['credentials', 'planType'],
+      ['credentials', 'chatgpt_plan_type'],
+      ['credentials', 'chatgptPlanType'],
+    ]),
+    imported_at: firstStringAtPaths(selected, [
+      ['imported_at'],
+      ['importedAt'],
+      ['extra', 'imported_at'],
+      ['extra', 'importedAt'],
+      ['credentials', 'imported_at'],
+      ['credentials', 'importedAt'],
+    ]),
+    expired: firstStringAtPaths(selected, [
+      ['expired'],
+      ['expires_at'],
+      ['expiresAt'],
+      ['tokens', 'expires_at'],
+      ['tokens', 'expiresAt'],
+      ['credentials', 'expired'],
+      ['credentials', 'expires_at'],
+      ['credentials', 'expiresAt'],
+    ]),
+  };
+  if (!normalized.account_id) {
+    normalized.account_id = getCodexJWTAccountID(normalized.access_token);
+  }
+  if (!normalized.email) {
+    normalized.email = getCodexJWTEmail(normalized.access_token);
+  }
+  if (!normalized.expired) {
+    normalized.expired = getCodexJWTExpiry(normalized.access_token);
+  }
+  Object.keys(normalized).forEach((key) => {
+    if (normalized[key] === '') {
+      delete normalized[key];
+    }
+  });
+  return normalized;
+};
+
+const normalizeCodexKeyJSONList = (source) => {
+  const sources = collectCodexKeySources(source);
+  const selectedSources = sources.length > 0 ? sources : [source];
+  const normalizedKeys = [];
+  const seen = new Set();
+  const importedAt = new Date().toISOString();
+
+  for (const item of selectedSources) {
+    const normalized = normalizeCodexKeyJSON(item);
+    if (!normalized.access_token) {
+      continue;
+    }
+    if (!normalized.imported_at) {
+      normalized.imported_at = importedAt;
+    }
+    const identity = normalized.account_id
+      ? `account:${normalized.account_id}`
+      : `access:${normalized.access_token || ''}`;
+    if (seen.has(identity)) {
+      continue;
+    }
+    seen.add(identity);
+    normalizedKeys.push(normalized);
+  }
+  return normalizedKeys;
+};
+
 const DEPRECATED_DOUBAO_CODING_PLAN_BASE_URL = 'doubao-coding-plan';
 
 // 支持并且已适配通过接口获取模型列表的渠道类型
@@ -1545,13 +1845,9 @@ const EditChannelModal = (props) => {
     const formValues = formApiRef.current ? formApiRef.current.getValues() : {};
     let localInputs = { ...formValues };
     localInputs.param_override = inputs.param_override;
+    let codexConfigCount = 0;
 
     if (localInputs.type === 57) {
-      if (batch) {
-        showInfo(t('Codex 渠道不支持批量创建'));
-        return;
-      }
-
       const rawKey = (localInputs.key || '').trim();
       if (!isEdit && rawKey === '') {
         showInfo(t('请输入密钥！'));
@@ -1569,17 +1865,28 @@ const EditChannelModal = (props) => {
             showInfo(t('密钥必须是 JSON 对象'));
             return;
           }
-          const accessToken = String(parsed.access_token || '').trim();
-          const accountId = String(parsed.account_id || '').trim();
-          if (!accessToken) {
+          const normalizedKeys = normalizeCodexKeyJSONList(parsed);
+          if (normalizedKeys.length === 0) {
             showInfo(t('密钥 JSON 必须包含 access_token'));
             return;
           }
-          if (!accountId) {
-            showInfo(t('密钥 JSON 必须包含 account_id'));
-            return;
+          for (const normalizedKey of normalizedKeys) {
+            const accessToken = String(normalizedKey.access_token || '').trim();
+            const accountId = String(normalizedKey.account_id || '').trim();
+            if (!accessToken) {
+              showInfo(t('密钥 JSON 必须包含 access_token'));
+              return;
+            }
+            if (!accountId) {
+              showInfo(t('密钥 JSON 必须包含 account_id'));
+              return;
+            }
           }
-          localInputs.key = JSON.stringify(parsed);
+          codexConfigCount = normalizedKeys.length;
+          localInputs.key =
+            normalizedKeys.length > 1
+              ? JSON.stringify(normalizedKeys)
+              : JSON.stringify(normalizedKeys[0]);
         } catch (error) {
           showInfo(t('密钥必须是合法的 JSON 格式！'));
           return;
@@ -1785,11 +2092,15 @@ const EditChannelModal = (props) => {
       delete settings.vertex_key_type;
     }
 
-    // type === 1 (OpenAI) 或 type === 14 (Claude): 设置字段透传控制（显式保存布尔值）
-    if (localInputs.type === 1 || localInputs.type === 14) {
+    // type === 1 (OpenAI)、type === 14 (Claude) 或 type === 57 (Codex): 设置字段透传控制（显式保存布尔值）
+    if (
+      localInputs.type === 1 ||
+      localInputs.type === 14 ||
+      localInputs.type === 57
+    ) {
       settings.allow_service_tier = localInputs.allow_service_tier === true;
       // 仅 OpenAI 渠道需要 store / safety_identifier / include_obfuscation
-      if (localInputs.type === 1) {
+      if (localInputs.type === 1 || localInputs.type === 57) {
         settings.disable_store = localInputs.disable_store === true;
         settings.allow_safety_identifier =
           localInputs.allow_safety_identifier === true;
@@ -1860,7 +2171,9 @@ const EditChannelModal = (props) => {
     localInputs.group = (localInputs.groups || []).join(',');
 
     let mode = 'single';
-    if (batch) {
+    if (localInputs.type === 57 && codexConfigCount > 1) {
+      mode = 'multi_to_single';
+    } else if (batch) {
       mode = multiToSingle ? 'multi_to_single' : 'batch';
     }
 
@@ -1873,7 +2186,12 @@ const EditChannelModal = (props) => {
     } else {
       res = await API.post(`/api/channel/`, {
         mode: mode,
-        multi_key_mode: mode === 'multi_to_single' ? multiKeyMode : undefined,
+        multi_key_mode:
+          mode === 'multi_to_single'
+            ? localInputs.type === 57
+              ? multiKeyMode || 'random'
+              : multiKeyMode
+            : undefined,
         channel: localInputs,
       });
     }
@@ -2485,7 +2803,7 @@ const EditChannelModal = (props) => {
                     </Col>
                   </Row>
 
-                  {inputs.type === 1 && (
+                  {(inputs.type === 1 || inputs.type === 57) && (
                     <>
                       <div className='mt-4 mb-2 text-sm font-medium text-gray-700'>
                         {t('字段透传控制')}
@@ -2817,8 +3135,8 @@ const EditChannelModal = (props) => {
                               field='key'
                               label={
                                 isEdit
-                                  ? t('密钥（编辑模式下，保存的密钥不会显示）')
-                                  : t('密钥')
+                                  ? t('配置（编辑模式下，保存的配置不会显示）')
+                                  : t('配置')
                               }
                               placeholder={t(
                                 '请输入 JSON 格式的 OAuth 凭据，例如：\n{\n  "access_token": "...",\n  "account_id": "..." \n}',
@@ -2840,11 +3158,20 @@ const EditChannelModal = (props) => {
                               disabled={isIonetLocked}
                               extraText={
                                 <div className='flex flex-col gap-2'>
-                                  <Text type='tertiary' size='small'>
-                                    {t(
-                                      '仅支持 JSON 对象，必须包含 access_token 与 account_id',
-                                    )}
-                                  </Text>
+                                  <div className='flex flex-wrap items-center gap-2'>
+                                    <Text type='tertiary' size='small'>
+                                      {t(
+                                        '仅支持 JSON 对象，必须包含 access_token 与 account_id，支持多配置',
+                                      )}
+                                    </Text>
+                                    <Text
+                                      type='secondary'
+                                      size='small'
+                                      style={{ fontSize: 12 }}
+                                    >
+                                      {t('支持sub2api JSON配置')}
+                                    </Text>
+                                  </div>
 
                                   <Space wrap spacing='tight'>
                                     <Button
@@ -2867,7 +3194,7 @@ const EditChannelModal = (props) => {
                                         loading={codexCredentialRefreshing}
                                         disabled={isIonetLocked}
                                       >
-                                        {t('刷新凭证')}
+                                        {t('刷新配置')}
                                       </Button>
                                     )}
                                     <Button
@@ -2887,7 +3214,7 @@ const EditChannelModal = (props) => {
                                         onClick={handleShow2FAModal}
                                         disabled={isIonetLocked}
                                       >
-                                        {t('查看密钥')}
+                                        {t('查看配置')}
                                       </Button>
                                     )}
                                     {batchExtra}
@@ -3111,20 +3438,44 @@ const EditChannelModal = (props) => {
                     {isEdit && isMultiKeyChannel && (
                       <Form.Select
                         field='key_mode'
-                        label={t('密钥更新模式')}
-                        placeholder={t('请选择密钥更新模式')}
+                        label={
+                          inputs.type === 57
+                            ? t('配置更新模式')
+                            : t('密钥更新模式')
+                        }
+                        placeholder={
+                          inputs.type === 57
+                            ? t('请选择配置更新模式')
+                            : t('请选择密钥更新模式')
+                        }
                         optionList={[
-                          { label: t('追加到现有密钥'), value: 'append' },
-                          { label: t('覆盖现有密钥'), value: 'replace' },
+                          {
+                            label:
+                              inputs.type === 57
+                                ? t('追加配置')
+                                : t('追加到现有密钥'),
+                            value: 'append',
+                          },
+                          {
+                            label:
+                              inputs.type === 57
+                                ? t('覆盖配置')
+                                : t('覆盖现有密钥'),
+                            value: 'replace',
+                          },
                         ]}
                         style={{ width: '100%' }}
                         value={keyMode}
                         onChange={(value) => setKeyMode(value)}
                         extraText={
                           <Text type='tertiary' size='small'>
-                            {keyMode === 'replace'
-                              ? t('覆盖模式：将完全替换现有的所有密钥')
-                              : t('追加模式：将新密钥添加到现有密钥列表末尾')}
+                            {inputs.type === 57
+                              ? keyMode === 'replace'
+                                ? t('覆盖模式：将完全替换现有的所有配置')
+                                : t('追加模式：将新配置添加到现有配置列表末尾')
+                              : keyMode === 'replace'
+                                ? t('覆盖模式：将完全替换现有的所有密钥')
+                                : t('追加模式：将新密钥添加到现有密钥列表末尾')}
                           </Text>
                         }
                       />

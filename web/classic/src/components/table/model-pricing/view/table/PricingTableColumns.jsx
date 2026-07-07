@@ -26,6 +26,7 @@ import {
   calculateModelPrice,
   getModelPriceItems,
   getLobeHubIcon,
+  renderRatio,
 } from '../../../../../helpers';
 import {
   renderLimitedItems,
@@ -105,6 +106,7 @@ export const getPricingTableColumns = ({
   t,
   selectedGroup,
   groupRatio,
+  groupMembershipDiscounts = {},
   copyText,
   setModalImageUrl,
   setIsModalOpenurl,
@@ -221,7 +223,16 @@ export const getPricingTableColumns = ({
             {record.quota_type === 0 ? completionRatio : t('无')}
           </div>
           <div className='text-gray-700'>
-            {t('分组倍率')}：{priceData?.usedGroupRatio ?? '-'}
+            {t('分组倍率')}：
+            {priceData?.usedGroupRatio !== undefined
+              ? renderRatio(priceData.usedGroupRatio, {
+                  membershipDiscount:
+                    groupMembershipDiscounts[priceData.usedGroup],
+                  compact: true,
+                  size: 'small',
+                  shape: 'circle',
+                })
+              : '-'}
           </div>
         </div>
       );

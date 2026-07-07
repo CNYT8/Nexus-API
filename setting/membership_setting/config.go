@@ -10,8 +10,9 @@ import (
 )
 
 type GroupDiscount struct {
-	Group    string  `json:"group"`
-	Discount float64 `json:"discount"`
+	Group           string  `json:"group"`
+	Discount        float64 `json:"discount"`
+	StackGroupRatio *bool   `json:"stack_group_ratio"`
 }
 
 type Tier struct {
@@ -23,7 +24,14 @@ type Tier struct {
 	SortOrder          int             `json:"sort_order"`
 	DiscountAllGroups  bool            `json:"discount_all_groups"`
 	AllGroupDiscount   float64         `json:"all_group_discount"`
+	AllGroupStackRatio *bool           `json:"all_group_stack_ratio"`
 	GroupDiscounts     []GroupDiscount `json:"group_discounts"`
+}
+
+type TierDiscount struct {
+	Tier            Tier
+	Multiplier      float64
+	StackGroupRatio bool
 }
 
 type MembershipSetting struct {
@@ -55,6 +63,24 @@ func normalizeDiscount(discount float64) float64 {
 	return discount
 }
 
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func normalizeStackGroupRatio(value *bool) *bool {
+	if value == nil {
+		return boolPtr(true)
+	}
+	return boolPtr(*value)
+}
+
+func stackGroupRatioValue(value *bool) bool {
+	if value == nil {
+		return true
+	}
+	return *value
+}
+
 func normalizeTier(tier Tier) Tier {
 	tier.Id = strings.TrimSpace(tier.Id)
 	tier.Name = strings.TrimSpace(tier.Name)
@@ -62,9 +88,11 @@ func normalizeTier(tier Tier) Tier {
 		tier.ThresholdAmount = 0
 	}
 	tier.AllGroupDiscount = normalizeDiscount(tier.AllGroupDiscount)
+	tier.AllGroupStackRatio = normalizeStackGroupRatio(tier.AllGroupStackRatio)
 	for i := range tier.GroupDiscounts {
 		tier.GroupDiscounts[i].Group = strings.TrimSpace(tier.GroupDiscounts[i].Group)
 		tier.GroupDiscounts[i].Discount = normalizeDiscount(tier.GroupDiscounts[i].Discount)
+		tier.GroupDiscounts[i].StackGroupRatio = normalizeStackGroupRatio(tier.GroupDiscounts[i].StackGroupRatio)
 	}
 	return tier
 }
@@ -148,29 +176,36 @@ func NextTierByAmount(amount float64) (Tier, bool) {
 	return next, found
 }
 
-func GetTierDiscount(tierId string, group string) (Tier, float64, bool) {
+func GetTierDiscount(tierId string, group string) (TierDiscount, bool) {
 	tier, ok := FindTier(tierId)
 	if !ok || !tier.Enabled {
-		return Tier{}, 1, false
+		return TierDiscount{}, false
 	}
 	group = strings.TrimSpace(group)
 	discount := 1.0
+	stackGroupRatio := true
 	matched := false
 	if tier.DiscountAllGroups {
 		discount = tier.AllGroupDiscount
+		stackGroupRatio = stackGroupRatioValue(tier.AllGroupStackRatio)
 		matched = true
 	}
 	for _, item := range tier.GroupDiscounts {
 		if item.Group == group {
 			discount = item.Discount
+			stackGroupRatio = stackGroupRatioValue(item.StackGroupRatio)
 			matched = true
 			break
 		}
 	}
 	if !matched {
-		return tier, 1, false
+		return TierDiscount{}, false
 	}
-	return tier, normalizeDiscount(discount), true
+	return TierDiscount{
+		Tier:            tier,
+		Multiplier:      normalizeDiscount(discount),
+		StackGroupRatio: stackGroupRatio,
+	}, true
 }
 
 func ParseTiersJSONString(jsonStr string) ([]Tier, error) {

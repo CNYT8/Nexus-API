@@ -38,6 +38,7 @@ func GetPricing(c *gin.Context) {
 	userId, exists := c.Get("id")
 	usableGroup := map[string]string{}
 	groupRatio := map[string]float64{}
+	membershipDiscounts := map[string]model.MembershipDiscountInfo{}
 	for s, f := range ratio_setting.GetGroupRatioCopy() {
 		groupRatio[s] = f
 	}
@@ -51,7 +52,11 @@ func GetPricing(c *gin.Context) {
 				if ok {
 					groupRatio[g] = ratio
 				}
-				groupRatio[g], _ = model.ApplyMembershipDiscount(userId.(int), g, groupRatio[g])
+				discountedRatio, membershipDiscount := model.ApplyMembershipDiscount(userId.(int), g, groupRatio[g])
+				groupRatio[g] = discountedRatio
+				if membershipDiscount.Applied {
+					membershipDiscounts[g] = membershipDiscount
+				}
 			}
 		}
 	}
@@ -62,18 +67,20 @@ func GetPricing(c *gin.Context) {
 	for group := range ratio_setting.GetGroupRatioCopy() {
 		if _, ok := usableGroup[group]; !ok {
 			delete(groupRatio, group)
+			delete(membershipDiscounts, group)
 		}
 	}
 
 	c.JSON(200, gin.H{
-		"success":            true,
-		"data":               pricing,
-		"vendors":            model.GetVendors(),
-		"group_ratio":        groupRatio,
-		"usable_group":       usableGroup,
-		"supported_endpoint": model.GetSupportedEndpointMap(),
-		"auto_groups":        service.GetUserAutoGroup(group),
-		"pricing_version":    "a42d372ccf0b5dd13ecf71203521f9d2",
+		"success":             true,
+		"data":                pricing,
+		"vendors":             model.GetVendors(),
+		"group_ratio":         groupRatio,
+		"usable_group":        usableGroup,
+		"membership_discount": membershipDiscounts,
+		"supported_endpoint":  model.GetSupportedEndpointMap(),
+		"auto_groups":         service.GetUserAutoGroup(group),
+		"pricing_version":     "a42d372ccf0b5dd13ecf71203521f9d2",
 	})
 }
 

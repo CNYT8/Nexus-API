@@ -92,33 +92,33 @@ func runCodexCredentialAutoRefreshOnce() {
 				continue
 			}
 			scanned++
-			if ch.ChannelInfo.IsMultiKey {
-				continue
-			}
 
 			rawKey := strings.TrimSpace(ch.Key)
 			if rawKey == "" {
 				continue
 			}
 
-			oauthKey, err := parseCodexOAuthKey(rawKey)
+			oauthKeys, err := parseCodexOAuthKeys(rawKey)
 			if err != nil {
 				continue
 			}
 
-			refreshToken := strings.TrimSpace(oauthKey.RefreshToken)
-			if refreshToken == "" {
-				continue
+			needsRefresh := false
+			for i := range oauthKeys {
+				if strings.TrimSpace(oauthKeys[i].RefreshToken) == "" {
+					continue
+				}
+				if codexOAuthKeyNeedsRefresh(&oauthKeys[i], now, codexCredentialRefreshThreshold) {
+					needsRefresh = true
+					break
+				}
 			}
-
-			expiredAtRaw := strings.TrimSpace(oauthKey.Expired)
-			expiredAt, err := time.Parse(time.RFC3339, expiredAtRaw)
-			if err == nil && !expiredAt.IsZero() && expiredAt.Sub(now) > codexCredentialRefreshThreshold {
+			if !needsRefresh {
 				continue
 			}
 
 			refreshCtx, cancel := context.WithTimeout(ctx, codexCredentialRefreshTimeout)
-			newKey, _, err := RefreshCodexChannelCredential(refreshCtx, ch.Id, CodexCredentialRefreshOptions{ResetCaches: false})
+			newKey, _, err := RefreshCodexChannelCredential(refreshCtx, ch.Id, CodexCredentialRefreshOptions{ResetCaches: false, RefreshOnlyExpiring: true})
 			cancel()
 			if err != nil {
 				logger.LogWarn(ctx, fmt.Sprintf("codex credential auto-refresh: channel_id=%d name=%s refresh failed: %v", ch.Id, ch.Name, err))

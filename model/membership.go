@@ -36,10 +36,11 @@ type MembershipSummary struct {
 }
 
 type MembershipDiscountInfo struct {
-	Applied  bool    `json:"applied"`
-	TierId   string  `json:"tier_id"`
-	TierName string  `json:"tier_name"`
-	Discount float64 `json:"discount"`
+	Applied         bool    `json:"applied"`
+	TierId          string  `json:"tier_id"`
+	TierName        string  `json:"tier_name"`
+	Discount        float64 `json:"discount"`
+	StackGroupRatio bool    `json:"stack_group_ratio"`
 }
 
 type userMembershipCacheEntry struct {
@@ -264,17 +265,22 @@ func ApplyMembershipDiscount(userId int, group string, groupRatio float64) (floa
 	if tierId == "" {
 		return groupRatio, info
 	}
-	tier, discount, ok := membership_setting.GetTierDiscount(tierId, group)
-	if !ok || discount <= 0 || discount >= 1 {
+	tierDiscount, ok := membership_setting.GetTierDiscount(tierId, group)
+	if !ok || tierDiscount.Multiplier <= 0 || tierDiscount.Multiplier >= 1 {
 		return groupRatio, info
 	}
-	info = MembershipDiscountInfo{
-		Applied:  true,
-		TierId:   tier.Id,
-		TierName: tier.Name,
-		Discount: discount,
+	finalRatio := tierDiscount.Multiplier
+	if tierDiscount.StackGroupRatio {
+		finalRatio = groupRatio * tierDiscount.Multiplier
 	}
-	return groupRatio * discount, info
+	info = MembershipDiscountInfo{
+		Applied:         true,
+		TierId:          tierDiscount.Tier.Id,
+		TierName:        tierDiscount.Tier.Name,
+		Discount:        tierDiscount.Multiplier,
+		StackGroupRatio: tierDiscount.StackGroupRatio,
+	}
+	return finalRatio, info
 }
 
 func BuildMembershipSummary(userId int) (MembershipSummary, error) {

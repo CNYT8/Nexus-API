@@ -37,12 +37,19 @@ func GetCodexChannelUsage(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel type is not Codex"})
 		return
 	}
+	rawKey := strings.TrimSpace(ch.Key)
+	selectedKeyIndex := 0
 	if ch.ChannelInfo.IsMultiKey {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "multi-key channel is not supported"})
-		return
+		nextKey, keyIndex, keyErr := ch.GetNextEnabledKey()
+		if keyErr != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": keyErr.Error()})
+			return
+		}
+		selectedKeyIndex = keyIndex
+		rawKey = strings.TrimSpace(nextKey)
 	}
 
-	oauthKey, err := codex.ParseOAuthKey(strings.TrimSpace(ch.Key))
+	oauthKey, err := codex.ParseOAuthKey(rawKey)
 	if err != nil {
 		common.SysError("failed to parse oauth key: " + err.Error())
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "解析凭证失败，请检查渠道配置"})
@@ -91,7 +98,15 @@ func GetCodexChannelUsage(c *gin.Context) {
 
 			encoded, encErr := common.Marshal(oauthKey)
 			if encErr == nil {
-				_ = model.DB.Model(&model.Channel{}).Where("id = ?", ch.Id).Update("key", string(encoded)).Error
+				if ch.ChannelInfo.IsMultiKey {
+					keys := ch.GetKeys()
+					if selectedKeyIndex >= 0 && selectedKeyIndex < len(keys) {
+						keys[selectedKeyIndex] = string(encoded)
+						_ = model.DB.Model(&model.Channel{}).Where("id = ?", ch.Id).Update("key", strings.Join(keys, "\n")).Error
+					}
+				} else {
+					_ = model.DB.Model(&model.Channel{}).Where("id = ?", ch.Id).Update("key", string(encoded)).Error
+				}
 				model.InitChannelCache()
 				service.ResetProxyClientCache()
 			}

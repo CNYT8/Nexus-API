@@ -38,24 +38,55 @@ import { API, renderQuotaWithAmount, showError } from '../../helpers';
 
 const { Text, Title } = Typography;
 
-const formatDiscount = (discount) => {
+const formatDiscount = (discount, t) => {
   const value = Number(discount || 1);
-  if (!Number.isFinite(value) || value <= 0) return '1.00';
-  return value.toFixed(2);
+  if (!Number.isFinite(value) || value <= 0) {
+    return t('{{discount}}折', { discount: 10 });
+  }
+  const discountValue = Number((value * 10).toFixed(2));
+  return t('{{discount}}折', { discount: discountValue });
 };
 
 const getTierDiscounts = (tier, t) => {
   const discounts = [];
   if (tier.discount_all_groups) {
     discounts.push(
-      `${t('全部分组')} ${formatDiscount(tier.all_group_discount)}`,
+      `${t('全部分组')} ${formatDiscount(tier.all_group_discount, t)}`,
     );
   }
   (tier.group_discounts || []).forEach((item) => {
     if (!item.group) return;
-    discounts.push(`${item.group} ${formatDiscount(item.discount)}`);
+    discounts.push(`${item.group} ${formatDiscount(item.discount, t)}`);
   });
   return discounts;
+};
+
+const getTierBestDiscount = (tier) => {
+  const values = [];
+  if (tier.discount_all_groups) {
+    values.push(Number(tier.all_group_discount || 1));
+  }
+  (tier.group_discounts || []).forEach((item) => {
+    values.push(Number(item.discount || 1));
+  });
+  const validValues = values.filter(
+    (value) => Number.isFinite(value) && value > 0 && value <= 1,
+  );
+  if (validValues.length === 0) return 1;
+  return Math.min(...validValues);
+};
+
+const decorateTier = (tier) => {
+  const bestDiscount = getTierBestDiscount(tier);
+  const discountDepth = Math.max(0, 1 - bestDiscount);
+  return {
+    ...tier,
+    bestDiscount,
+    discountDepth,
+    filledSteps:
+      discountDepth > 0 ? Math.min(4, Math.ceil(discountDepth * 5)) : 0,
+    lift: Math.min(18, Math.round(discountDepth * 36)),
+  };
 };
 
 const Membership = () => {
@@ -93,10 +124,14 @@ const Membership = () => {
   const current = data.current || {};
   const tiers = useMemo(
     () =>
-      [...(data.tiers || [])].sort(
-        (a, b) => a.threshold_amount - b.threshold_amount,
-      ),
+      [...(data.tiers || [])]
+        .sort((a, b) => a.threshold_amount - b.threshold_amount)
+        .map(decorateTier),
     [data.tiers],
+  );
+  const maxTierLift = useMemo(
+    () => Math.max(0, ...tiers.map((tier) => tier.lift || 0)),
+    [tiers],
   );
   const nextTier = data.has_next_tier ? data.next_tier : null;
   const currentTier = current.tier_name || t('无');
@@ -181,10 +216,15 @@ const Membership = () => {
               <div className='mb-3'>
                 <Text strong>{t('会员等级')}</Text>
               </div>
-              <div className='grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3'>
+              <div
+                className='grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3'
+                style={{ paddingTop: maxTierLift }}
+              >
                 {tiers.map((tier) => {
                   const active = current.tier_id === tier.id;
                   const discounts = getTierDiscounts(tier, t);
+                  const hasDiscount = tier.discountDepth > 0;
+                  const shadowOpacity = 0.08 + tier.discountDepth * 0.12;
                   return (
                     <Card
                       key={tier.id}
@@ -192,16 +232,63 @@ const Membership = () => {
                       style={{
                         borderColor: active
                           ? 'var(--semi-color-primary)'
-                          : 'var(--semi-color-border)',
+                          : hasDiscount
+                            ? 'rgba(245, 158, 11, 0.45)'
+                            : 'var(--semi-color-border)',
+                        boxShadow: hasDiscount
+                          ? `0 ${8 + tier.lift / 2}px ${18 + tier.lift}px rgba(180, 83, 9, ${shadowOpacity})`
+                          : undefined,
+                        transform: `translateY(-${tier.lift}px)`,
+                        transition:
+                          'transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease',
                       }}
                     >
-                      <div className='mb-2 flex items-center justify-between gap-2'>
-                        <Text strong>{tier.name}</Text>
-                        {active && (
-                          <Tag color='blue' shape='circle'>
-                            {t('当前等级')}
+                      <div className='mb-3 flex items-start justify-between gap-2'>
+                        <div className='flex min-w-0 items-center gap-2'>
+                          <Avatar
+                            size='extra-small'
+                            color={hasDiscount ? 'orange' : 'grey'}
+                          >
+                            <Crown size={14} />
+                          </Avatar>
+                          <Text strong ellipsis={{ showTooltip: true }}>
+                            {tier.name}
+                          </Text>
+                        </div>
+                        <Space wrap spacing={4}>
+                          <Tag
+                            color={hasDiscount ? 'yellow' : 'white'}
+                            shape='circle'
+                          >
+                            {formatDiscount(tier.bestDiscount, t)}
                           </Tag>
-                        )}
+                          {active && (
+                            <Tag color='blue' shape='circle'>
+                              {t('当前等级')}
+                            </Tag>
+                          )}
+                        </Space>
+                      </div>
+                      <div
+                        className='mb-3 flex items-end gap-1'
+                        aria-hidden='true'
+                      >
+                        {Array.from({ length: 4 }).map((_, step) => {
+                          const filled = step < tier.filledSteps;
+                          return (
+                            <span
+                              key={step}
+                              style={{
+                                width: 18,
+                                height: 4 + step * 4,
+                                borderRadius: 999,
+                                backgroundColor: filled
+                                  ? 'rgba(245, 158, 11, 0.82)'
+                                  : 'var(--semi-color-fill-1)',
+                              }}
+                            />
+                          );
+                        })}
                       </div>
                       <Text type='secondary' size='small' className='block'>
                         {t('门槛')}{' '}

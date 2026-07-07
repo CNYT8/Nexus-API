@@ -124,3 +124,94 @@ func TestMembershipAutoUpgradeDoesNotDowngradeManualTier(t *testing.T) {
 	assert.Equal(t, "gold", info.TierId)
 	assert.InDelta(t, 1.6, ratio, 0.0001)
 }
+
+func TestMembershipDiscountCanOverrideGroupRatio(t *testing.T) {
+	truncateTables(t)
+	resetMembershipForTest(t)
+	setting := membership_setting.GetMembershipSetting()
+	setting.Enabled = true
+	require.NoError(t, membership_setting.UpdateTiersByJSONString(`[
+		{"id":"gold","name":"Gold","threshold_amount":0,"auto_upgrade_enabled":true,"enabled":true,"sort_order":1,"discount_all_groups":true,"all_group_discount":0.7,"all_group_stack_ratio":false,"group_discounts":[]}
+	]`))
+
+	userId := 503
+	require.NoError(t, DB.Create(&User{
+		Id:       userId,
+		Username: "membership_override_user",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+		AffCode:  "membership_override_user",
+	}).Error)
+	require.NoError(t, SetUserMembershipTier(userId, "gold", MembershipSourceManual))
+
+	ratio, info := ApplyMembershipDiscount(userId, "default", 0.8)
+
+	assert.True(t, info.Applied)
+	assert.False(t, info.StackGroupRatio)
+	assert.InDelta(t, 0.7, ratio, 0.0001)
+}
+
+func TestMembershipGroupDiscountCanStackGroupRatio(t *testing.T) {
+	truncateTables(t)
+	resetMembershipForTest(t)
+	setting := membership_setting.GetMembershipSetting()
+	setting.Enabled = true
+	require.NoError(t, membership_setting.UpdateTiersByJSONString(`[
+		{"id":"gold","name":"Gold","threshold_amount":0,"auto_upgrade_enabled":true,"enabled":true,"sort_order":1,"discount_all_groups":false,"all_group_discount":1,"group_discounts":[{"group":"vip","discount":0.7,"stack_group_ratio":true}]}
+	]`))
+
+	userId := 504
+	require.NoError(t, DB.Create(&User{
+		Id:       userId,
+		Username: "membership_stack_user",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+		AffCode:  "membership_stack_user",
+	}).Error)
+	require.NoError(t, SetUserMembershipTier(userId, "gold", MembershipSourceManual))
+
+	ratio, info := ApplyMembershipDiscount(userId, "vip", 0.8)
+
+	assert.True(t, info.Applied)
+	assert.True(t, info.StackGroupRatio)
+	assert.InDelta(t, 0.56, ratio, 0.0001)
+}
+
+func TestSearchUsersByMembershipTier(t *testing.T) {
+	truncateTables(t)
+	resetMembershipForTest(t)
+
+	goldUser := &User{
+		Username: "member_search_gold",
+		Password: "password123",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+		AffCode:  "member_search_gold",
+	}
+	silverUser := &User{
+		Username: "member_search_silver",
+		Password: "password123",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+		AffCode:  "member_search_silver",
+	}
+	require.NoError(t, DB.Create(goldUser).Error)
+	require.NoError(t, DB.Create(silverUser).Error)
+	require.NoError(t, DB.Create(&UserMembership{
+		UserId: goldUser.Id,
+		TierId: "gold",
+		Source: MembershipSourceManual,
+	}).Error)
+	require.NoError(t, DB.Create(&UserMembership{
+		UserId: silverUser.Id,
+		TierId: "silver",
+		Source: MembershipSourceManual,
+	}).Error)
+
+	users, total, err := SearchUsers("member_search_", "", "gold", nil, nil, 0, 10)
+
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, users, 1)
+	assert.Equal(t, goldUser.Id, users[0].Id)
+}

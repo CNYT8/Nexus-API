@@ -62,6 +62,7 @@ const createDefaultTier = (index) => ({
   sort_order: index + 1,
   discount_all_groups: false,
   all_group_discount: 1,
+  all_group_stack_ratio: true,
   group_discounts: [],
 });
 
@@ -103,11 +104,13 @@ const normalizeTier = (tier, index) => ({
   sort_order: index + 1,
   discount_all_groups: tier.discount_all_groups === true,
   all_group_discount: normalizeDiscount(tier.all_group_discount),
+  all_group_stack_ratio: tier.all_group_stack_ratio !== false,
   group_discounts: (tier.group_discounts || [])
     .filter((item) => item?.group)
     .map((item) => ({
       group: String(item.group).trim(),
       discount: normalizeDiscount(item.discount),
+      stack_group_ratio: item.stack_group_ratio !== false,
     })),
 });
 
@@ -222,7 +225,7 @@ const MembershipSetting = () => {
           ...tier,
           group_discounts: [
             ...(tier.group_discounts || []),
-            { group: '', discount: 1 },
+            { group: '', discount: 1, stack_group_ratio: true },
           ],
         };
       }),
@@ -410,7 +413,7 @@ const MembershipSetting = () => {
                   </Col>
                   <Col xs={24} md={8}>
                     <div className='mb-1'>
-                      <Text size='small'>{t('全部分组折扣')}</Text>
+                      <Text size='small'>{t('全部分组倍率')}</Text>
                     </div>
                     <Space align='center'>
                       <Switch
@@ -432,6 +435,22 @@ const MembershipSetting = () => {
                       />
                     </Space>
                   </Col>
+                  <Col xs={24} md={8}>
+                    <div className='mb-1'>
+                      <Text size='small'>{t('叠加原分组倍率')}</Text>
+                    </div>
+                    <Space>
+                      <Switch
+                        checked={tier.all_group_stack_ratio !== false}
+                        onChange={(checked) =>
+                          updateTier(tier.id, 'all_group_stack_ratio', checked)
+                        }
+                      />
+                      <Text type='secondary' size='small'>
+                        {t('叠加原分组倍率')}
+                      </Text>
+                    </Space>
+                  </Col>
                 </Row>
 
                 <Divider margin='12px' />
@@ -444,13 +463,13 @@ const MembershipSetting = () => {
                     type='tertiary'
                     onClick={() => addGroupDiscount(tier.id)}
                   >
-                    {t('添加分组折扣')}
+                    {t('添加分组倍率')}
                   </Button>
                 </div>
                 <div className='space-y-2'>
                   {(tier.group_discounts || []).map((item, discountIndex) => (
-                    <Row key={`${tier.id}-${discountIndex}`} gutter={8}>
-                      <Col span={14}>
+                    <Row key={`${tier.id}-${discountIndex}`} gutter={[8, 8]}>
+                      <Col xs={24} md={8}>
                         <Select
                           value={item.group}
                           placeholder={t('选择分组')}
@@ -466,7 +485,7 @@ const MembershipSetting = () => {
                           }
                         />
                       </Col>
-                      <Col span={8}>
+                      <Col xs={12} md={6}>
                         <InputNumber
                           value={item.discount}
                           min={0.01}
@@ -484,7 +503,25 @@ const MembershipSetting = () => {
                           }
                         />
                       </Col>
-                      <Col span={2}>
+                      <Col xs={12} md={8}>
+                        <Space>
+                          <Switch
+                            checked={item.stack_group_ratio !== false}
+                            onChange={(checked) =>
+                              updateTierDiscount(
+                                tier.id,
+                                discountIndex,
+                                'stack_group_ratio',
+                                checked,
+                              )
+                            }
+                          />
+                          <Text type='secondary' size='small'>
+                            {t('叠加原分组倍率')}
+                          </Text>
+                        </Space>
+                      </Col>
+                      <Col xs={24} md={2}>
                         <Button
                           type='danger'
                           theme='borderless'

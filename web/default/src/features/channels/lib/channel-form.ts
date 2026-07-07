@@ -23,6 +23,7 @@ import {
   MODEL_FETCHABLE_TYPES,
 } from '../constants'
 import type { Channel } from '../types'
+import { isCodexCredential } from './codex-credential'
 
 // ============================================================================
 // Form Validation Schema
@@ -74,22 +75,6 @@ function isOptionalStatusCodeMapping(value: string | undefined): boolean {
         toCode <= 599
       )
     })
-  } catch {
-    return false
-  }
-}
-
-function isCodexCredential(value: string | undefined): boolean {
-  try {
-    const parsed = parseOptionalJson(value)
-    if (parsed === undefined) return true
-    return (
-      isJsonObjectValue(parsed) &&
-      typeof parsed.access_token === 'string' &&
-      parsed.access_token.trim().length > 0 &&
-      typeof parsed.account_id === 'string' &&
-      parsed.account_id.trim().length > 0
-    )
   } catch {
     return false
   }

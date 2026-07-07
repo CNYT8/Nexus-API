@@ -174,6 +174,18 @@ const SelectableButtonGroup = ({
     );
   };
 
+  const renderBadge = (content, isActive, badgeVariant) => {
+    const className = [
+      'sbg-badge',
+      isActive ? 'sbg-badge-active' : '',
+      badgeVariant ? `sbg-badge-${badgeVariant}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    return <span className={className}>{content}</span>;
+  };
+
   const contentElement = showSkeleton ? (
     renderSkeletonButtons()
   ) : (
@@ -205,11 +217,14 @@ const SelectableButtonGroup = ({
                 <div className='sbg-content'>
                   {item.icon && <span className='sbg-icon'>{item.icon}</span>}
                   <ConditionalTooltipText text={item.label} />
-                  {item.tagCount !== undefined && shouldShowTags && (
-                    <span className={`sbg-badge ${isActive ? 'sbg-badge-active' : ''}`}>
-                      {item.tagCount}
-                    </span>
-                  )}
+                  {item.tagCount !== undefined &&
+                    shouldShowTags &&
+                    item.tagCount !== '' &&
+                    renderBadge(item.tagCount, isActive, item.tagVariant)}
+                  {item.extraTag !== undefined &&
+                    shouldShowTags &&
+                    item.extraTag !== '' &&
+                    renderBadge(item.extraTag, isActive, item.extraTagVariant)}
                 </div>
               </Button>
             </Col>
@@ -228,11 +243,14 @@ const SelectableButtonGroup = ({
               <div className='sbg-content'>
                 {item.icon && <span className='sbg-icon'>{item.icon}</span>}
                 <ConditionalTooltipText text={item.label} />
-                {item.tagCount !== undefined && shouldShowTags && item.tagCount !== '' && (
-                  <span className={`sbg-badge ${isActive ? 'sbg-badge-active' : ''}`}>
-                    {item.tagCount}
-                  </span>
-                )}
+                {item.tagCount !== undefined &&
+                  shouldShowTags &&
+                  item.tagCount !== '' &&
+                  renderBadge(item.tagCount, isActive, item.tagVariant)}
+                {item.extraTag !== undefined &&
+                  shouldShowTags &&
+                  item.extraTag !== '' &&
+                  renderBadge(item.extraTag, isActive, item.extraTagVariant)}
               </div>
             </Button>
           </Col>

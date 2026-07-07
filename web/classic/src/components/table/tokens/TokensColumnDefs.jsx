@@ -37,6 +37,7 @@ import {
   timestamp2string,
   renderGroup,
   renderQuota,
+  renderRatio,
   getModelCategories,
   showError,
 } from '../../../helpers';
@@ -88,7 +89,13 @@ const renderStatus = (text, record, t) => {
 };
 
 // Render group column
-const renderGroupColumn = (text, record, t, groupRatios = {}) => {
+const renderGroupColumn = (
+  text,
+  record,
+  t,
+  groupRatios = {},
+  groupMembershipDiscounts = {},
+) => {
   if (text === 'auto') {
     return (
       <Tooltip
@@ -108,11 +115,13 @@ const renderGroupColumn = (text, record, t, groupRatios = {}) => {
   return (
     <span className='flex items-center gap-1'>
       {renderGroup(text)}
-      {ratio !== undefined && (
-        <Tag size='small' color='green' shape='circle'>
-          {ratio}x
-        </Tag>
-      )}
+      {ratio !== undefined &&
+        renderRatio(ratio, {
+          membershipDiscount: groupMembershipDiscounts[text],
+          compact: true,
+          size: 'small',
+          shape: 'circle',
+        })}
     </span>
   );
 };
@@ -480,6 +489,7 @@ export const getTokensColumns = ({
   setShowEdit,
   refresh,
   groupRatios = {},
+  groupMembershipDiscounts = {},
 }) => {
   return [
     {
@@ -501,7 +511,14 @@ export const getTokensColumns = ({
       title: t('分组'),
       dataIndex: 'group',
       key: 'group',
-      render: (text, record) => renderGroupColumn(text, record, t, groupRatios),
+      render: (text, record) =>
+        renderGroupColumn(
+          text,
+          record,
+          t,
+          groupRatios,
+          groupMembershipDiscounts,
+        ),
     },
     {
       title: t('密钥'),

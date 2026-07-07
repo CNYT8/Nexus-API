@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   API,
@@ -73,6 +73,7 @@ const EditUserModal = (props) => {
   const [adjustLoading, setAdjustLoading] = useState(false);
   const isMobile = useIsMobile();
   const [groupOptions, setGroupOptions] = useState([]);
+  const [membershipTierOptions, setMembershipTierOptions] = useState([]);
   const [bindingModalVisible, setBindingModalVisible] = useState(false);
   const formApiRef = useRef(null);
   const [showAdjustQuotaRaw, setShowAdjustQuotaRaw] = useState(false);
@@ -80,13 +81,10 @@ const EditUserModal = (props) => {
   const [inputs, setInputs] = useState(null);
 
   const isEdit = Boolean(userId);
-  const membershipTierOptions = useMemo(
-    () => [
-      { label: t('无'), value: '' },
-      ...(props.membershipTierOptions || []),
-    ],
-    [props.membershipTierOptions, t],
-  );
+  const resolvedMembershipTierOptions =
+    membershipTierOptions.length > 0
+      ? membershipTierOptions
+      : props.membershipTierOptions || [];
 
   const getInitValues = () => ({
     username: '',
@@ -112,6 +110,30 @@ const EditUserModal = (props) => {
       setGroupOptions(res.data.data.map((g) => ({ label: g, value: g })));
     } catch (e) {
       showError(e.message);
+    }
+  };
+
+  const fetchMembershipOptions = async () => {
+    if (!props.membershipEnabled) {
+      setMembershipTierOptions([]);
+      return;
+    }
+    try {
+      const res = await API.get('/api/membership/admin/tiers');
+      if (!res.data.success) {
+        return;
+      }
+      const tiers = res.data.data?.tiers || [];
+      setMembershipTierOptions(
+        tiers
+          .filter((tier) => tier.enabled !== false)
+          .map((tier) => ({
+            label: tier.name,
+            value: tier.id,
+          })),
+      );
+    } catch (error) {
+      showError(t('会员等级加载失败'));
     }
   };
 
@@ -143,8 +165,9 @@ const EditUserModal = (props) => {
   useEffect(() => {
     loadUser();
     if (userId) fetchGroups();
+    if (userId) fetchMembershipOptions();
     setBindingModalVisible(false);
-  }, [props.editingUser.id]);
+  }, [props.editingUser.id, props.membershipEnabled]);
 
   const openBindingModal = () => {
     setBindingModalVisible(true);
@@ -406,7 +429,16 @@ const EditUserModal = (props) => {
                             field='membership_tier_id'
                             label={t('会员阶级')}
                             placeholder={t('请选择会员阶级')}
-                            optionList={membershipTierOptions}
+                            optionList={[
+                              { label: t('无'), value: '' },
+                              ...resolvedMembershipTierOptions,
+                            ]}
+                            onChange={(value) =>
+                              formApiRef.current?.setValue(
+                                'membership_tier_id',
+                                value ?? '',
+                              )
+                            }
                             showClear
                             search
                           />

@@ -20,13 +20,18 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Avatar, Typography, Table, Tag } from '@douyinfe/semi-ui';
 import { IconCoinMoneyStroked } from '@douyinfe/semi-icons';
-import { calculateModelPrice, getModelPriceItems } from '../../../../../helpers';
+import {
+  calculateModelPrice,
+  getModelPriceItems,
+  renderRatio,
+} from '../../../../../helpers';
 
 const { Text } = Typography;
 
 const ModelPricingTable = ({
   modelData,
   groupRatio,
+  groupMembershipDiscounts = {},
   currency,
   siteDisplayType,
   tokenUnit,
@@ -70,6 +75,7 @@ const ModelPricingTable = ({
         key: group,
         group: group,
         ratio: groupRatioValue,
+        membershipDiscount: groupMembershipDiscounts[group],
         billingType:
           modelData?.billing_mode === 'tiered_expr'
             ? t('动态计费')
@@ -103,11 +109,13 @@ const ModelPricingTable = ({
       columns.push({
         title: t('分组倍率'),
         dataIndex: 'ratio',
-        render: (text) => (
-          <Tag color='blue' size='small' shape='circle'>
-            {text}x
-          </Tag>
-        ),
+        render: (text, record) =>
+          renderRatio(text, {
+            membershipDiscount: record.membershipDiscount,
+            compact: true,
+            size: 'small',
+            shape: 'circle',
+          }),
       });
     }
 

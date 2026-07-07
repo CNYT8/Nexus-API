@@ -101,13 +101,12 @@ import {
   SiOkta,
   SiOpenid,
   SiReddit,
-  SiSlack,
   SiTelegram,
   SiTwitch,
   SiWechat,
   SiX,
 } from 'react-icons/si';
-import { FaLinkedin } from 'react-icons/fa';
+import { FaLinkedin, FaSlack } from 'react-icons/fa';
 
 // 获取侧边栏Lucide图标组件
 export function getLucideIcon(key, selected = false) {
@@ -518,7 +517,7 @@ const oauthProviderIconMap = {
   linkedin: FaLinkedin,
   x: SiX,
   twitter: SiX,
-  slack: SiSlack,
+  slack: FaSlack,
   telegram: SiTelegram,
   wechat: SiWechat,
   keycloak: SiKeycloak,
@@ -832,19 +831,64 @@ export function renderGroup(group) {
   );
 }
 
-export function renderRatio(ratio) {
-  let color = 'green';
-  if (ratio > 5) {
+export const isMembershipDiscountApplied = (membershipDiscount) =>
+  membershipDiscount?.applied === true || membershipDiscount?.Applied === true;
+
+export function renderMembershipDiscountBadge(options = {}) {
+  const { size = 'small', shape = 'circle' } = options;
+  const iconSize = size === 'small' ? 12 : 14;
+
+  return (
+      <Tag
+          color='amber'
+          size={size}
+          shape={shape}
+          title={i18next.t('会员')}
+      >
+        <Crown size={iconSize} strokeWidth={2.4} />
+      </Tag>
+  );
+}
+
+export function renderRatio(ratio, options = {}) {
+  const {
+    membershipDiscount,
+    compact = false,
+    showMembershipBadge = true,
+    size,
+    shape,
+  } = options || {};
+  const membershipApplied = isMembershipDiscountApplied(membershipDiscount);
+  let color = membershipApplied ? 'amber' : 'green';
+  if (!membershipApplied && ratio > 5) {
     color = 'red';
-  } else if (ratio > 3) {
+  } else if (!membershipApplied && ratio > 3) {
     color = 'orange';
-  } else if (ratio > 1) {
+  } else if (!membershipApplied && ratio > 1) {
     color = 'blue';
   }
-  return (
-      <Tag color={color}>
-        {ratio}x {i18next.t('倍率')}
+  const tagProps = {};
+  if (size) {
+    tagProps.size = size;
+  }
+  if (shape) {
+    tagProps.shape = shape;
+  }
+  const ratioTag = (
+      <Tag color={color} {...tagProps}>
+        {ratio}x{compact ? '' : ` ${i18next.t('倍率')}`}
       </Tag>
+  );
+
+  if (!membershipApplied || !showMembershipBadge) {
+    return ratioTag;
+  }
+
+  return (
+      <span className='inline-flex items-center gap-1 align-middle'>
+        {ratioTag}
+        {renderMembershipDiscountBadge({ size, shape })}
+      </span>
   );
 }
 
@@ -984,7 +1028,12 @@ export const renderGroupOption = (item) => {
             {label}
           </Typography.Text>
         </div>
-        {item.ratio && renderRatio(item.ratio)}
+        {item.ratio !== undefined &&
+          item.ratio !== null &&
+          item.ratio !== '' &&
+          renderRatio(item.ratio, {
+            membershipDiscount: item.membership_discount,
+          })}
       </div>
   );
 };

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/common/codexkey"
 )
 
 const (
@@ -22,7 +22,6 @@ const (
 	codexOAuthTokenURL     = "https://auth.openai.com/oauth/token"
 	codexOAuthRedirectURI  = "http://localhost:1455/auth/callback"
 	codexOAuthScope        = "openid profile email offline_access"
-	codexJWTClaimPath      = "https://api.openai.com/auth"
 	defaultHTTPTimeout     = 20 * time.Second
 )
 
@@ -253,65 +252,9 @@ func generatePKCEPair() (verifier string, challenge string, err error) {
 }
 
 func ExtractCodexAccountIDFromJWT(token string) (string, bool) {
-	claims, ok := decodeJWTClaims(token)
-	if !ok {
-		return "", false
-	}
-	raw, ok := claims[codexJWTClaimPath]
-	if !ok {
-		return "", false
-	}
-	obj, ok := raw.(map[string]any)
-	if !ok {
-		return "", false
-	}
-	v, ok := obj["chatgpt_account_id"]
-	if !ok {
-		return "", false
-	}
-	s, ok := v.(string)
-	if !ok {
-		return "", false
-	}
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "", false
-	}
-	return s, true
+	return codexkey.ExtractAccountIDFromJWT(token)
 }
 
 func ExtractEmailFromJWT(token string) (string, bool) {
-	claims, ok := decodeJWTClaims(token)
-	if !ok {
-		return "", false
-	}
-	v, ok := claims["email"]
-	if !ok {
-		return "", false
-	}
-	s, ok := v.(string)
-	if !ok {
-		return "", false
-	}
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "", false
-	}
-	return s, true
-}
-
-func decodeJWTClaims(token string) (map[string]any, bool) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return nil, false
-	}
-	payloadRaw, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil, false
-	}
-	var claims map[string]any
-	if err := json.Unmarshal(payloadRaw, &claims); err != nil {
-		return nil, false
-	}
-	return claims, true
+	return codexkey.ExtractEmailFromJWT(token)
 }

@@ -40,6 +40,7 @@ import {
   formatPriceInfo,
   formatDynamicPriceSummary,
   getLobeHubIcon,
+  renderRatio,
 } from '../../../../../helpers';
 import PricingCardSkeleton from './PricingCardSkeleton';
 import { useMinimumLoadingTime } from '../../../../../hooks/common/useMinimumLoadingTime';
@@ -64,6 +65,7 @@ const PricingCardView = ({
   setCurrentPage,
   selectedGroup,
   groupRatio,
+  groupMembershipDiscounts = {},
   copyText,
   setModalImageUrl,
   setIsModalOpenurl,
@@ -350,8 +352,17 @@ const PricingCardView = ({
                             ? parseFloat(model.completion_ratio.toFixed(3))
                             : t('无')}
                         </div>
-                        <div>
-                          {t('分组')}: {priceData?.usedGroupRatio ?? '-'}
+                        <div className='flex flex-wrap items-center gap-1'>
+                          <span>{t('分组')}:</span>
+                          {priceData?.usedGroupRatio !== undefined
+                            ? renderRatio(priceData.usedGroupRatio, {
+                                membershipDiscount:
+                                  groupMembershipDiscounts[priceData.usedGroup],
+                                compact: true,
+                                size: 'small',
+                                shape: 'circle',
+                              })
+                            : '-'}
                         </div>
                       </div>
                     </div>

@@ -68,6 +68,7 @@ const PricingPage = () => {
         onClose={pricingData.closeModelDetail}
         modelData={pricingData.selectedModel}
         groupRatio={pricingData.groupRatio}
+        groupMembershipDiscounts={pricingData.groupMembershipDiscounts}
         usableGroup={pricingData.usableGroup}
         currency={pricingData.currency}
         siteDisplayType={pricingData.siteDisplayType}

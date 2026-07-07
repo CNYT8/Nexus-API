@@ -18,7 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
+import { Crown } from 'lucide-react';
 import SelectableButtonGroup from '../../../common/ui/SelectableButtonGroup';
+import { isMembershipDiscountApplied } from '../../../../helpers';
 
 /**
  * 分组筛选组件
@@ -35,6 +37,7 @@ const PricingGroups = ({
   setFilterGroup,
   usableGroup = {},
   groupRatio = {},
+  groupMembershipDiscounts = {},
   models = [],
   loading = false,
   t,
@@ -61,10 +64,18 @@ const PricingGroups = ({
         ratioDisplay = '1x';
       }
     }
+    const membershipApplied = isMembershipDiscountApplied(
+      groupMembershipDiscounts[g],
+    );
     return {
       value: g,
       label: g === 'all' ? t('全部分组') : g,
       tagCount: ratioDisplay,
+      tagVariant: membershipApplied ? 'amber' : undefined,
+      extraTag: membershipApplied ? (
+        <Crown size={12} strokeWidth={2.4} aria-label={t('会员')} />
+      ) : undefined,
+      extraTagVariant: membershipApplied ? 'amber' : undefined,
     };
   });
 

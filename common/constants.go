@@ -13,7 +13,7 @@ import (
 )
 
 var StartTime = time.Now().Unix() // unit: second
-var Version = "v1.0.2-rc.1"       // this hard coding will be replaced automatically when building, no need to manually change
+var Version = "v1.0.3"            // this hard coding will be replaced automatically when building, no need to manually change
 var SystemName = "New API"
 var Footer = ""
 var Logo = ""
@@ -77,6 +77,8 @@ var DefaultRecordIpLogUpdatedAt int64 = 0 // 管理员上次切换 DefaultRecord
 
 var SessionSecret = uuid.New().String()
 var CryptoSecret = uuid.New().String()
+var SessionCookieSecure = false
+var SessionCookieTrustedURLs []string
 
 var OptionMap map[string]string
 var OptionMapRWMutex sync.RWMutex

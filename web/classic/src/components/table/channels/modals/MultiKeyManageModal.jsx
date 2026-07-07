@@ -69,6 +69,7 @@ const MultiKeyManageModal = ({ visible, onCancel, channel, onRefresh }) => {
 
   // Filter states
   const [statusFilter, setStatusFilter] = useState(null); // null=all, 1=enabled, 2=manual_disabled, 3=auto_disabled
+  const isCodexChannel = channel?.type === 57;
 
   // Load key status data
   const loadKeyStatus = async (
@@ -130,7 +131,7 @@ const MultiKeyManageModal = ({ visible, onCancel, channel, onRefresh }) => {
       });
 
       if (res.data.success) {
-        showSuccess(t('密钥已禁用'));
+        showSuccess(isCodexChannel ? t('账号已禁用') : t('密钥已禁用'));
         await loadKeyStatus(currentPage, pageSize); // Reload current page
         onRefresh && onRefresh(); // Refresh parent component
       } else {
@@ -156,7 +157,7 @@ const MultiKeyManageModal = ({ visible, onCancel, channel, onRefresh }) => {
       });
 
       if (res.data.success) {
-        showSuccess(t('密钥已启用'));
+        showSuccess(isCodexChannel ? t('账号已启用') : t('密钥已启用'));
         await loadKeyStatus(currentPage, pageSize); // Reload current page
         onRefresh && onRefresh(); // Refresh parent component
       } else {
@@ -260,7 +261,7 @@ const MultiKeyManageModal = ({ visible, onCancel, channel, onRefresh }) => {
       });
 
       if (res.data.success) {
-        showSuccess(t('密钥已删除'));
+        showSuccess(isCodexChannel ? t('账号已删除') : t('密钥已删除'));
         await loadKeyStatus(currentPage, pageSize); // Reload current page
         onRefresh && onRefresh(); // Refresh parent component
       } else {
@@ -354,6 +355,147 @@ const MultiKeyManageModal = ({ visible, onCancel, channel, onRefresh }) => {
         );
     }
   };
+
+  const formatCodexTime = (value) => {
+    if (!value) {
+      return '-';
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+    return date.toLocaleString();
+  };
+
+  const renderCodexAccountCards = () => (
+    <div className='flex flex-col gap-3'>
+      <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
+        {keyStatusList.map((record) => (
+          <div
+            key={record.index}
+            className='rounded-xl p-4'
+            style={{
+              background: 'var(--semi-color-bg-0)',
+              border: '1px solid var(--semi-color-border)',
+              boxShadow: '0 8px 24px rgba(15, 23, 42, 0.06)',
+            }}
+          >
+            <div className='flex items-start justify-between gap-3 mb-3'>
+              <div className='min-w-0'>
+                <div className='flex items-center gap-2 mb-1'>
+                  <Text type='tertiary'>#{Number(record.index) + 1}</Text>
+                  {renderStatusTag(record.status)}
+                  <Tag color='amber' shape='circle' size='small'>
+                    {record.account_plan || t('未知套餐')}
+                  </Tag>
+                </div>
+                <Text strong ellipsis={{ showTooltip: true }} className='block'>
+                  {record.account_email || record.key_preview || t('未知账号')}
+                </Text>
+              </div>
+              <Space>
+                {record.status === 1 ? (
+                  <Button
+                    type='danger'
+                    size='small'
+                    loading={operationLoading[`disable_${record.index}`]}
+                    onClick={() => handleDisableKey(record.index)}
+                  >
+                    {t('禁用')}
+                  </Button>
+                ) : (
+                  <Button
+                    type='primary'
+                    size='small'
+                    loading={operationLoading[`enable_${record.index}`]}
+                    onClick={() => handleEnableKey(record.index)}
+                  >
+                    {t('启用')}
+                  </Button>
+                )}
+                <Popconfirm
+                  title={t('确定要删除此账号配置吗？')}
+                  content={t('此操作不可撤销，将永久删除该账号配置')}
+                  onConfirm={() => handleDeleteKey(record.index)}
+                  okType='danger'
+                  position='topRight'
+                >
+                  <Button
+                    type='danger'
+                    size='small'
+                    loading={operationLoading[`delete_${record.index}`]}
+                  >
+                    {t('删除')}
+                  </Button>
+                </Popconfirm>
+              </Space>
+            </div>
+
+            <Row gutter={[12, 8]}>
+              <Col span={12}>
+                <Text type='tertiary' size='small'>
+                  {t('账号ID')}
+                </Text>
+                <Tooltip content={record.account_id || '-'}>
+                  <Text code ellipsis className='block mt-1'>
+                    {record.account_id || '-'}
+                  </Text>
+                </Tooltip>
+              </Col>
+              <Col span={12}>
+                <Text type='tertiary' size='small'>
+                  {t('导入时间')}
+                </Text>
+                <Text className='block mt-1'>
+                  {formatCodexTime(record.imported_at)}
+                </Text>
+              </Col>
+              <Col span={12}>
+                <Text type='tertiary' size='small'>
+                  {t('过期时间')}
+                </Text>
+                <Text className='block mt-1'>
+                  {formatCodexTime(record.account_expired)}
+                </Text>
+              </Col>
+              <Col span={12}>
+                <Text type='tertiary' size='small'>
+                  {t('禁用原因')}
+                </Text>
+                <Text ellipsis={{ showTooltip: true }} className='block mt-1'>
+                  {record.status === 1 ? '-' : record.reason || '-'}
+                </Text>
+              </Col>
+            </Row>
+          </div>
+        ))}
+      </div>
+      <div className='flex items-center justify-between'>
+        <Text type='tertiary' size='small'>
+          {t('第 {{page}} / {{total}} 页', {
+            page: currentPage,
+            total: totalPages,
+          })}
+        </Text>
+        <Space>
+          <Button
+            size='small'
+            disabled={currentPage <= 1}
+            onClick={() => handlePageChange(currentPage - 1)}
+          >
+            {t('上一页')}
+          </Button>
+          <Button
+            size='small'
+            disabled={currentPage >= totalPages}
+            onClick={() => handlePageChange(currentPage + 1)}
+          >
+            {t('下一页')}
+          </Button>
+        </Space>
+      </div>
+    </div>
+  );
 
   // Table columns definition
   const columns = [
@@ -456,14 +598,14 @@ const MultiKeyManageModal = ({ visible, onCancel, channel, onRefresh }) => {
     <Modal
       title={
         <Space>
-          <Text>{t('多密钥管理')}</Text>
+          <Text>{isCodexChannel ? t('多账号管理') : t('多密钥管理')}</Text>
           {channel?.name && (
             <Tag size='small' shape='circle' color='white'>
               {channel.name}
             </Tag>
           )}
           <Tag size='small' shape='circle' color='white'>
-            {t('总密钥数')}: {total}
+            {isCodexChannel ? t('总账号数') : t('总密钥数')}: {total}
           </Tag>
           {channel?.channel_info?.multi_key_mode && (
             <Tag size='small' shape='circle' color='white'>
@@ -598,122 +740,10 @@ const MultiKeyManageModal = ({ visible, onCancel, channel, onRefresh }) => {
         <div className='flex-1 flex flex-col min-h-0'>
           <Spin spinning={loading}>
             <Card className='!rounded-xl'>
-              <Table
-                title={() => (
-                  <Row gutter={12} style={{ width: '100%' }}>
-                    <Col span={14}>
-                      <Row gutter={12} style={{ alignItems: 'center' }}>
-                        <Col>
-                          <Select
-                            value={statusFilter}
-                            onChange={handleStatusFilterChange}
-                            size='small'
-                            placeholder={t('全部状态')}
-                          >
-                            <Select.Option value={null}>
-                              {t('全部状态')}
-                            </Select.Option>
-                            <Select.Option value={1}>
-                              {t('已启用')}
-                            </Select.Option>
-                            <Select.Option value={2}>
-                              {t('手动禁用')}
-                            </Select.Option>
-                            <Select.Option value={3}>
-                              {t('自动禁用')}
-                            </Select.Option>
-                          </Select>
-                        </Col>
-                      </Row>
-                    </Col>
-                    <Col
-                      span={10}
-                      style={{ display: 'flex', justifyContent: 'flex-end' }}
-                    >
-                      <Space>
-                        <Button
-                          size='small'
-                          type='tertiary'
-                          onClick={() => loadKeyStatus(currentPage, pageSize)}
-                          loading={loading}
-                        >
-                          {t('刷新')}
-                        </Button>
-                        {manualDisabledCount + autoDisabledCount > 0 && (
-                          <Popconfirm
-                            title={t('确定要启用所有密钥吗？')}
-                            onConfirm={handleEnableAll}
-                            position={'topRight'}
-                          >
-                            <Button
-                              size='small'
-                              type='primary'
-                              loading={operationLoading.enable_all}
-                            >
-                              {t('启用全部')}
-                            </Button>
-                          </Popconfirm>
-                        )}
-                        {enabledCount > 0 && (
-                          <Popconfirm
-                            title={t('确定要禁用所有的密钥吗？')}
-                            onConfirm={handleDisableAll}
-                            okType={'danger'}
-                            position={'topRight'}
-                          >
-                            <Button
-                              size='small'
-                              type='danger'
-                              loading={operationLoading.disable_all}
-                            >
-                              {t('禁用全部')}
-                            </Button>
-                          </Popconfirm>
-                        )}
-                        <Popconfirm
-                          title={t('确定要删除所有已自动禁用的密钥吗？')}
-                          content={t(
-                            '此操作不可撤销，将永久删除已自动禁用的密钥',
-                          )}
-                          onConfirm={handleDeleteDisabledKeys}
-                          okType={'danger'}
-                          position={'topRight'}
-                        >
-                          <Button
-                            size='small'
-                            type='warning'
-                            loading={operationLoading.delete_disabled}
-                          >
-                            {t('删除自动禁用密钥')}
-                          </Button>
-                        </Popconfirm>
-                      </Space>
-                    </Col>
-                  </Row>
-                )}
-                columns={columns}
-                dataSource={keyStatusList}
-                pagination={{
-                  currentPage: currentPage,
-                  pageSize: pageSize,
-                  total: total,
-                  showSizeChanger: true,
-                  showQuickJumper: true,
-                  pageSizeOpts: [10, 20, 50, 100],
-                  onChange: (page, size) => {
-                    setCurrentPage(page);
-                    loadKeyStatus(page, size);
-                  },
-                  onShowSizeChange: (current, size) => {
-                    setCurrentPage(1);
-                    handlePageSizeChange(size);
-                  },
-                }}
-                size='small'
-                bordered={false}
-                rowKey='index'
-                scroll={{ x: 'max-content' }}
-                empty={
+              {isCodexChannel ? (
+                keyStatusList.length > 0 ? (
+                  renderCodexAccountCards()
+                ) : (
                   <Empty
                     image={
                       <IllustrationNoResult
@@ -725,12 +755,146 @@ const MultiKeyManageModal = ({ visible, onCancel, channel, onRefresh }) => {
                         style={{ width: 140, height: 140 }}
                       />
                     }
-                    title={t('暂无密钥数据')}
+                    title={t('暂无账号数据')}
                     description={t('请检查渠道配置或刷新重试')}
                     style={{ padding: 30 }}
                   />
-                }
-              />
+                )
+              ) : (
+                <Table
+                  title={() => (
+                    <Row gutter={12} style={{ width: '100%' }}>
+                      <Col span={14}>
+                        <Row gutter={12} style={{ alignItems: 'center' }}>
+                          <Col>
+                            <Select
+                              value={statusFilter}
+                              onChange={handleStatusFilterChange}
+                              size='small'
+                              placeholder={t('全部状态')}
+                            >
+                              <Select.Option value={null}>
+                                {t('全部状态')}
+                              </Select.Option>
+                              <Select.Option value={1}>
+                                {t('已启用')}
+                              </Select.Option>
+                              <Select.Option value={2}>
+                                {t('手动禁用')}
+                              </Select.Option>
+                              <Select.Option value={3}>
+                                {t('自动禁用')}
+                              </Select.Option>
+                            </Select>
+                          </Col>
+                        </Row>
+                      </Col>
+                      <Col
+                        span={10}
+                        style={{ display: 'flex', justifyContent: 'flex-end' }}
+                      >
+                        <Space>
+                          <Button
+                            size='small'
+                            type='tertiary'
+                            onClick={() => loadKeyStatus(currentPage, pageSize)}
+                            loading={loading}
+                          >
+                            {t('刷新')}
+                          </Button>
+                          {manualDisabledCount + autoDisabledCount > 0 && (
+                            <Popconfirm
+                              title={t('确定要启用所有密钥吗？')}
+                              onConfirm={handleEnableAll}
+                              position={'topRight'}
+                            >
+                              <Button
+                                size='small'
+                                type='primary'
+                                loading={operationLoading.enable_all}
+                              >
+                                {t('启用全部')}
+                              </Button>
+                            </Popconfirm>
+                          )}
+                          {enabledCount > 0 && (
+                            <Popconfirm
+                              title={t('确定要禁用所有的密钥吗？')}
+                              onConfirm={handleDisableAll}
+                              okType={'danger'}
+                              position={'topRight'}
+                            >
+                              <Button
+                                size='small'
+                                type='danger'
+                                loading={operationLoading.disable_all}
+                              >
+                                {t('禁用全部')}
+                              </Button>
+                            </Popconfirm>
+                          )}
+                          <Popconfirm
+                            title={t('确定要删除所有已自动禁用的密钥吗？')}
+                            content={t(
+                              '此操作不可撤销，将永久删除已自动禁用的密钥',
+                            )}
+                            onConfirm={handleDeleteDisabledKeys}
+                            okType={'danger'}
+                            position={'topRight'}
+                          >
+                            <Button
+                              size='small'
+                              type='warning'
+                              loading={operationLoading.delete_disabled}
+                            >
+                              {t('删除自动禁用密钥')}
+                            </Button>
+                          </Popconfirm>
+                        </Space>
+                      </Col>
+                    </Row>
+                  )}
+                  columns={columns}
+                  dataSource={keyStatusList}
+                  pagination={{
+                    currentPage: currentPage,
+                    pageSize: pageSize,
+                    total: total,
+                    showSizeChanger: true,
+                    showQuickJumper: true,
+                    pageSizeOpts: [10, 20, 50, 100],
+                    onChange: (page, size) => {
+                      setCurrentPage(page);
+                      loadKeyStatus(page, size);
+                    },
+                    onShowSizeChange: (current, size) => {
+                      setCurrentPage(1);
+                      handlePageSizeChange(size);
+                    },
+                  }}
+                  size='small'
+                  bordered={false}
+                  rowKey='index'
+                  scroll={{ x: 'max-content' }}
+                  empty={
+                    <Empty
+                      image={
+                        <IllustrationNoResult
+                          style={{ width: 140, height: 140 }}
+                        />
+                      }
+                      darkModeImage={
+                        <IllustrationNoResultDark
+                          style={{ width: 140, height: 140 }}
+                        />
+                      }
+                      title={t('暂无密钥数据')}
+                      description={t('请检查渠道配置或刷新重试')}
+                      style={{ padding: 30 }}
+                    />
+                  }
+                />
+              )}
             </Card>
           </Spin>
         </div>
