@@ -39,3 +39,23 @@ export function normalizeInterfaceLanguage(value?: string | null): string {
     ? normalized
     : 'en'
 }
+
+export function toIntlLocale(value?: string | null): string | undefined {
+  if (!value) return undefined
+
+  switch (value) {
+    case 'zh':
+    case 'zhCN':
+      return 'zh-CN'
+    case 'zhTW':
+      return 'zh-TW'
+    default:
+      break
+  }
+
+  try {
+    return Intl.getCanonicalLocales(value)[0]
+  } catch {
+    return undefined
+  }
+}

@@ -119,7 +119,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     return { avgRPM, avgTPM, timeDiff };
   }, [times, consumeTokens, inputs.start_timestamp, inputs.end_timestamp]);
 
-  const getGreeting = useMemo(() => {
+  const greetingParts = useMemo(() => {
     const hours = new Date().getHours();
     let greeting = '';
 
@@ -134,8 +134,18 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     }
 
     const username = userState?.user?.username || '';
-    return `👋${greeting}，${username}`;
+    return {
+      emoji: '👋',
+      greeting,
+      username,
+    };
   }, [t, userState?.user?.username]);
+
+  const getGreeting = useMemo(
+    () =>
+      `${greetingParts.emoji}${greetingParts.greeting}，${greetingParts.username}`,
+    [greetingParts],
+  );
 
   // ========== 回调函数 ==========
   const handleInputChange = useCallback((value, name) => {
@@ -319,6 +329,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     timeOptions,
     performanceMetrics,
     getGreeting,
+    greetingParts,
     isAdminUser,
     hasApiInfoPanel,
     hasInfoPanels,

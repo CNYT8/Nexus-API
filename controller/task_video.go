@@ -180,7 +180,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor channel.TaskAdaptor, cha
 							finalGroupRatio, _ = model.ApplyMembershipDiscount(task.UserId, group, finalGroupRatio)
 
 							// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio
-							actualQuota := int(float64(taskResult.TotalTokens) * modelRatio * finalGroupRatio)
+							actualQuota := common.QuotaFromFloat(float64(taskResult.TotalTokens) * modelRatio * finalGroupRatio)
 
 							// 计算差额
 							preConsumedQuota := task.Quota

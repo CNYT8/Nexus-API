@@ -471,6 +471,24 @@ body[theme-mode='warm'] .sidebar-nav-item-selected {
 }
 
 /* ==================== 组件特定样式 ==================== */
+/* DashboardHeader */
+.dashboard-greeting-title {
+  color: var(--semi-color-text-0);
+}
+
+.dashboard-greeting-username {
+  display: inline-block;
+  margin-left: 0.125rem;
+  font-family: ui-serif, Georgia, Cambria, 'Times New Roman', Times,
+    'Noto Serif SC', 'Songti SC', STSong, serif;
+  font-size: 1.08em;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1.15;
+  color: var(--semi-color-primary);
+  text-shadow: 0 1px 0 var(--semi-color-bg-1);
+}
+
 /* SelectableButtonGroup */
 .sbg-button .semi-button-content {
   min-width: 0 !important;
