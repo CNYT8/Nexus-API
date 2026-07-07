@@ -6,14 +6,14 @@ import { pluginReact } from '@rsbuild/plugin-react'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
-const semiUiDir = path.resolve(
-  path.dirname(require.resolve('@douyinfe/semi-ui')),
-  '../..',
-)
-const semiDateFnsDir = path.resolve(
+const resolvePackageDir = (pkg: string, paths?: string[]) =>
+  path.dirname(require.resolve(`${pkg}/package.json`, { paths }))
+
+const semiUiDir = resolvePackageDir('@douyinfe/semi-ui')
+const semiFoundationDir = resolvePackageDir('@douyinfe/semi-foundation', [
   semiUiDir,
-  '../semi-foundation/node_modules/date-fns',
-)
+])
+const semiDateFnsDir = resolvePackageDir('date-fns', [semiFoundationDir])
 
 export default defineConfig(({ envMode }) => {
   const env = loadEnv({ mode: envMode, prefixes: ['VITE_'] })
