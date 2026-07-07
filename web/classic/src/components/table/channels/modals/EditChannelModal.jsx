@@ -1147,6 +1147,7 @@ const EditChannelModal = (props) => {
       const chInfo = data.channel_info || {};
       const isMulti = chInfo.is_multi_key === true;
       setIsMultiKeyChannel(isMulti);
+      setKeyMode(data.type === 57 ? 'replace' : 'append');
       if (isMulti) {
         setBatch(true);
         setMultiToSingle(true);
@@ -2181,7 +2182,8 @@ const EditChannelModal = (props) => {
       res = await API.put(`/api/channel/`, {
         ...localInputs,
         id: parseInt(channelId),
-        key_mode: isMultiKeyChannel ? keyMode : undefined, // 只在多key模式下传递
+        key_mode:
+          isMultiKeyChannel || localInputs.type === 57 ? keyMode : undefined,
       });
     } else {
       res = await API.post(`/api/channel/`, {
@@ -2297,6 +2299,10 @@ const EditChannelModal = (props) => {
   };
 
   const batchAllowed = (!isEdit || isMultiKeyChannel) && inputs.type !== 57;
+  const showCodexAggregationMode =
+    isEdit && inputs.type === 57 && keyMode === 'append';
+  const showMultiKeyModeSelect =
+    (batch && multiToSingle) || showCodexAggregationMode;
   const batchExtra = batchAllowed ? (
     <Space>
       {!isEdit && (
@@ -3206,6 +3212,13 @@ const EditChannelModal = (props) => {
                                     >
                                       {t('格式化')}
                                     </Button>
+                                    {isEdit && keyMode === 'append' && (
+                                      <Text type='warning' size='small'>
+                                        {t(
+                                          '追加模式：将新配置添加到现有配置列表末尾',
+                                        )}
+                                      </Text>
+                                    )}
                                     {isEdit && (
                                       <Button
                                         size='small'
@@ -3218,6 +3231,25 @@ const EditChannelModal = (props) => {
                                       </Button>
                                     )}
                                     {batchExtra}
+                                    {isEdit && (
+                                      <Button
+                                        size='small'
+                                        type='primary'
+                                        theme='outline'
+                                        onClick={() =>
+                                          setKeyMode((mode) =>
+                                            mode === 'append'
+                                              ? 'replace'
+                                              : 'append',
+                                          )
+                                        }
+                                        disabled={isIonetLocked}
+                                      >
+                                        {keyMode === 'append'
+                                          ? t('覆盖配置')
+                                          : t('追加配置')}
+                                      </Button>
+                                    )}
                                   </Space>
                                 </div>
                               }
@@ -3435,7 +3467,7 @@ const EditChannelModal = (props) => {
                       </>
                     )}
 
-                    {isEdit && isMultiKeyChannel && (
+                    {isEdit && isMultiKeyChannel && inputs.type !== 57 && (
                       <Form.Select
                         field='key_mode'
                         label={
@@ -3480,12 +3512,20 @@ const EditChannelModal = (props) => {
                         }
                       />
                     )}
-                    {batch && multiToSingle && (
+                    {showMultiKeyModeSelect && (
                       <>
                         <Form.Select
                           field='multi_key_mode'
-                          label={t('密钥聚合模式')}
-                          placeholder={t('请选择多密钥使用策略')}
+                          label={
+                            inputs.type === 57
+                              ? t('配置聚合模式')
+                              : t('密钥聚合模式')
+                          }
+                          placeholder={
+                            inputs.type === 57
+                              ? t('请选择多配置使用策略')
+                              : t('请选择多密钥使用策略')
+                          }
                           optionList={[
                             { label: t('随机'), value: 'random' },
                             { label: t('轮询'), value: 'polling' },

@@ -609,6 +609,89 @@ func getCodexConfigIdentity(raw string) string {
 	return identity
 }
 
+func splitStoredChannelKeys(raw string) []string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	if strings.HasPrefix(trimmed, "[") {
+		var arr []json.RawMessage
+		if err := json.Unmarshal([]byte(trimmed), &arr); err == nil {
+			keys := make([]string, 0, len(arr))
+			for _, item := range arr {
+				if key := strings.TrimSpace(string(item)); key != "" {
+					keys = append(keys, key)
+				}
+			}
+			return keys
+		}
+	}
+	keys := make([]string, 0)
+	for _, key := range strings.Split(strings.Trim(raw, "\n"), "\n") {
+		if key := strings.TrimSpace(key); key != "" {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+func appendCodexConfigKeys(existingKeys, newKeys []string) []string {
+	merged := make([]string, 0, len(existingKeys)+len(newKeys))
+	seen := make(map[string]struct{}, len(existingKeys)+len(newKeys))
+	appendUnique := func(keys []string) {
+		for _, key := range keys {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			identity := getCodexConfigIdentity(key)
+			if _, ok := seen[identity]; ok {
+				continue
+			}
+			seen[identity] = struct{}{}
+			merged = append(merged, key)
+		}
+	}
+	appendUnique(existingKeys)
+	appendUnique(newKeys)
+	return merged
+}
+
+func applyCodexChannelKeyUpdate(channel *PatchChannel, originChannel *model.Channel) error {
+	if channel.Type != constant.ChannelTypeCodex || strings.TrimSpace(channel.Key) == "" {
+		return nil
+	}
+
+	newKeys, err := getCodexConfigKeys(channel.Key)
+	if err != nil {
+		return err
+	}
+
+	keys := newKeys
+	if channel.KeyMode != nil && *channel.KeyMode == "append" {
+		keys = appendCodexConfigKeys(splitStoredChannelKeys(originChannel.Key), newKeys)
+	}
+
+	channel.Key = strings.Join(keys, "\n")
+	channel.ChannelInfo.MultiKeySize = len(keys)
+	if len(keys) > 1 {
+		channel.ChannelInfo.IsMultiKey = true
+		if channel.ChannelInfo.MultiKeyMode == "" {
+			channel.ChannelInfo.MultiKeyMode = constant.MultiKeyModeRandom
+		}
+		return nil
+	}
+
+	channel.ChannelInfo.IsMultiKey = false
+	channel.ChannelInfo.MultiKeySize = len(keys)
+	channel.ChannelInfo.MultiKeyMode = ""
+	channel.ChannelInfo.MultiKeyStatusList = nil
+	channel.ChannelInfo.MultiKeyDisabledReason = nil
+	channel.ChannelInfo.MultiKeyDisabledTime = nil
+	channel.ChannelInfo.MultiKeyPollingIndex = 0
+	return nil
+}
+
 func AddChannel(c *gin.Context) {
 	addChannelRequest := AddChannelRequest{}
 	err := c.ShouldBindJSON(&addChannelRequest)
@@ -968,26 +1051,16 @@ func UpdateChannel(c *gin.Context) {
 		channel.ChannelInfo.MultiKeyMode = constant.MultiKeyMode(*channel.MultiKeyMode)
 	}
 
-	if channel.Type == constant.ChannelTypeCodex && strings.TrimSpace(channel.Key) != "" {
-		codexKeys, err := getCodexConfigKeys(channel.Key)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": err.Error(),
-			})
-			return
-		}
-		channel.Key = strings.Join(codexKeys, "\n")
-		if len(codexKeys) > 1 {
-			channel.ChannelInfo.IsMultiKey = true
-			if channel.ChannelInfo.MultiKeyMode == "" {
-				channel.ChannelInfo.MultiKeyMode = constant.MultiKeyModeRandom
-			}
-		}
+	if err := applyCodexChannelKeyUpdate(&channel, originChannel); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
 	}
 
 	// 处理多key模式下的密钥追加/覆盖逻辑
-	if channel.KeyMode != nil && channel.ChannelInfo.IsMultiKey {
+	if channel.Type != constant.ChannelTypeCodex && channel.KeyMode != nil && channel.ChannelInfo.IsMultiKey {
 		switch *channel.KeyMode {
 		case "append":
 			// 追加模式：将新密钥添加到现有密钥列表
