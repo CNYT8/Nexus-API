@@ -178,6 +178,68 @@ func TestGetModelMonitorSummaryAggregatesRecentLogs(t *testing.T) {
 	require.Less(t, emptyModel.Score, normalModel.Score)
 }
 
+func TestGetModelMonitorSummarySeparatesSameModelByGroup(t *testing.T) {
+	InvalidateModelMonitorCache()
+	t.Cleanup(InvalidateModelMonitorCache)
+	InvalidatePricingCache()
+	t.Cleanup(InvalidatePricingCache)
+	resetModelMonitorTables(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&Channel{
+		Id:     996,
+		Type:   1,
+		Status: common.ChannelStatusEnabled,
+	}).Error)
+	for _, group := range []string{"default", "vip", "svip"} {
+		require.NoError(t, DB.Create(&Ability{
+			Group:     group,
+			Model:     "gpt-group-monitor-test",
+			ChannelId: 996,
+			Enabled:   true,
+		}).Error)
+	}
+	require.NoError(t, LOG_DB.Create(&Log{
+		CreatedAt:        now - 60,
+		Type:             LogTypeConsume,
+		ModelName:        "gpt-group-monitor-test",
+		Group:            "default",
+		PromptTokens:     600,
+		CompletionTokens: 400,
+		UseTime:          2,
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		CreatedAt: now - 60,
+		Type:      LogTypeError,
+		ModelName: "gpt-group-monitor-test",
+		Group:     "vip",
+		UseTime:   20,
+	}).Error)
+
+	summary, err := GetModelMonitorSummary()
+	require.NoError(t, err)
+	require.Equal(t, 3, summary.ModelCount)
+	require.Equal(t, 2, summary.KnownCount)
+	require.Equal(t, 1, summary.UnknownCount)
+	require.Len(t, summary.Vendors, 1)
+	require.Len(t, summary.Vendors[0].Models, 3)
+
+	models := make(map[string]ModelMonitorModel)
+	for _, item := range summary.Vendors[0].Models {
+		models[item.ModelName+"/"+item.Group] = item
+	}
+	defaultModel := models["gpt-group-monitor-test/default"]
+	vipModel := models["gpt-group-monitor-test/vip"]
+	svipModel := models["gpt-group-monitor-test/svip"]
+	require.Equal(t, "default", defaultModel.Group)
+	require.True(t, defaultModel.HasData)
+	require.Equal(t, "vip", vipModel.Group)
+	require.True(t, vipModel.HasData)
+	require.Equal(t, "svip", svipModel.Group)
+	require.False(t, svipModel.HasData)
+	require.Greater(t, defaultModel.Score, vipModel.Score)
+}
+
 func TestGetModelMonitorSummaryIncludesUnknownEnabledModels(t *testing.T) {
 	InvalidateModelMonitorCache()
 	t.Cleanup(InvalidateModelMonitorCache)

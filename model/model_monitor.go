@@ -19,6 +19,7 @@ const (
 
 type ModelMonitorModel struct {
 	ModelName  string `json:"model_name"`
+	Group      string `json:"group"`
 	Score      int    `json:"score"`
 	Status     string `json:"status"`
 	StatusText string `json:"status_text"`
@@ -70,6 +71,54 @@ type modelMonitorBucket struct {
 	weightedEmptyOutputs     float64
 	weightedSlowRequests     float64
 	lastSeen                 int64
+}
+
+type modelMonitorModelKey struct {
+	modelName string
+	group     string
+}
+
+type modelMonitorModelEntry struct {
+	modelName string
+	group     string
+	vendor    PricingVendor
+}
+
+func normalizeModelMonitorGroup(group string) string {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return "default"
+	}
+	return group
+}
+
+func normalizeModelMonitorGroups(groups []string) []string {
+	if len(groups) == 0 {
+		return []string{"default"}
+	}
+	seen := make(map[string]struct{}, len(groups))
+	normalized := make([]string, 0, len(groups))
+	for _, group := range groups {
+		group = normalizeModelMonitorGroup(group)
+		if _, ok := seen[group]; ok {
+			continue
+		}
+		seen[group] = struct{}{}
+		normalized = append(normalized, group)
+	}
+	if len(normalized) == 0 {
+		return []string{"default"}
+	}
+	sort.Slice(normalized, func(i, j int) bool {
+		if normalized[i] == "default" {
+			return true
+		}
+		if normalized[j] == "default" {
+			return false
+		}
+		return normalized[i] < normalized[j]
+	})
+	return normalized
 }
 
 func modelMonitorWeight(createdAt int64, now int64) float64 {
@@ -336,15 +385,16 @@ func getOrCreateModelMonitorVendor(vendorMap map[string]*ModelMonitorVendor, ven
 	return group
 }
 
-func appendModelMonitorModel(vendorMap map[string]*ModelMonitorVendor, vendor PricingVendor, modelName string, bucket modelMonitorBucket, hasData bool) {
+func appendModelMonitorModel(vendorMap map[string]*ModelMonitorVendor, vendor PricingVendor, modelName string, group string, bucket modelMonitorBucket, hasData bool) {
 	score := 0
 	if hasData {
 		score = scoreModelMonitorBucket(bucket)
 	}
 	status, statusText := modelMonitorStatus(score, hasData)
-	group := getOrCreateModelMonitorVendor(vendorMap, vendor, modelName)
-	group.Models = append(group.Models, ModelMonitorModel{
+	vendorGroup := getOrCreateModelMonitorVendor(vendorMap, vendor, modelName)
+	vendorGroup.Models = append(vendorGroup.Models, ModelMonitorModel{
 		ModelName:  modelName,
+		Group:      normalizeModelMonitorGroup(group),
 		Score:      score,
 		Status:     status,
 		StatusText: statusText,
@@ -424,21 +474,42 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 	vendorByModel := getModelMonitorVendorMap(pricing, GetVendors())
 	activeModels := make([]string, 0, len(pricing))
 	activeModelSet := make(map[string]struct{}, len(pricing))
+	activeEntrySet := make(map[modelMonitorModelKey]struct{}, len(pricing))
+	activeEntries := make([]modelMonitorModelEntry, 0, len(pricing))
 
 	for _, item := range pricing {
 		modelName := strings.TrimSpace(item.ModelName)
 		if modelName == "" {
 			continue
 		}
-		if _, ok := activeModelSet[modelName]; ok {
-			continue
+		if _, ok := activeModelSet[modelName]; !ok {
+			activeModelSet[modelName] = struct{}{}
+			activeModels = append(activeModels, modelName)
 		}
-		activeModelSet[modelName] = struct{}{}
-		activeModels = append(activeModels, modelName)
+		vendor, ok := vendorByModel[modelName]
+		if !ok || vendor.Name == "" {
+			vendor.Name = modelMonitorVendorFallback(modelName)
+		}
+		for _, group := range normalizeModelMonitorGroups(item.EnableGroup) {
+			key := modelMonitorModelKey{
+				modelName: modelName,
+				group:     group,
+			}
+			if _, ok := activeEntrySet[key]; ok {
+				continue
+			}
+			activeEntrySet[key] = struct{}{}
+			activeEntries = append(activeEntries, modelMonitorModelEntry{
+				modelName: modelName,
+				group:     group,
+				vendor:    vendor,
+			})
+		}
 	}
 
 	weightSQL := modelMonitorWeightSQL()
-	selectSQL := "model_name, " +
+	groupSQL := "COALESCE(NULLIF(TRIM(" + logGroupCol + "), ''), 'default')"
+	selectSQL := "model_name, " + groupSQL + " AS group_name, " +
 		"SUM(" + weightSQL + ") AS weighted_requests, " +
 		"SUM(CASE WHEN type = ? THEN " + weightSQL + " ELSE 0 END) AS weighted_success, " +
 		"SUM(CASE WHEN type = ? THEN " + weightSQL + " ELSE 0 END) AS weighted_errors, " +
@@ -469,6 +540,7 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 
 	type row struct {
 		ModelName                string
+		GroupName                string
 		WeightedRequests         float64
 		WeightedSuccess          float64
 		WeightedErrors           float64
@@ -486,13 +558,13 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 		if err := LOG_DB.Model(&Log{}).
 			Select(selectSQL, selectArgs...).
 			Where("created_at >= ? AND model_name IN ? AND type IN ?", since, activeModels, []int{LogTypeConsume, LogTypeError}).
-			Group("model_name").
+			Group("model_name, " + groupSQL).
 			Find(&rows).Error; err != nil {
 			return nil, err
 		}
 	}
 
-	buckets := make(map[string]modelMonitorBucket)
+	buckets := make(map[modelMonitorModelKey]modelMonitorBucket)
 	for _, item := range rows {
 		modelName := strings.TrimSpace(item.ModelName)
 		if modelName == "" {
@@ -501,7 +573,14 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 		if _, ok := activeModelSet[modelName]; !ok {
 			continue
 		}
-		buckets[modelName] = modelMonitorBucket{
+		key := modelMonitorModelKey{
+			modelName: modelName,
+			group:     normalizeModelMonitorGroup(item.GroupName),
+		}
+		if _, ok := activeEntrySet[key]; !ok {
+			continue
+		}
+		buckets[key] = modelMonitorBucket{
 			weightedRequests:         item.WeightedRequests,
 			weightedSuccess:          item.WeightedSuccess,
 			weightedErrors:           item.WeightedErrors,
@@ -516,20 +595,14 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 	}
 
 	vendorMap := make(map[string]*ModelMonitorVendor)
-	seenModels := make(map[string]bool)
 
-	for _, item := range pricing {
-		modelName := strings.TrimSpace(item.ModelName)
-		if modelName == "" || seenModels[modelName] {
-			continue
+	for _, item := range activeEntries {
+		key := modelMonitorModelKey{
+			modelName: item.modelName,
+			group:     item.group,
 		}
-		seenModels[modelName] = true
-		vendor, ok := vendorByModel[modelName]
-		if !ok || vendor.Name == "" {
-			vendor.Name = modelMonitorVendorFallback(modelName)
-		}
-		bucket, hasData := buckets[modelName]
-		appendModelMonitorModel(vendorMap, vendor, modelName, bucket, hasData)
+		bucket, hasData := buckets[key]
+		appendModelMonitorModel(vendorMap, item.vendor, item.modelName, item.group, bucket, hasData)
 	}
 
 	vendors := make([]ModelMonitorVendor, 0, len(vendorMap))
@@ -543,6 +616,9 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 				return vendor.Models[i].HasData
 			}
 			if vendor.Models[i].Score == vendor.Models[j].Score {
+				if vendor.Models[i].ModelName == vendor.Models[j].ModelName {
+					return vendor.Models[i].Group < vendor.Models[j].Group
+				}
 				return vendor.Models[i].ModelName < vendor.Models[j].ModelName
 			}
 			return vendor.Models[i].Score > vendor.Models[j].Score
@@ -558,7 +634,10 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 			}
 			vendor.KnownCount++
 			knownCount++
-			bucket := buckets[item.ModelName]
+			bucket := buckets[modelMonitorModelKey{
+				modelName: item.ModelName,
+				group:     normalizeModelMonitorGroup(item.Group),
+			}]
 			weight := bucket.weightedRequests
 			if weight <= 0 {
 				weight = 1

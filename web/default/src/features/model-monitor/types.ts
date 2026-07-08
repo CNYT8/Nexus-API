@@ -25,6 +25,7 @@ export type ModelMonitorStatus =
 
 export interface ModelMonitorModel {
   model_name: string
+  group: string
   score: number
   status: ModelMonitorStatus
   status_text: string

@@ -144,13 +144,22 @@ function ModelScoreCard(props: { model: ModelMonitorModel }) {
   const { t } = useTranslation()
   const status = getMonitorStatus(props.model)
   const score = clampScore(props.model.score)
+  const group = props.model.group || 'default'
 
   return (
     <div className={cn('rounded-lg border p-3', cardClassName[status])}>
       <div className='flex items-start justify-between gap-3'>
         <div className='min-w-0'>
-          <div className='truncate font-mono text-sm font-semibold'>
-            {props.model.model_name}
+          <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
+            <span className='min-w-0 max-w-full truncate font-mono text-sm font-semibold'>
+              {props.model.model_name}
+            </span>
+            <Badge
+              variant='outline'
+              className='h-5 max-w-32 truncate px-1.5 text-[10px]'
+            >
+              {group}
+            </Badge>
           </div>
           <div className='text-muted-foreground mt-0.5 text-xs'>
             {t(statusTextKey[status])}
@@ -304,7 +313,10 @@ export function ModelMonitor() {
                     <AccordionContent className='pb-4'>
                       <div className='grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3'>
                         {vendor.models.map((model) => (
-                          <ModelScoreCard key={model.model_name} model={model} />
+                          <ModelScoreCard
+                            key={`${model.model_name}:${model.group || 'default'}`}
+                            model={model}
+                          />
                         ))}
                       </div>
                     </AccordionContent>

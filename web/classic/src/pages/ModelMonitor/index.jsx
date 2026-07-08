@@ -153,6 +153,7 @@ const ModelScoreBar = ({ model }) => {
 const ModelRow = ({ model, t }) => {
   const status = getItemStatus(model);
   const meta = getStatusMeta(status);
+  const group = model.group || 'default';
 
   return (
     <div
@@ -165,7 +166,19 @@ const ModelRow = ({ model, t }) => {
       }}
     >
       <div className='min-w-0'>
-        <Text className='block truncate'>{model.model_name}</Text>
+        <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
+          <Text className='block min-w-0 max-w-full truncate'>
+            {model.model_name}
+          </Text>
+          <Tag
+            color='grey'
+            size='small'
+            shape='circle'
+            className='max-w-[8rem] truncate'
+          >
+            {group}
+          </Tag>
+        </div>
       </div>
       <div className='flex items-center justify-between gap-3 md:justify-end'>
         <Tag color={meta.tagColor} shape='circle'>
@@ -232,7 +245,11 @@ const VendorBlock = ({ vendor, open, onToggle, t }) => {
       <Collapsible isOpen={open} keepDOM>
         <div className='pb-2 pl-8 md:pl-[76px]'>
           {(vendor.models || []).map((model) => (
-            <ModelRow key={model.model_name} model={model} t={t} />
+            <ModelRow
+              key={`${model.model_name}:${model.group || 'default'}`}
+              model={model}
+              t={t}
+            />
           ))}
         </div>
       </Collapsible>
