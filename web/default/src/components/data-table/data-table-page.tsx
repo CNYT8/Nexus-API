@@ -156,6 +156,12 @@ export type DataTablePageProps<TData> = {
   applyHeaderSize?: boolean
 
   /**
+   * Show column resize handles. The table instance must also enable TanStack
+   * column resizing; this prop only controls the shared UI chrome.
+   */
+  enableColumnResizing?: boolean
+
+  /**
    * Optional skeleton key prefix for stable React keys across re-renders.
    */
   skeletonKeyPrefix?: string
@@ -308,7 +314,13 @@ function renderDesktop<TData>(
         props.tableClassName
       )}
     >
-      <Table>
+      <Table
+        style={
+          props.applyHeaderSize
+            ? { width: props.table.getCenterTotalSize(), minWidth: '100%' }
+            : undefined
+        }
+      >
         <TableHeader className={props.tableHeaderClassName}>
           {props.table.getHeaderGroups().map((headerGroup) => (
             <TableRow key={headerGroup.id}>
@@ -316,6 +328,11 @@ function renderDesktop<TData>(
                 <TableHead
                   key={header.id}
                   colSpan={header.colSpan}
+                  className={cn(
+                    props.enableColumnResizing &&
+                      header.column.getCanResize() &&
+                      'group/header relative pr-3'
+                  )}
                   style={
                     props.applyHeaderSize
                       ? { width: header.getSize() }
@@ -328,6 +345,26 @@ function renderDesktop<TData>(
                         header.column.columnDef.header,
                         header.getContext()
                       )}
+                  {props.enableColumnResizing &&
+                    header.column.getCanResize() && (
+                      <div
+                        role='separator'
+                        aria-orientation='vertical'
+                        onDoubleClick={() => header.column.resetSize()}
+                        onMouseDown={(event) =>
+                          header.getResizeHandler()(event)
+                        }
+                        onTouchStart={(event) =>
+                          header.getResizeHandler()(event)
+                        }
+                        className={cn(
+                          'absolute top-0 right-0 h-full w-1 cursor-col-resize touch-none select-none',
+                          'bg-border/60 opacity-0 transition-opacity group-hover/header:opacity-100 hover:bg-primary',
+                          header.column.getIsResizing() &&
+                            'bg-primary opacity-100'
+                        )}
+                      />
+                    )}
                 </TableHead>
               ))}
             </TableRow>
@@ -358,6 +395,7 @@ function renderDesktop<TData>(
                   key={row.id}
                   row={row}
                   className={props.getRowClassName?.(row, { isMobile: false })}
+                  applyCellSize={props.applyHeaderSize}
                 />
               )
             })
@@ -371,9 +409,11 @@ function renderDesktop<TData>(
 function DefaultRow<TData>({
   row,
   className,
+  applyCellSize,
 }: {
   row: Row<TData>
   className?: string
+  applyCellSize?: boolean
 }) {
   return (
     <TableRow
@@ -381,7 +421,10 @@ function DefaultRow<TData>({
       className={className}
     >
       {row.getVisibleCells().map((cell) => (
-        <TableCell key={cell.id}>
+        <TableCell
+          key={cell.id}
+          style={applyCellSize ? { width: cell.column.getSize() } : undefined}
+        >
           {flexRender(cell.column.columnDef.cell, cell.getContext())}
         </TableCell>
       ))}

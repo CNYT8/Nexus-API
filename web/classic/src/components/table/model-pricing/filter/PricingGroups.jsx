@@ -19,8 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Crown } from 'lucide-react';
+import { getModelGroupIcon } from '../../../common/ModelGroupIcon';
 import SelectableButtonGroup from '../../../common/ui/SelectableButtonGroup';
-import { isMembershipDiscountApplied } from '../../../../helpers';
+import { formatRatioDisplay, isMembershipDiscountApplied } from '../../../../helpers';
 
 /**
  * 分组筛选组件
@@ -59,7 +60,7 @@ const PricingGroups = ({
     } else {
       const ratio = groupRatio[g];
       if (ratio !== undefined && ratio !== null) {
-        ratioDisplay = `${ratio}x`;
+        ratioDisplay = `${formatRatioDisplay(ratio)}x`;
       } else {
         ratioDisplay = '1x';
       }
@@ -70,6 +71,7 @@ const PricingGroups = ({
     return {
       value: g,
       label: g === 'all' ? t('全部分组') : g,
+      icon: g === 'all' ? undefined : getModelGroupIcon(g),
       tagCount: ratioDisplay,
       tagVariant: membershipApplied ? 'amber' : undefined,
       extraTag: membershipApplied ? (

@@ -21,6 +21,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { ArrowLeft, Code2, HeartPulse, Info, Timer } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { formatRatioDisplay } from '@/lib/format'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -704,7 +705,7 @@ function GroupPricingSection(props: {
                 <div className='bg-muted/20 flex items-center justify-between gap-3 border-b px-3 py-2'>
                   <GroupBadge group={group} size='sm' />
                   <span className='text-muted-foreground font-mono text-xs'>
-                    {ratio}x
+                    {formatRatioDisplay(ratio)}x
                   </span>
                 </div>
                 <div className='overflow-x-auto'>
@@ -811,7 +812,7 @@ function GroupPricingSection(props: {
                     <GroupBadge group={group} size='sm' />
                   </TableCell>
                   <TableCell className='text-muted-foreground py-2.5 font-mono'>
-                    {ratio}x
+                    {formatRatioDisplay(ratio)}x
                   </TableCell>
                   {isTokenBased ? (
                     <>

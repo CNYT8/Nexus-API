@@ -283,7 +283,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               variant={config.color as StatusBadgeProps['variant']}
               size='sm'
               copyable={false}
-              className='!text-xs [&_span]:!text-xs'
+              className='-ml-1.5 !text-xs [&_span]:!text-xs'
             />
           </div>
         )
@@ -762,6 +762,38 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         )
       },
       meta: { label: t('Cost') },
+    },
+
+    {
+      accessorKey: 'client',
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title={t('Client')} />
+      ),
+      cell: ({ row }) => {
+        const client = row.original.client
+        if (!client) {
+          return <span className='text-muted-foreground text-xs'>-</span>
+        }
+
+        return (
+          <TooltipProvider delay={300}>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className='border-border/70 bg-muted/40 inline-flex h-6 max-w-[180px] items-center truncate rounded-md border px-2 text-xs' />
+                }
+              >
+                {client}
+              </TooltipTrigger>
+              <TooltipContent side='top' className='max-w-xs break-all'>
+                {client}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )
+      },
+      enableHiding: false,
+      meta: { label: t('Client') },
     },
 
     {

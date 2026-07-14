@@ -103,6 +103,10 @@ const ColumnSelectorModal = ({
         style={{ border: '1px solid var(--semi-color-border)' }}
       >
         {allColumns.map((column) => {
+          if (column.key === COLUMN_KEYS.CLIENT) {
+            return null;
+          }
+
           // Skip admin-only columns for non-admin users
           if (
             !isAdminUser &&

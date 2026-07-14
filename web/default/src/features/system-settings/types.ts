@@ -79,6 +79,7 @@ export type AuthSettings = {
   EmailDomainRestrictionEnabled: boolean
   EmailAliasRestrictionEnabled: boolean
   EmailDomainWhitelist: string
+  ServerAddress: string
   GitHubOAuthEnabled: boolean
   GitHubClientId: string
   GitHubClientSecret: string
@@ -268,6 +269,7 @@ export type BillingSettings = {
   'checkin_setting.condition_enabled': boolean
   'checkin_setting.request_threshold': number
   'checkin_setting.token_threshold': number
+  'checkin_setting.amount_threshold': number
   'checkin_setting.min_quota': number
   'checkin_setting.max_quota': number
 }

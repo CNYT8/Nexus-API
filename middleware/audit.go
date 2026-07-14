@@ -174,9 +174,10 @@ func finishAdminAudit(c *gin.Context, writer *auditResponseWriter) {
 	if len(routeParams) > 0 {
 		auditInfo["params"] = routeParams
 	}
+	client := model.ResolveLogClient(c)
 
 	gopool.Go(func() {
-		model.RecordOperationAuditLog(operatorId, content, ip, action, opParams, adminInfo, auditInfo)
+		model.RecordOperationAuditLog(operatorId, content, ip, client, action, opParams, adminInfo, auditInfo)
 	})
 }
 

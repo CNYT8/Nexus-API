@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
+import { formatRatioDisplay } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { StatusBadge, type StatusBadgeProps } from './status-badge'
 
@@ -98,7 +99,7 @@ export function GroupBadge(props: GroupBadgeProps) {
           getGroupRatioClassName(ratio)
         )}
       >
-        <span>{ratio}x</span>
+        <span>{formatRatioDisplay(ratio)}x</span>
       </span>
     </span>
   )

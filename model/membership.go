@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 
@@ -16,6 +17,7 @@ const (
 	MembershipSourceManual = "manual"
 
 	userMembershipCacheTTL int64 = 60
+	membershipRatioScale   int64 = 1_000_000_000_000
 )
 
 type UserMembership struct {
@@ -256,6 +258,13 @@ func AutoUpgradeUserMembershipAfterTopUp(userId int) {
 	}
 }
 
+func normalizeMembershipRatio(ratio float64) float64 {
+	if math.IsNaN(ratio) || math.IsInf(ratio, 0) {
+		return ratio
+	}
+	return math.Round(ratio*float64(membershipRatioScale)) / float64(membershipRatioScale)
+}
+
 func ApplyMembershipDiscount(userId int, group string, groupRatio float64) (float64, MembershipDiscountInfo) {
 	info := MembershipDiscountInfo{Discount: 1}
 	if !membership_setting.IsEnabled() || userId <= 0 {
@@ -273,6 +282,7 @@ func ApplyMembershipDiscount(userId int, group string, groupRatio float64) (floa
 	if tierDiscount.StackGroupRatio {
 		finalRatio = groupRatio * tierDiscount.Multiplier
 	}
+	finalRatio = normalizeMembershipRatio(finalRatio)
 	info = MembershipDiscountInfo{
 		Applied:         true,
 		TierId:          tierDiscount.Tier.Id,

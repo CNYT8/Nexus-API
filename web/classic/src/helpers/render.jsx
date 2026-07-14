@@ -831,6 +831,21 @@ export function renderGroup(group) {
   );
 }
 
+export function formatRatioDisplay(value, digits = 6) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return value === undefined || value === null ? '' : String(value);
+  }
+  const trimZeros = (text) =>
+    text.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
+  const trimmed = trimZeros(numeric.toFixed(digits));
+  if (Number(trimmed) === 0 && numeric !== 0) {
+    const precise = trimZeros(numeric.toFixed(12));
+    return Number(precise) === 0 ? String(numeric) : precise;
+  }
+  return Number(trimmed) === 0 ? '0' : trimmed;
+}
+
 export const isMembershipDiscountApplied = (membershipDiscount) =>
   membershipDiscount?.applied === true || membershipDiscount?.Applied === true;
 
@@ -876,7 +891,7 @@ export function renderRatio(ratio, options = {}) {
   }
   const ratioTag = (
       <Tag color={color} {...tagProps}>
-        {ratio}x{compact ? '' : ` ${i18next.t('倍率')}`}
+        {formatRatioDisplay(ratio)}x{compact ? '' : ` ${i18next.t('倍率')}`}
       </Tag>
   );
 
@@ -976,6 +991,7 @@ export const renderGroupOption = (item) => {
     selected,
     label,
     value,
+    icon,
     focused,
     className,
     style,
@@ -1021,9 +1037,12 @@ export const renderGroupOption = (item) => {
           onMouseEnter={handleMouseEnter}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <Typography.Text strong type={disabled ? 'tertiary' : undefined}>
-            {value}
-          </Typography.Text>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {icon && <span style={{ display: 'inline-flex' }}>{icon}</span>}
+            <Typography.Text strong type={disabled ? 'tertiary' : undefined}>
+              {value}
+            </Typography.Text>
+          </span>
           <Typography.Text type='secondary' size='small'>
             {label}
           </Typography.Text>
@@ -1290,7 +1309,7 @@ function getGroupRatioText(groupRatio, user_group_ratio) {
   const { ratio, label } = getEffectiveRatio(groupRatio, user_group_ratio);
   return i18next.t('{{ratioType}} {{ratio}}x', {
     ratioType: label,
-    ratio,
+    ratio: formatRatioDisplay(ratio),
   });
 }
 

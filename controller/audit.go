@@ -94,12 +94,12 @@ func recordManageAudit(c *gin.Context, action string, params map[string]interfac
 // recordManageAuditFor 记录一条归属于 logUserId 的管理审计日志（面向用户的操作：
 // 对目标用户的额度调整 / 解绑 / 2FA 等，使该用户也能在自己的日志中看到）。
 func recordManageAuditFor(c *gin.Context, logUserId int, action string, params map[string]interface{}) {
-	model.RecordOperationAuditLog(logUserId, auditContentEN(action, params), c.ClientIP(), action, params, auditOperatorInfo(c), nil)
+	model.RecordOperationAuditLog(logUserId, auditContentEN(action, params), c.ClientIP(), model.ResolveLogClient(c), action, params, auditOperatorInfo(c), nil)
 	markAuditLogged(c)
 }
 
 // recordUserSecurityAudit 记录普通用户自己的安全敏感操作（如 passkey 绑定/解绑）。
 // 这类日志没有管理员操作者，不写 admin_info；同时不依赖 AdminAuth/RootAuth 的兜底。
 func recordUserSecurityAudit(c *gin.Context, userId int, action string, params map[string]interface{}) {
-	model.RecordOperationAuditLog(userId, auditContentEN(action, params), c.ClientIP(), action, params, nil, nil)
+	model.RecordOperationAuditLog(userId, auditContentEN(action, params), c.ClientIP(), model.ResolveLogClient(c), action, params, nil, nil)
 }

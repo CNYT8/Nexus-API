@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo, useState } from 'react'
 import { Check, ChevronsUpDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { formatRatioDisplay } from '@/lib/format'
+import { getModelGroupIcon } from '@/lib/model-group-icon'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -56,7 +58,7 @@ function formatGroupRatio(
   ratioLabel: string
 ) {
   if (ratio === undefined || ratio === null || ratio === '') return null
-  return `${ratio}x ${ratioLabel}`
+  return `${formatRatioDisplay(ratio)}x ${ratioLabel}`
 }
 
 function getRatioBadgeClassName(ratio: ApiKeyGroupOption['ratio']) {
@@ -93,6 +95,13 @@ function GroupRatioBadge({ ratio }: { ratio: ApiKeyGroupOption['ratio'] }) {
       {label}
     </Badge>
   )
+}
+
+function ModelGroupPrefixIcon({ group }: { group?: string | null }) {
+  const icon = getModelGroupIcon(group)
+  if (!icon) return null
+
+  return <span className='shrink-0'>{icon}</span>
 }
 
 export function ApiKeyGroupCombobox({
@@ -143,15 +152,18 @@ export function ApiKeyGroupCombobox({
         }
       >
         <span className='flex min-w-0 flex-1 items-center justify-between gap-2 sm:gap-3'>
-          <span className='min-w-0'>
-            <span className='block truncate font-medium'>
-              {selectedOption?.label || placeholder || t('Select a group')}
-            </span>
-            {selectedOption?.desc && (
-              <span className='text-muted-foreground block truncate text-[11px] sm:text-xs'>
-                {selectedOption.desc}
+          <span className='flex min-w-0 items-center gap-1.5'>
+            <ModelGroupPrefixIcon group={selectedOption?.value} />
+            <span className='min-w-0'>
+              <span className='block truncate font-medium'>
+                {selectedOption?.label || placeholder || t('Select a group')}
               </span>
-            )}
+              {selectedOption?.desc && (
+                <span className='text-muted-foreground block truncate text-[11px] sm:text-xs'>
+                  {selectedOption.desc}
+                </span>
+              )}
+            </span>
           </span>
           <span className='hidden sm:block'>
             <GroupRatioBadge ratio={selectedOption?.ratio} />
@@ -188,8 +200,9 @@ export function ApiKeyGroupCombobox({
                     )}
                   />
                   <span className='min-w-0 flex-1'>
-                    <span className='block truncate font-medium'>
-                      {option.label}
+                    <span className='flex items-center gap-1.5 truncate font-medium'>
+                      <ModelGroupPrefixIcon group={option.value} />
+                      <span className='truncate'>{option.label}</span>
                     </span>
                     {option.desc && (
                       <span className='text-muted-foreground block truncate text-xs'>

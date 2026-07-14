@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 
@@ -48,6 +49,17 @@ func TestMembershipDisabledKeepsGroupRatio(t *testing.T) {
 
 	assert.Equal(t, 1.5, ratio)
 	assert.False(t, info.Applied)
+}
+
+func TestNormalizeMembershipRatioRemovesFloatNoise(t *testing.T) {
+	groupRatio := 0.8
+	discount := 0.7
+	assert.Equal(t, "0.56", strconv.FormatFloat(normalizeMembershipRatio(groupRatio*discount), 'f', -1, 64))
+
+	groupRatio = 0.1
+	discount = 0.5
+	assert.Equal(t, "0.05", strconv.FormatFloat(normalizeMembershipRatio(groupRatio*discount), 'f', -1, 64))
+	assert.Equal(t, "1.000001", strconv.FormatFloat(normalizeMembershipRatio(1.000001), 'f', -1, 64))
 }
 
 func TestGetUserCumulativeTopUpAmount(t *testing.T) {

@@ -19,7 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 import type { ReactNode } from 'react'
 import { ChevronDown, RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { formatRatioDisplay } from '@/lib/format'
 import { getLobeIcon } from '@/lib/lobe-icon'
+import { getModelGroupIcon } from '@/lib/model-group-icon'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -83,10 +85,7 @@ function countBy(
 
 function formatGroupRatio(ratio: number | undefined): string | undefined {
   if (ratio == null) return undefined
-  const formatted = Number.isInteger(ratio)
-    ? ratio.toString()
-    : ratio.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')
-  return `x${formatted}`
+  return `x${formatRatioDisplay(ratio)}`
 }
 
 function FilterChip(props: {
@@ -187,6 +186,7 @@ export function PricingSidebar(props: PricingSidebarProps) {
       value: group,
       label: group,
       suffix: formatGroupRatio(props.groupRatios?.[group]),
+      icon: getModelGroupIcon(group),
     })),
   ]
 

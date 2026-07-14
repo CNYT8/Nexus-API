@@ -46,6 +46,7 @@ const schema = z.object({
   conditionEnabled: z.boolean(),
   requestThreshold: z.coerce.number().int().min(0),
   tokenThreshold: z.coerce.number().int().min(0),
+  amountThreshold: z.coerce.number().int().min(0),
   minQuota: z.coerce.number().int().min(0),
   maxQuota: z.coerce.number().int().min(0),
 })
@@ -60,6 +61,7 @@ export function CheckinSettingsSection({
     conditionEnabled: boolean
     requestThreshold: number
     tokenThreshold: number
+    amountThreshold: number
     minQuota: number
     maxQuota: number
   }
@@ -74,6 +76,7 @@ export function CheckinSettingsSection({
       conditionEnabled: defaultValues.conditionEnabled,
       requestThreshold: defaultValues.requestThreshold,
       tokenThreshold: defaultValues.tokenThreshold,
+      amountThreshold: defaultValues.amountThreshold,
       minQuota: defaultValues.minQuota,
       maxQuota: defaultValues.maxQuota,
     },
@@ -111,6 +114,13 @@ export function CheckinSettingsSection({
       updates.push({
         key: 'checkin_setting.token_threshold',
         value: String(values.tokenThreshold),
+      })
+    }
+
+    if (values.amountThreshold !== defaultValues.amountThreshold) {
+      updates.push({
+        key: 'checkin_setting.amount_threshold',
+        value: String(values.amountThreshold),
       })
     }
 
@@ -243,6 +253,33 @@ export function CheckinSettingsSection({
                     <FormDescription>
                       {t(
                         'Users whose previous-day token usage does not exceed this value cannot check in'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='amountThreshold'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      {t('Previous-day spent quota threshold')}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={0}
+                        placeholder={t('0 means no amount limit')}
+                        disabled={!conditionEnabled}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Users whose previous-day spent quota does not exceed this value cannot check in'
                       )}
                     </FormDescription>
                     <FormMessage />

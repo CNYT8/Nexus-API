@@ -33,8 +33,10 @@ type CheckinConditionStatus struct {
 	Date             string `json:"date"`
 	RequestThreshold int    `json:"request_threshold"`
 	TokenThreshold   int    `json:"token_threshold"`
+	AmountThreshold  int    `json:"amount_threshold"`
 	RequestCount     int64  `json:"request_count"`
 	TokenCount       int64  `json:"token_count"`
+	UsedQuota        int64  `json:"used_quota"`
 	StageMode        bool   `json:"stage_mode"`
 	MatchedStage     int    `json:"-"`
 	StageMinQuota    int    `json:"-"`
@@ -79,6 +81,7 @@ func getCheckinConditionStatusWithQuota(userId int, setting *operation_setting.C
 		Date:             yesterday.Format("2006-01-02"),
 		RequestThreshold: setting.RequestThreshold,
 		TokenThreshold:   setting.TokenThreshold,
+		AmountThreshold:  setting.AmountThreshold,
 		MatchedStage:     -1,
 		StageMinQuota:    minQuota,
 		StageMaxQuota:    maxQuota,
@@ -93,9 +96,10 @@ func getCheckinConditionStatusWithQuota(userId int, setting *operation_setting.C
 	var usage struct {
 		RequestCount int64
 		TokenCount   int64
+		UsedQuota    int64
 	}
 	if err := LOG_DB.Model(&Log{}).
-		Select("COUNT(*) AS request_count, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS token_count").
+		Select("COUNT(*) AS request_count, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS token_count, COALESCE(SUM(quota), 0) AS used_quota").
 		Where("user_id = ? AND type = ? AND quota > 0 AND created_at >= ? AND created_at < ?", userId, LogTypeConsume, startAt.Unix(), endAt.Unix()).
 		Scan(&usage).Error; err != nil {
 		return nil, 0, 0, err
@@ -103,19 +107,21 @@ func getCheckinConditionStatusWithQuota(userId int, setting *operation_setting.C
 
 	status.RequestCount = usage.RequestCount
 	status.TokenCount = usage.TokenCount
+	status.UsedQuota = usage.UsedQuota
 
 	if len(setting.StageRules) > 0 {
 		status.StageMode = true
 		matched := false
 		bestIndex := -1
-		bestPriority := -1
+		var bestPriority int64 = -1
 		bestAllowCheckin := false
 		bestMinQuota := 0
 		bestMaxQuota := 0
 		bestRequestThreshold := 0
 		bestTokenThreshold := 0
+		bestAmountThreshold := 0
 		for index, rule := range setting.StageRules {
-			if !checkinStageRuleMatches(rule, usage.RequestCount, usage.TokenCount) {
+			if !checkinStageRuleMatches(rule, usage.RequestCount, usage.TokenCount, usage.UsedQuota) {
 				continue
 			}
 			matched = true
@@ -129,12 +135,14 @@ func getCheckinConditionStatusWithQuota(userId int, setting *operation_setting.C
 				bestMaxQuota = stageMaxQuota
 				bestRequestThreshold = rule.RequestThreshold
 				bestTokenThreshold = rule.TokenThreshold
+				bestAmountThreshold = rule.AmountThreshold
 			}
 		}
 		if matched {
 			status.MatchedStage = bestIndex
 			status.RequestThreshold = bestRequestThreshold
 			status.TokenThreshold = bestTokenThreshold
+			status.AmountThreshold = bestAmountThreshold
 			status.StageMinQuota = bestMinQuota
 			status.StageMaxQuota = bestMaxQuota
 			if !bestAllowCheckin {
@@ -163,17 +171,26 @@ func getCheckinConditionStatusWithQuota(userId int, setting *operation_setting.C
 		status.Message = "前一天用量未达到签到要求"
 		return status, 0, 0, nil
 	}
+	if setting.AmountThreshold > 0 && usage.UsedQuota <= int64(setting.AmountThreshold) {
+		status.Eligible = false
+		status.Reason = "amount"
+		status.Message = "前一天调用金额未达到签到要求"
+		return status, 0, 0, nil
+	}
 
 	return status, minQuota, maxQuota, nil
 }
 
-func checkinStageRulePriority(rule operation_setting.CheckinStageRule) int {
-	priority := 0
+func checkinStageRulePriority(rule operation_setting.CheckinStageRule) int64 {
+	var priority int64
 	if rule.RequestThreshold > 0 {
-		priority += rule.RequestThreshold * 1000000
+		priority += int64(rule.RequestThreshold) * 1000000000000
+	}
+	if rule.AmountThreshold > 0 {
+		priority += int64(rule.AmountThreshold) * 1000
 	}
 	if rule.TokenThreshold > 0 {
-		priority += rule.TokenThreshold
+		priority += int64(rule.TokenThreshold)
 	}
 	if !rule.AllowCheckin {
 		priority += 1
@@ -181,12 +198,13 @@ func checkinStageRulePriority(rule operation_setting.CheckinStageRule) int {
 	return priority
 }
 
-func checkinStageRuleMatches(rule operation_setting.CheckinStageRule, requestCount int64, tokenCount int64) bool {
-	if rule.RequestThreshold <= 0 && rule.TokenThreshold <= 0 {
+func checkinStageRuleMatches(rule operation_setting.CheckinStageRule, requestCount int64, tokenCount int64, usedQuota int64) bool {
+	if rule.RequestThreshold <= 0 && rule.TokenThreshold <= 0 && rule.AmountThreshold <= 0 {
 		return true
 	}
 	return (rule.RequestThreshold > 0 && requestCount > int64(rule.RequestThreshold)) ||
-		(rule.TokenThreshold > 0 && tokenCount > int64(rule.TokenThreshold))
+		(rule.TokenThreshold > 0 && tokenCount > int64(rule.TokenThreshold)) ||
+		(rule.AmountThreshold > 0 && usedQuota > int64(rule.AmountThreshold))
 }
 
 func normalizeCheckinQuotaRange(minQuota int, maxQuota int) (int, int) {

@@ -78,6 +78,9 @@ type ModelRatioVisualEditorProps = {
   audioCompletionRatio: string
   billingMode: string
   billingExpr: string
+  candidateModelNames?: string[]
+  candidateModelsLoading?: boolean
+  filterMode?: 'all' | 'unset'
   onChange: (field: string, value: string) => void
 }
 
@@ -204,6 +207,9 @@ export const ModelRatioVisualEditor = memo(
     audioCompletionRatio,
     billingMode,
     billingExpr,
+    candidateModelNames,
+    candidateModelsLoading,
+    filterMode = 'all',
     onChange,
   }: ModelRatioVisualEditorProps) {
     const { t } = useTranslation()
@@ -306,7 +312,7 @@ export const ModelRatioVisualEditor = memo(
         }
       )
 
-      const modelNames = new Set([
+      const configuredModelNames = new Set([
         ...Object.keys(priceMap),
         ...Object.keys(ratioMap),
         ...Object.keys(cacheMap),
@@ -318,6 +324,10 @@ export const ModelRatioVisualEditor = memo(
         ...Object.keys(billingModeMap),
         ...Object.keys(billingExprMap),
       ])
+      const modelNames =
+        filterMode === 'unset'
+          ? new Set(candidateModelNames ?? [])
+          : configuredModelNames
 
       const modelData: ModelRow[] = Array.from(modelNames).map((name) => {
         const price = priceMap[name]?.toString() || ''
@@ -377,8 +387,16 @@ export const ModelRatioVisualEditor = memo(
         }
       })
 
-      return modelData.sort((a, b) => a.name.localeCompare(b.name))
+      return modelData
+        .filter(
+          (row) =>
+            filterMode !== 'unset' ||
+            (row.billingMode !== 'tiered_expr' && !row.price && !row.ratio)
+        )
+        .sort((a, b) => a.name.localeCompare(b.name))
     }, [
+      candidateModelNames,
+      filterMode,
       modelPrice,
       modelRatio,
       cacheRatio,
@@ -667,6 +685,7 @@ export const ModelRatioVisualEditor = memo(
               <Button
                 variant='ghost'
                 size='sm'
+                disabled={filterMode === 'unset'}
                 onClick={() => handleDelete(row.original.name)}
               >
                 <Trash2 />
@@ -676,7 +695,7 @@ export const ModelRatioVisualEditor = memo(
           enableHiding: false,
         },
       ]
-    }, [handleEdit, handleDelete, t])
+    }, [handleEdit, handleDelete, filterMode, t])
 
     const table = useReactTable({
       data: models,
@@ -915,10 +934,12 @@ export const ModelRatioVisualEditor = memo(
                 },
               ]}
               preActions={
-                <Button onClick={handleAdd}>
-                  <Plus data-icon='inline-start' />
-                  {t('Add model')}
-                </Button>
+                filterMode === 'unset' ? undefined : (
+                  <Button onClick={handleAdd}>
+                    <Plus data-icon='inline-start' />
+                    {t('Add model')}
+                  </Button>
+                )
               }
             />
 
@@ -926,7 +947,11 @@ export const ModelRatioVisualEditor = memo(
               <div className='text-muted-foreground rounded-lg border border-dashed p-8 text-center'>
                 {table.getState().globalFilter
                   ? t('No models match your search')
-                  : t('No models configured. Use Add model to get started.')}
+                  : filterMode === 'unset'
+                    ? candidateModelsLoading
+                      ? t('Loading...')
+                      : t('No models with unset prices')
+                    : t('No models configured. Use Add model to get started.')}
               </div>
             ) : (
               <div className='overflow-hidden rounded-md border'>
@@ -980,7 +1005,6 @@ export const ModelRatioVisualEditor = memo(
                 </Table>
               </div>
             )}
-
             {table.getRowModel().rows.length > 0 && (
               <DataTablePagination table={table} />
             )}
@@ -1005,10 +1029,12 @@ export const ModelRatioVisualEditor = memo(
                     'Use the full-width table to scan prices, then select a row to edit it here.'
                   )}
                 </p>
-                <Button variant='outline' onClick={handleAdd}>
-                  <Plus data-icon='inline-start' />
-                  {t('Add model')}
-                </Button>
+                {filterMode !== 'unset' && (
+                  <Button variant='outline' onClick={handleAdd}>
+                    <Plus data-icon='inline-start' />
+                    {t('Add model')}
+                  </Button>
+                )}
               </div>
             )}
           </div>
@@ -1049,6 +1075,9 @@ export const ModelRatioVisualEditor = memo(
       prevProps.audioCompletionRatio === nextProps.audioCompletionRatio &&
       prevProps.billingMode === nextProps.billingMode &&
       prevProps.billingExpr === nextProps.billingExpr &&
+      prevProps.candidateModelNames === nextProps.candidateModelNames &&
+      prevProps.candidateModelsLoading === nextProps.candidateModelsLoading &&
+      prevProps.filterMode === nextProps.filterMode &&
       prevProps.onChange === nextProps.onChange
     )
   }

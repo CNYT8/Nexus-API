@@ -41,10 +41,7 @@ const DashboardHeader = ({
         {greetingParts ? (
           <>
             {greetingParts.emoji}
-            {greetingParts.greeting}，
-            <span className='dashboard-greeting-username'>
-              {greetingParts.username}
-            </span>
+            {greetingParts.greeting}，{greetingParts.username}
           </>
         ) : (
           getGreeting

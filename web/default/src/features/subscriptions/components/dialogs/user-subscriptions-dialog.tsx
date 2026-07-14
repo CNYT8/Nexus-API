@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -29,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import {
   Sheet,
   SheetContent,
@@ -58,6 +59,7 @@ import {
   createUserSubscription,
   invalidateUserSubscription,
   deleteUserSubscription,
+  resetUserSubscriptionsByPlan,
 } from '../../api'
 import { formatTimestamp } from '../../lib'
 import type { PlanRecord, UserSubscriptionRecord } from '../../types'
@@ -109,6 +111,12 @@ export function UserSubscriptionsDialog(props: Props) {
   const [plans, setPlans] = useState<PlanRecord[]>([])
   const [subs, setSubs] = useState<UserSubscriptionRecord[]>([])
   const [selectedPlanId, setSelectedPlanId] = useState<string>('')
+  const [resetting, setResetting] = useState(false)
+  const [advanceResetTime, setAdvanceResetTime] = useState(true)
+  const [resetAction, setResetAction] = useState<{
+    planId: number
+    planTitle: string
+  } | null>(null)
   const [confirmAction, setConfirmAction] = useState<{
     type: 'invalidate' | 'delete'
     subId: number
@@ -191,6 +199,31 @@ export function UserSubscriptionsDialog(props: Props) {
       toast.error(t('Operation failed'))
     } finally {
       setConfirmAction(null)
+    }
+  }
+
+  const handleResetConfirm = async () => {
+    if (!props.user?.id || !resetAction) return
+    setResetting(true)
+    try {
+      const res = await resetUserSubscriptionsByPlan(props.user.id, {
+        plan_id: resetAction.planId,
+        advance_reset_time: advanceResetTime,
+      })
+      if (res.success) {
+        toast.success(
+          t('Reset {{count}} active subscriptions', {
+            count: res.data?.reset_count || 0,
+          })
+        )
+        await loadData()
+        props.onSuccess?.()
+      }
+    } catch {
+      toast.error(t('Operation failed'))
+    } finally {
+      setResetting(false)
+      setResetAction(null)
     }
   }
 
@@ -321,6 +354,23 @@ export function UserSubscriptionsDialog(props: Props) {
                                 size='sm'
                                 variant='outline'
                                 disabled={!isActive}
+                                onClick={() => {
+                                  setAdvanceResetTime(true)
+                                  setResetAction({
+                                    planId: sub.plan_id,
+                                    planTitle:
+                                      planTitleMap.get(sub.plan_id) ||
+                                      `#${sub.plan_id}`,
+                                  })
+                                }}
+                              >
+                                <RotateCcw className='mr-1 h-4 w-4' />
+                                {t('Reset quota')}
+                              </Button>
+                              <Button
+                                size='sm'
+                                variant='outline'
+                                disabled={!isActive}
                                 onClick={() =>
                                   setConfirmAction({
                                     type: 'invalidate',
@@ -376,6 +426,29 @@ export function UserSubscriptionsDialog(props: Props) {
           handleConfirm={handleConfirmAction}
           destructive={confirmAction.type === 'delete'}
         />
+      )}
+
+      {resetAction && (
+        <ConfirmDialog
+          open
+          onOpenChange={(v) => !v && setResetAction(null)}
+          title={t('Reset subscription quota')}
+          desc={t('Reset active {{plan}} subscriptions for this user?', {
+            plan: resetAction.planTitle,
+          })}
+          confirmText={t('Reset quota')}
+          handleConfirm={handleResetConfirm}
+          isLoading={resetting}
+        >
+          <label className='flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm'>
+            <span>{t('Advance next reset time')}</span>
+            <Switch
+              checked={advanceResetTime}
+              onCheckedChange={(checked) => setAdvanceResetTime(!!checked)}
+              aria-label={t('Advance next reset time')}
+            />
+          </label>
+        </ConfirmDialog>
       )}
     </>
   )

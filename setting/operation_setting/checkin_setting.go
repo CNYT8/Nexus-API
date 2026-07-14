@@ -11,6 +11,7 @@ import (
 type CheckinStageRule struct {
 	RequestThreshold int  `json:"request_threshold"` // 前一天调用次数需超过，0 表示不限制
 	TokenThreshold   int  `json:"token_threshold"`   // 前一天 token 用量需超过，0 表示不限制
+	AmountThreshold  int  `json:"amount_threshold"`  // 前一天消费额度需超过，0 表示不限制
 	AllowCheckin     bool `json:"allow_checkin"`     // 是否允许该阶段签到
 	MinQuota         int  `json:"min_quota"`         // 该阶段最小额度奖励
 	MaxQuota         int  `json:"max_quota"`         // 该阶段最大额度奖励
@@ -24,6 +25,7 @@ type CheckinSetting struct {
 	ConditionEnabled bool               `json:"condition_enabled"` // 是否启用阶段签到（兼容旧配置键）
 	RequestThreshold int                `json:"request_threshold"` // 前一天调用次数需超过
 	TokenThreshold   int                `json:"token_threshold"`   // 前一天 token 用量需超过
+	AmountThreshold  int                `json:"amount_threshold"`  // 前一天消费额度需超过
 	StageRules       []CheckinStageRule `json:"stage_rules"`       // 阶段签到规则
 }
 
@@ -35,6 +37,7 @@ var checkinSetting = CheckinSetting{
 	ConditionEnabled: false, // 默认不限制前一天用量
 	RequestThreshold: 0,
 	TokenThreshold:   0,
+	AmountThreshold:  0,
 	StageRules:       nil,
 }
 
@@ -88,6 +91,7 @@ func ParseCheckinStageRules(jsonStr string) ([]CheckinStageRule, error) {
 	}
 	for i := range rules {
 		if rules[i].RequestThreshold < 0 || rules[i].TokenThreshold < 0 ||
+			rules[i].AmountThreshold < 0 ||
 			rules[i].MinQuota < 0 || rules[i].MaxQuota < 0 {
 			return nil, errors.New("checkin stage values must not be negative")
 		}

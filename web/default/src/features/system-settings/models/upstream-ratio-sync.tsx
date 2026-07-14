@@ -50,7 +50,13 @@ import {
 import {
   NUMERIC_SYNC_FIELDS,
   RATIO_SYNC_FIELDS,
-  getPreferredSyncField,
+  applyResolutionRemovalPlan,
+  applyResolutionSelection,
+  applyResolutionSelections,
+  deleteResolutionField,
+  getBillingCategory,
+  type ResolutionRemovalPlan,
+  type ResolutionSelection,
   type ResolutionsMap,
 } from './upstream-ratio-sync-helpers'
 import { UpstreamRatioSyncTable } from './upstream-ratio-sync-table'
@@ -88,13 +94,6 @@ function getDefaultEndpointForChannel(channel: UpstreamChannel): string {
   return DEFAULT_ENDPOINT
 }
 
-function getBillingCategory(ratioType: string): 'price' | 'ratio' | 'tiered' {
-  if (ratioType === 'model_price') return 'price'
-  if (ratioType === 'billing_mode' || ratioType === 'billing_expr')
-    return 'tiered'
-  return 'ratio'
-}
-
 function optionKeyBySyncField(ratioType: string): string {
   const explicit: Record<string, string> = {
     billing_mode: 'billing_setting.billing_mode',
@@ -113,25 +112,6 @@ function parseJsonRecord<T>(raw: string | undefined | null): Record<string, T> {
   } catch {
     return {}
   }
-}
-
-function deleteResolutionField(
-  res: ResolutionsMap,
-  model: string,
-  ratioType: string
-): ResolutionsMap {
-  if (!res[model]) return res
-  const newModelRes = { ...res[model] }
-  delete newModelRes[ratioType]
-  if (ratioType === 'billing_expr') delete newModelRes['billing_mode']
-  if (ratioType === 'billing_mode') delete newModelRes['billing_expr']
-  const next = { ...res }
-  if (Object.keys(newModelRes).length === 0) {
-    delete next[model]
-  } else {
-    next[model] = newModelRes
-  }
-  return next
 }
 
 // ---------------------------------------------------------------------------
@@ -274,53 +254,24 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
       value: number | string,
       sourceName: string
     ) => {
-      const modelDiffs = differences[model]
-
-      // Prefer billing_expr over individual ratio fields when available
-      const preferredType = sourceName
-        ? getPreferredSyncField(modelDiffs || {}, ratioType, sourceName)
-        : ratioType
-      const preferredValue =
-        preferredType === ratioType
-          ? value
-          : (modelDiffs?.[preferredType]?.upstreams?.[sourceName] ?? value)
-
-      const finalType = preferredType
-      const finalValue = preferredValue as number | string
-      const category = getBillingCategory(finalType)
-
-      setResolutions((prev) => {
-        const newModelRes = { ...(prev[model] || {}) }
-
-        // Clear conflicting categories
-        Object.keys(newModelRes).forEach((rt) => {
-          if (
-            category !== 'tiered' &&
-            getBillingCategory(rt) !== 'tiered' &&
-            getBillingCategory(rt) !== category
-          ) {
-            delete newModelRes[rt]
-          }
+      setResolutions((prev) =>
+        applyResolutionSelection(prev, differences, {
+          model,
+          ratioType,
+          value,
+          sourceName,
         })
+      )
+    },
+    [differences]
+  )
 
-        newModelRes[finalType] = finalValue
-
-        // When selecting a tiered field, auto-populate paired fields from the same source
-        if (category === 'tiered' && sourceName && modelDiffs) {
-          const modeVal = modelDiffs.billing_mode?.upstreams?.[sourceName]
-          const exprVal = modelDiffs.billing_expr?.upstreams?.[sourceName]
-          if (modeVal !== undefined && modeVal !== null && modeVal !== 'same') {
-            newModelRes['billing_mode'] = modeVal
-          } else if (finalType === 'billing_expr') {
-            newModelRes['billing_mode'] = 'tiered_expr'
-          }
-          if (exprVal !== undefined && exprVal !== null && exprVal !== 'same') {
-            newModelRes['billing_expr'] = exprVal
-          }
-        }
-
-        return { ...prev, [model]: newModelRes }
-      })
+  const handleSelectValues = useCallback(
+    (selections: ResolutionSelection[]) => {
+      if (selections.length === 0) return
+      setResolutions((prev) =>
+        applyResolutionSelections(prev, differences, selections)
+      )
     },
     [differences]
   )
@@ -331,6 +282,11 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
     },
     []
   )
+
+  const handleUnselectValues = useCallback((plan: ResolutionRemovalPlan) => {
+    if (plan.size === 0) return
+    setResolutions((prev) => applyResolutionRemovalPlan(prev, plan))
+  }, [])
 
   const parsedRatios = useMemo(() => {
     return {
@@ -544,7 +500,9 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
         isDisabled={isLoading}
         isSyncing={fetchMutation.isPending}
         onSelectValue={handleSelectValue}
+        onSelectValues={handleSelectValues}
         onUnselectValue={handleUnselectValue}
+        onUnselectValues={handleUnselectValues}
       />
 
       <ChannelSelectorDialog

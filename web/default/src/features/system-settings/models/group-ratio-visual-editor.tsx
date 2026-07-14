@@ -70,7 +70,7 @@ type SimpleGroup = {
 type GroupPricingRow = {
   _id: string
   name: string
-  ratio: number
+  ratio: string
   selectable: boolean
   description: string
 }
@@ -112,7 +112,7 @@ function buildGroupPricingRows(
   return Array.from(names).map((name) => ({
     _id: createGroupPricingId(),
     name,
-    ratio: normalizeRatio(ratioMap[name]),
+    ratio: String(normalizeRatio(ratioMap[name])),
     selectable: Object.prototype.hasOwnProperty.call(usableMap, name),
     description: String(usableMap[name] ?? ''),
   }))
@@ -815,7 +815,7 @@ function GroupPricingTable({
       {
         _id: createGroupPricingId(),
         name,
-        ratio: 1,
+        ratio: '1',
         selectable: true,
         description: '',
       },
@@ -905,13 +905,9 @@ function GroupPricingTable({
                           type='number'
                           min={0}
                           step={0.1}
-                          value={String(row.ratio)}
+                          value={row.ratio}
                           onChange={(event) =>
-                            updateRow(
-                              row._id,
-                              'ratio',
-                              normalizeRatio(event.target.value)
-                            )
+                            updateRow(row._id, 'ratio', event.target.value)
                           }
                         />
                       </TableCell>

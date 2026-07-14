@@ -20,6 +20,7 @@ import { useMemo } from 'react'
 import { Tag as TagIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useSystemConfigStore } from '@/stores/system-config-store'
+import { formatRatioDisplay } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -408,7 +409,7 @@ export function DynamicPricingBreakdown({
                   variant='secondary'
                   className='shrink-0 bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300'
                 >
-                  {group.multiplier}x
+                  {formatRatioDisplay(group.multiplier)}x
                 </Badge>
               </li>
             ))}

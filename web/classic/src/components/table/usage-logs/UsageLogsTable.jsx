@@ -71,7 +71,10 @@ const LogsTable = (logsData) => {
 
   // Filter columns based on visibility settings
   const getVisibleColumns = () => {
-    return allColumns.filter((column) => visibleColumns[column.key]);
+    return allColumns.filter(
+      (column) =>
+        column.key === COLUMN_KEYS.CLIENT || visibleColumns[column.key],
+    );
   };
 
   const visibleColumnsList = useMemo(() => {

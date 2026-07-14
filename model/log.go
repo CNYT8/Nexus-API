@@ -76,6 +76,7 @@ type Log struct {
 	TokenId           int    `json:"token_id" gorm:"default:0;index"`
 	Group             string `json:"group" gorm:"index"`
 	Ip                string `json:"ip" gorm:"index;default:''"`
+	Client            string `json:"client" gorm:"type:varchar(255);default:''"`
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
 	Other             string `json:"other"`
@@ -122,7 +123,6 @@ func StripChannelRestrictedAdminLogFields(logs []*Log) {
 		}
 		log.ChannelId = 0
 		log.ChannelName = ""
-		log.ModelName = ""
 		if strings.TrimSpace(log.Other) == "" {
 			continue
 		}
@@ -215,6 +215,59 @@ func RecordLogWithAdminInfo(userId int, logType int, content string, adminInfo m
 	}
 }
 
+const maxLogClientLength = 255
+
+var logClientHeaderCandidates = []string{
+	"X-Client-Name",
+	"X-App-Name",
+	"X-Title",
+	"X-Client",
+}
+
+func sanitizeLogClient(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	value = strings.Join(strings.Fields(value), " ")
+	runes := []rune(value)
+	if len(runes) > maxLogClientLength {
+		return string(runes[:maxLogClientLength])
+	}
+	return value
+}
+
+func resolveStainlessClient(c *gin.Context) string {
+	lang := sanitizeLogClient(c.GetHeader("X-Stainless-Lang"))
+	packageVersion := sanitizeLogClient(c.GetHeader("X-Stainless-Package-Version"))
+	if lang == "" && packageVersion == "" {
+		return ""
+	}
+	parts := []string{"OpenAI SDK"}
+	if lang != "" {
+		parts = append(parts, lang)
+	}
+	if packageVersion != "" {
+		parts = append(parts, packageVersion)
+	}
+	return sanitizeLogClient(strings.Join(parts, " "))
+}
+
+func ResolveLogClient(c *gin.Context) string {
+	if c == nil || c.Request == nil {
+		return ""
+	}
+	for _, header := range logClientHeaderCandidates {
+		if client := sanitizeLogClient(c.GetHeader(header)); client != "" {
+			return client
+		}
+	}
+	if client := resolveStainlessClient(c); client != "" {
+		return client
+	}
+	return sanitizeLogClient(c.Request.UserAgent())
+}
+
 // buildOpField 构建语言无关的操作描述（写入 Other.op）。
 // 前端依据 action(稳定操作标识) + params(结构化参数) 在渲染期用 i18n 本地化展示，
 // 因此不在数据库中存储自然语言句子。
@@ -232,7 +285,7 @@ func buildOpField(action string, params map[string]interface{}) map[string]inter
 // username 由调用方传入（登录流程已持有用户对象），避免额外的数据库查询。
 // content 为英文兜底文本（用于导出/经典前端）；action+params 供前端本地化渲染。
 // extra 可携带 login_method、user_agent 等附加信息（普通用户可见）。
-func RecordLoginLog(userId int, username string, content string, ip string, action string, params map[string]interface{}, extra map[string]interface{}) {
+func RecordLoginLog(userId int, username string, content string, ip string, client string, action string, params map[string]interface{}, extra map[string]interface{}) {
 	other := map[string]interface{}{}
 	for k, v := range extra {
 		other[k] = v
@@ -245,6 +298,7 @@ func RecordLoginLog(userId int, username string, content string, ip string, acti
 		Type:      LogTypeLogin,
 		Content:   content,
 		Ip:        ip,
+		Client:    sanitizeLogClient(client),
 		Other:     common.MapToJsonStr(other),
 	}
 	if err := LOG_DB.Create(log).Error; err != nil {
@@ -258,7 +312,7 @@ func RecordLoginLog(userId int, username string, content string, ip string, acti
 // action+params 写入 Other.op，供前端本地化渲染（普通用户可见，不含敏感信息）。
 // adminInfo 存放操作者身份（写入 Other.admin_info，普通用户查询时剥离）；
 // auditInfo 存放路由/方法/结果等中间件兜底信息（写入 Other.audit_info，普通用户查询时剥离）。
-func RecordOperationAuditLog(logUserId int, content string, ip string, action string, params map[string]interface{}, adminInfo map[string]interface{}, auditInfo map[string]interface{}) {
+func RecordOperationAuditLog(logUserId int, content string, ip string, client string, action string, params map[string]interface{}, adminInfo map[string]interface{}, auditInfo map[string]interface{}) {
 	username, _ := GetUsernameById(logUserId, false)
 	other := map[string]interface{}{
 		"op": buildOpField(action, params),
@@ -276,6 +330,7 @@ func RecordOperationAuditLog(logUserId int, content string, ip string, action st
 		Type:      LogTypeManage,
 		Content:   content,
 		Ip:        ip,
+		Client:    sanitizeLogClient(client),
 		Other:     common.MapToJsonStr(other),
 	}
 	if err := LOG_DB.Create(log).Error; err != nil {
@@ -353,6 +408,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		UseTime:          useTimeSeconds,
 		IsStream:         isStream,
 		Group:            group,
+		Client:           ResolveLogClient(c),
 		Ip: func() string {
 			if needRecordIp {
 				return c.ClientIP()
@@ -410,6 +466,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		UseTime:          params.UseTimeSeconds,
 		IsStream:         params.IsStream,
 		Group:            params.Group,
+		Client:           ResolveLogClient(c),
 		Ip: func() string {
 			if needRecordIp {
 				return c.ClientIP()

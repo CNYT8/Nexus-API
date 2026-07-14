@@ -209,13 +209,15 @@ export interface CheckinStats {
   condition?: {
     enabled: boolean
     eligible: boolean
-    reason?: 'request_count' | 'token_count'
+    reason?: 'request_count' | 'token_count' | 'amount'
     message?: string
     date: string
     request_threshold: number
     token_threshold: number
+    amount_threshold: number
     request_count: number
     token_count: number
+    used_quota: number
   }
   /** Total number of check-ins */
   total_checkins: number

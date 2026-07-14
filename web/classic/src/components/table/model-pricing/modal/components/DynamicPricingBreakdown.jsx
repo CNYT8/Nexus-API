@@ -20,7 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Avatar, Tag, Table, Typography } from '@douyinfe/semi-ui';
 import { IconPriceTag } from '@douyinfe/semi-icons';
-import { parseTiersFromExpr, getCurrencyConfig } from '../../../../../helpers';
+import { parseTiersFromExpr, getCurrencyConfig, formatRatioDisplay } from '../../../../../helpers';
 import { BILLING_PRICING_VARS } from '../../../../../constants';
 import {
   splitBillingExprAndRequestRules,
@@ -195,7 +195,7 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
               }}
             >
               <Text size='small'>{describeGroup(group, t)}</Text>
-              <Tag color='orange' size='small'>{group.multiplier}x</Tag>
+              <Tag color='orange' size='small'>{formatRatioDisplay(group.multiplier)}x</Tag>
             </div>
           ))}
         </div>

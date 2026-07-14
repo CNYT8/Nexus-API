@@ -177,6 +177,8 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
     conditionBlockedMessage = t(condition.message);
   } else if (condition?.reason === 'request_count') {
     conditionBlockedMessage = t('前一天调用量未达到签到要求');
+  } else if (condition?.reason === 'amount') {
+    conditionBlockedMessage = t('前一天调用金额未达到签到要求');
   }
   let checkinStatusText = t('每日签到可获得额度奖励');
   if (conditionBlocked) {

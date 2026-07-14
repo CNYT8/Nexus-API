@@ -127,7 +127,9 @@ export function CheckinCalendarCard({
       ? t('Previous-day request count did not meet the check-in requirement')
       : condition?.reason === 'token_count'
         ? t('Previous-day usage did not meet the check-in requirement')
-        : t('Previous-day usage did not meet the check-in requirement')
+        : condition?.reason === 'amount'
+          ? t('Previous-day spent amount did not meet the check-in requirement')
+          : t('Previous-day usage did not meet the check-in requirement')
   const todayAward = checkinRecordsMap[todayString]
   let checkinStatusText = t('Check in daily to receive random quota rewards')
   if (conditionBlocked) {

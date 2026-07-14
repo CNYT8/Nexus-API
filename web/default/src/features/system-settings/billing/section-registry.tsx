@@ -109,7 +109,7 @@ const BILLING_SECTIONS = [
         modelDefaults={getModelDefaults(settings)}
         groupDefaults={getGroupDefaults(settings)}
         toolPricesDefault={settings['tool_price_setting.prices']}
-        visibleTabs={['models', 'tool-prices', 'upstream-sync']}
+        visibleTabs={['models', 'unset-models', 'tool-prices', 'upstream-sync']}
       />
     ),
   },
@@ -196,6 +196,7 @@ const BILLING_SECTIONS = [
           conditionEnabled: settings['checkin_setting.condition_enabled'],
           requestThreshold: settings['checkin_setting.request_threshold'],
           tokenThreshold: settings['checkin_setting.token_threshold'],
+          amountThreshold: settings['checkin_setting.amount_threshold'],
           minQuota: settings['checkin_setting.min_quota'],
           maxQuota: settings['checkin_setting.max_quota'],
         }}

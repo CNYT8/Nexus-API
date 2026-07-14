@@ -30,6 +30,15 @@ type TaskSubmitResult struct {
 	//PerCallPrice   types.PriceData
 }
 
+func noteTaskQuotaClamp(info *relaycommon.RelayInfo, clamp *common.QuotaClamp) {
+	if clamp == nil || info == nil {
+		return
+	}
+	if info.QuotaClamp == nil {
+		info.QuotaClamp = clamp
+	}
+}
+
 // ResolveOriginTask 处理基于已有任务的提交（remix / continuation）：
 // 查找原始任务、从中提取模型名称、将渠道锁定到原始任务的渠道
 // （通过 info.LockedChannel，重试时复用同一渠道并轮换 key），
@@ -202,7 +211,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 				quotaWithRatios *= ra
 			}
 		}
-		info.PriceData.Quota = common.QuotaFromFloat(quotaWithRatios)
+		quota, clamp := common.QuotaFromFloatChecked(quotaWithRatios)
+		noteTaskQuotaClamp(info, clamp)
+		info.PriceData.Quota = quota
 	}
 
 	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
@@ -278,7 +289,9 @@ func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float6
 			result *= ra
 		}
 	}
-	return common.QuotaFromFloat(result)
+	quota, clamp := common.QuotaFromFloatChecked(result)
+	noteTaskQuotaClamp(info, clamp)
+	return quota
 }
 
 var fetchRespBuilders = map[int]func(c *gin.Context) (respBody []byte, taskResp *dto.TaskError){

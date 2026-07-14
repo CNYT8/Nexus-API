@@ -126,6 +126,7 @@ func TestCheckinConditionStatusIgnoresZeroQuotaConsumeLogs(t *testing.T) {
 		ConditionEnabled: true,
 		RequestThreshold: 1,
 		TokenThreshold:   100,
+		AmountThreshold:  1,
 	}
 
 	yesterday := time.Now().AddDate(0, 0, -1)
@@ -150,7 +151,68 @@ func TestCheckinConditionStatusIgnoresZeroQuotaConsumeLogs(t *testing.T) {
 	require.False(t, status.Eligible)
 	require.Equal(t, int64(0), status.RequestCount)
 	require.Equal(t, int64(0), status.TokenCount)
+	require.Equal(t, int64(0), status.UsedQuota)
 	require.Equal(t, "request_count", status.Reason)
+}
+
+func TestCheckinConditionStatusSupportsAmountThreshold(t *testing.T) {
+	truncateTables(t)
+	userId := 1009
+	setting := &operation_setting.CheckinSetting{
+		ConditionEnabled: true,
+		AmountThreshold:  100,
+	}
+
+	createYesterdayConsumeLogsWithQuota(t, userId, 60, 50)
+
+	status, err := GetCheckinConditionStatus(userId, setting)
+	require.NoError(t, err)
+	require.True(t, status.Eligible)
+	require.Equal(t, int64(110), status.UsedQuota)
+}
+
+func TestCheckinConditionStatusRejectsEqualAmountThreshold(t *testing.T) {
+	truncateTables(t)
+	userId := 1010
+	setting := &operation_setting.CheckinSetting{
+		ConditionEnabled: true,
+		AmountThreshold:  100,
+	}
+
+	createYesterdayConsumeLogsWithQuota(t, userId, 60, 40)
+
+	status, err := GetCheckinConditionStatus(userId, setting)
+	require.NoError(t, err)
+	require.False(t, status.Eligible)
+	require.Equal(t, "amount", status.Reason)
+	require.Equal(t, int64(100), status.UsedQuota)
+}
+
+func TestCheckinStageStatusSupportsAmountThreshold(t *testing.T) {
+	truncateTables(t)
+	userId := 1011
+	setting := &operation_setting.CheckinSetting{
+		ConditionEnabled: true,
+		StageRules: []operation_setting.CheckinStageRule{
+			{
+				AmountThreshold: 100,
+				AllowCheckin:    true,
+				MinQuota:        25000,
+				MaxQuota:        50000,
+			},
+		},
+	}
+
+	createYesterdayConsumeLogsWithQuota(t, userId, 75, 50)
+
+	status, minQuota, maxQuota, err := getCheckinConditionStatusWithQuota(userId, setting)
+	require.NoError(t, err)
+	require.True(t, status.Eligible)
+	require.Equal(t, 0, status.MatchedStage)
+	require.Equal(t, 100, status.AmountThreshold)
+	require.Equal(t, 25000, minQuota)
+	require.Equal(t, 50000, maxQuota)
+	require.Equal(t, int64(125), status.UsedQuota)
 }
 
 func TestCheckinStageStatusCanDenyLowUsage(t *testing.T) {
@@ -216,6 +278,21 @@ func createYesterdayConsumeLogs(t *testing.T, userId int, tokenCounts ...int) {
 			Type:             LogTypeConsume,
 			Quota:            1,
 			PromptTokens:     tokens,
+			CompletionTokens: 0,
+		}).Error)
+	}
+}
+
+func createYesterdayConsumeLogsWithQuota(t *testing.T, userId int, quotas ...int) {
+	t.Helper()
+	yesterday := time.Now().AddDate(0, 0, -1)
+	for index, quota := range quotas {
+		require.NoError(t, LOG_DB.Create(&Log{
+			UserId:           userId,
+			CreatedAt:        time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 13, index, 0, 0, time.Local).Unix(),
+			Type:             LogTypeConsume,
+			Quota:            quota,
+			PromptTokens:     1,
 			CompletionTokens: 0,
 		}).Error)
 	}

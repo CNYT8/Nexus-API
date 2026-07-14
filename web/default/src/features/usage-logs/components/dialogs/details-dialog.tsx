@@ -593,6 +593,22 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 />
               )}
 
+              {props.log.client && (
+                <DetailRow
+                  label={t('Client')}
+                  value={
+                    <span className='flex items-center gap-1'>
+                      <Monitor
+                        className='text-muted-foreground size-3'
+                        aria-hidden='true'
+                      />
+                      {props.log.client}
+                    </span>
+                  }
+                  mono
+                />
+              )}
+
               {showTiming && props.log.use_time > 0 && (
                 <DetailRow
                   label={t('Response Time')}

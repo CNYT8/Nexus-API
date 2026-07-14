@@ -56,8 +56,9 @@ export default function NexusApiPresetIcon({ size = 24 }) {
       >
         <defs>
           <linearGradient id={frameId} x1='0' y1='0' x2='1' y2='1'>
-            <stop offset='0%' stopColor='#111827' />
-            <stop offset='100%' stopColor='#334155' />
+            <stop offset='0%' stopColor='#de2910' />
+            <stop offset='52%' stopColor='#f97316' />
+            <stop offset='100%' stopColor='#fbbf24' />
           </linearGradient>
           <linearGradient id={cloudId} x1='0' y1='0' x2='1' y2='1'>
             <stop offset='0%' stopColor='#fbbf24' />

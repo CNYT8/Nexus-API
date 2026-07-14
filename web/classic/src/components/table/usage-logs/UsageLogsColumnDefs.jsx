@@ -889,6 +889,42 @@ export const getLogsColumns = ({
       },
     },
     {
+      key: COLUMN_KEYS.CLIENT,
+      title: t('客户端'),
+      dataIndex: 'client',
+      render: (text, record, index) => {
+        if (!text) {
+          return <></>;
+        }
+        return (
+          <Tooltip content={text}>
+            <span>
+              <Tag
+                color='white'
+                shape='circle'
+                onClick={(event) => {
+                  copyText(event, text);
+                }}
+              >
+                <span
+                  style={{
+                    display: 'inline-block',
+                    maxWidth: 180,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    verticalAlign: 'bottom',
+                  }}
+                >
+                  {text}
+                </span>
+              </Tag>
+            </span>
+          </Tooltip>
+        );
+      },
+    },
+    {
       key: COLUMN_KEYS.RETRY,
       title: t('重试'),
       dataIndex: 'retry',

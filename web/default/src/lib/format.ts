@@ -60,6 +60,24 @@ export function formatCurrencyUSD(value: number | null | undefined): string {
   return formatCurrencyFromUSD(value == null ? null : (value as number))
 }
 
+export function formatRatioDisplay(
+  value: number | string | null | undefined,
+  digits = 6
+): string {
+  if (value === undefined || value === null || value === '') return ''
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return String(value)
+
+  const trimZeros = (text: string) =>
+    text.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '')
+  const trimmed = trimZeros(numeric.toFixed(digits))
+  if (Number(trimmed) === 0 && numeric !== 0) {
+    const precise = trimZeros(numeric.toFixed(12))
+    return Number(precise) === 0 ? String(numeric) : precise
+  }
+  return Number(trimmed) === 0 ? '0' : trimmed
+}
+
 // ============================================================================
 // Quota Formatting (500,000 units = $1)
 // ============================================================================

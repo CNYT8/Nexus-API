@@ -33,6 +33,7 @@ import {
   displayAmountToQuota,
 } from '../../../../helpers/quota';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
+import { getModelGroupIcon } from '../../../common/ModelGroupIcon';
 import {
   Button,
   SideSheet,
@@ -142,6 +143,7 @@ const EditTokenModal = (props) => {
         value: group,
         ratio: info.ratio,
         membership_discount: info.membership_discount,
+        icon: getModelGroupIcon(group),
       }));
       if (statusState?.status?.default_use_auto_group) {
         if (localGroupOptions.some((group) => group.value === 'auto')) {

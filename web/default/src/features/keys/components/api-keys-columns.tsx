@@ -21,6 +21,7 @@ import { type ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 import { getUserGroups } from '@/lib/api'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
+import { getModelGroupIcon } from '@/lib/model-group-icon'
 import { cn } from '@/lib/utils'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Progress } from '@/components/ui/progress'
@@ -228,7 +229,14 @@ export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
             </Tooltip>
           )
         }
-        return <GroupBadge group={group} ratio={ratio} />
+        const groupIcon = getModelGroupIcon(group)
+
+        return (
+          <span className='inline-flex items-center gap-1.5'>
+            {groupIcon && <span className='shrink-0'>{groupIcon}</span>}
+            <GroupBadge group={group} ratio={ratio} />
+          </span>
+        )
       },
       meta: { label: t('Group'), mobileHidden: true },
     },

@@ -24,6 +24,7 @@ import { IconClose } from '@douyinfe/semi-icons';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import ModelHeader from './components/ModelHeader';
 import ModelBasicInfo from './components/ModelBasicInfo';
+import ModelPerformanceInfo from './components/ModelPerformanceInfo';
 import ModelEndpoints from './components/ModelEndpoints';
 import ModelPricingTable from './components/ModelPricingTable';
 import DynamicPricingBreakdown from './components/DynamicPricingBreakdown';
@@ -87,6 +88,10 @@ const ModelDetailSideSheet = ({
                 vendorsMap={vendorsMap}
                 t={t}
               />
+            </div>
+            <Divider margin={16} />
+            <div style={{ padding: '0 24px' }}>
+              <ModelPerformanceInfo modelData={modelData} t={t} />
             </div>
             <Divider margin={16} />
             <div style={{ padding: '0 24px' }}>

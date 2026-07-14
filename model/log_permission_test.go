@@ -19,12 +19,18 @@ func TestStripChannelRestrictedAdminLogFields(t *testing.T) {
 				"channel_type":        1,
 				"is_model_mapped":     true,
 				"upstream_model_name": "upstream-model",
+				"original_model":      "raw-user-model",
+				"original_model_name": "raw-original-model",
+				"upstream_model":      "raw-upstream-model",
 				"admin_info": map[string]interface{}{
 					"use_channel":         []int{7, 8},
 					"channel_affinity":    map[string]interface{}{"key": "value"},
 					"is_multi_key":        true,
 					"multi_key_index":     3,
 					"upstream_model_name": "upstream-model",
+					"original_model":      "raw-user-model",
+					"original_model_name": "raw-original-model",
+					"upstream_model":      "raw-upstream-model",
 				},
 			}),
 		},
@@ -34,7 +40,7 @@ func TestStripChannelRestrictedAdminLogFields(t *testing.T) {
 
 	require.Equal(t, 0, logs[0].ChannelId)
 	require.Empty(t, logs[0].ChannelName)
-	require.Empty(t, logs[0].ModelName)
+	require.Equal(t, "private-model", logs[0].ModelName)
 	other, err := common.StrToMap(logs[0].Other)
 	require.NoError(t, err)
 	require.NotContains(t, other, "channel_id")
@@ -42,6 +48,9 @@ func TestStripChannelRestrictedAdminLogFields(t *testing.T) {
 	require.NotContains(t, other, "channel_type")
 	require.NotContains(t, other, "is_model_mapped")
 	require.NotContains(t, other, "upstream_model_name")
+	require.NotContains(t, other, "original_model")
+	require.NotContains(t, other, "original_model_name")
+	require.NotContains(t, other, "upstream_model")
 
 	adminInfo, ok := other["admin_info"].(map[string]interface{})
 	require.True(t, ok)
@@ -50,4 +59,7 @@ func TestStripChannelRestrictedAdminLogFields(t *testing.T) {
 	require.NotContains(t, adminInfo, "use_channel")
 	require.NotContains(t, adminInfo, "channel_affinity")
 	require.NotContains(t, adminInfo, "upstream_model_name")
+	require.NotContains(t, adminInfo, "original_model")
+	require.NotContains(t, adminInfo, "original_model_name")
+	require.NotContains(t, adminInfo, "upstream_model")
 }

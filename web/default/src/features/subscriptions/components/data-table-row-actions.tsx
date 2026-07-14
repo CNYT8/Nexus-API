@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { type Row } from '@tanstack/react-table'
-import { MoreHorizontal, Pencil, Power, PowerOff } from 'lucide-react'
+import { MoreHorizontal, Pencil, Power, PowerOff, RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import {
@@ -73,6 +73,16 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
               {t('Enable')}
             </>
           )}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!complianceConfirmed}
+          onClick={() => {
+            setCurrentRow(row.original)
+            setOpen('reset-subscriptions')
+          }}
+        >
+          <RotateCcw className='mr-2 h-4 w-4' />
+          {t('Reset subscription quota')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

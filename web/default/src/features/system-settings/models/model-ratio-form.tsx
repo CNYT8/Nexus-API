@@ -16,11 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { memo, useCallback, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { type UseFormReturn } from 'react-hook-form'
+import { useQuery } from '@tanstack/react-query'
 import { Code2, Eye } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { getEnabledModels } from '@/features/channels/api'
 import {
   Form,
   FormControl,
@@ -60,6 +63,7 @@ type ModelRatioFormProps = {
   onReset: () => void
   isSaving: boolean
   isResetting: boolean
+  variant?: 'default' | 'unset'
 }
 
 export const ModelRatioForm = memo(function ModelRatioForm({
@@ -68,9 +72,37 @@ export const ModelRatioForm = memo(function ModelRatioForm({
   onReset,
   isSaving,
   isResetting,
+  variant = 'default',
 }: ModelRatioFormProps) {
   const { t } = useTranslation()
+  const isUnsetVariant = variant === 'unset'
   const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
+
+  const enabledModelsQuery = useQuery({
+    queryKey: ['enabled-models'],
+    queryFn: getEnabledModels,
+    enabled: isUnsetVariant,
+  })
+
+  const enabledModelNames = useMemo(
+    () =>
+      enabledModelsQuery.data?.success
+        ? enabledModelsQuery.data.data || []
+        : [],
+    [enabledModelsQuery.data]
+  )
+  const enabledModelsError =
+    isUnsetVariant &&
+    (enabledModelsQuery.isError ||
+      (enabledModelsQuery.data !== undefined &&
+        !enabledModelsQuery.data.success))
+
+  useEffect(() => {
+    if (!enabledModelsError) return
+    toast.error(
+      enabledModelsQuery.data?.message || t('Failed to load enabled models')
+    )
+  }, [enabledModelsError, enabledModelsQuery.data?.message, t])
 
   const handleFieldChange = useCallback(
     (field: keyof ModelFormValues, value: string) => {
@@ -88,7 +120,17 @@ export const ModelRatioForm = memo(function ModelRatioForm({
 
   return (
     <div className='space-y-6'>
-      <div className='flex justify-end'>
+      <div className='flex justify-end gap-2'>
+        {isUnsetVariant && (
+          <Button
+            type='button'
+            size='sm'
+            onClick={form.handleSubmit(onSave)}
+            disabled={isSaving}
+          >
+            {isSaving ? t('Saving...') : t('Save model prices')}
+          </Button>
+        )}
         <Button variant='outline' size='sm' onClick={toggleEditMode}>
           {editMode === 'visual' ? (
             <>
@@ -105,25 +147,27 @@ export const ModelRatioForm = memo(function ModelRatioForm({
       </div>
 
       <Form {...form}>
-        <SettingsPageActionsPortal>
-          <Button
-            type='button'
-            variant='destructive'
-            size='sm'
-            onClick={onReset}
-            disabled={isResetting}
-          >
-            {t('Reset prices')}
-          </Button>
-          <Button
-            type='button'
-            size='sm'
-            onClick={form.handleSubmit(onSave)}
-            disabled={isSaving}
-          >
-            {isSaving ? t('Saving...') : t('Save model prices')}
-          </Button>
-        </SettingsPageActionsPortal>
+        {!isUnsetVariant && (
+          <SettingsPageActionsPortal>
+            <Button
+              type='button'
+              variant='destructive'
+              size='sm'
+              onClick={onReset}
+              disabled={isResetting}
+            >
+              {t('Reset prices')}
+            </Button>
+            <Button
+              type='button'
+              size='sm'
+              onClick={form.handleSubmit(onSave)}
+              disabled={isSaving}
+            >
+              {isSaving ? t('Saving...') : t('Save model prices')}
+            </Button>
+          </SettingsPageActionsPortal>
+        )}
         {editMode === 'visual' ? (
           <div className='space-y-6'>
             <ModelRatioVisualEditor
@@ -137,6 +181,9 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               audioCompletionRatio={form.watch('AudioCompletionRatio')}
               billingMode={form.watch('BillingMode')}
               billingExpr={form.watch('BillingExpr')}
+              candidateModelNames={enabledModelNames}
+              candidateModelsLoading={enabledModelsQuery.isLoading}
+              filterMode={isUnsetVariant ? 'unset' : 'all'}
               onChange={(field, value) => {
                 const fieldMap: Record<string, keyof ModelFormValues> = {
                   'billing_setting.billing_mode': 'BillingMode',

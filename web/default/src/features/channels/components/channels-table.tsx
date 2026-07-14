@@ -26,6 +26,7 @@ import {
   type OnChangeFn,
   type SortingState,
   type VisibilityState,
+  type ColumnSizingState,
   type ExpandedState,
   type Row,
 } from '@tanstack/react-table'
@@ -58,6 +59,7 @@ import { useChannels } from './channels-provider'
 import { DataTableBulkActions } from './data-table-bulk-actions'
 
 const route = getRouteApi('/_authenticated/channels/')
+const CHANNELS_COLUMN_SIZING_STORAGE_KEY = 'channels:column-sizing'
 
 const CHANNEL_SORTABLE_COLUMNS = new Set<ChannelSortBy>([
   'id',
@@ -74,6 +76,18 @@ function isDisabledChannelRow(channel: Channel) {
   )
 }
 
+function getInitialColumnSizing(): ColumnSizingState {
+  if (typeof window === 'undefined') return {}
+  try {
+    const stored = window.localStorage.getItem(
+      CHANNELS_COLUMN_SIZING_STORAGE_KEY
+    )
+    return stored ? (JSON.parse(stored) as ColumnSizingState) : {}
+  } catch {
+    return {}
+  }
+}
+
 export function ChannelsTable() {
   const { t } = useTranslation()
   const { enableTagMode, idSort } = useChannels()
@@ -85,6 +99,8 @@ export function ChannelsTable() {
     models: false,
     tag: false,
   })
+  const [columnSizing, setColumnSizing] =
+    useState<ColumnSizingState>(getInitialColumnSizing)
   const [rowSelection, setRowSelection] = useState({})
   const [expanded, setExpanded] = useState<ExpandedState>({})
 
@@ -278,6 +294,14 @@ export function ChannelsTable() {
   // Columns configuration
   const columns = useChannelsColumns()
 
+  useEffect(() => {
+    if (isMobile) return
+    window.localStorage.setItem(
+      CHANNELS_COLUMN_SIZING_STORAGE_KEY,
+      JSON.stringify(columnSizing)
+    )
+  }, [columnSizing, isMobile])
+
   // React Table instance
   const table = useReactTable({
     data: channels,
@@ -287,6 +311,7 @@ export function ChannelsTable() {
       sorting,
       columnFilters,
       columnVisibility,
+      columnSizing,
       rowSelection,
       pagination,
       expanded,
@@ -297,12 +322,15 @@ export function ChannelsTable() {
     onSortingChange: handleSortingChange,
     onColumnFiltersChange,
     onColumnVisibilityChange: setColumnVisibility,
+    onColumnSizingChange: setColumnSizing,
     onPaginationChange,
     onExpandedChange: setExpanded,
     onGlobalFilterChange,
     getCoreRowModel: getCoreRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
     getSubRows: (row: Channel & { children?: Channel[] }) => row.children,
+    enableColumnResizing: !isMobile,
+    columnResizeMode: 'onChange',
     manualPagination: true,
     manualSorting: true,
     manualFiltering: true,
@@ -383,6 +411,7 @@ export function ChannelsTable() {
       )}
       skeletonKeyPrefix='channel-skeleton'
       applyHeaderSize
+      enableColumnResizing={!isMobile}
       toolbarProps={{
         searchPlaceholder: t('Filter by name, ID, or key...'),
         additionalSearch: (

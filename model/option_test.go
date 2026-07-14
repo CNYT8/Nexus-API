@@ -52,11 +52,16 @@ func TestUpdateOptionMapClearsCheckinStageRules(t *testing.T) {
 	common.OptionMap = map[string]string{}
 	common.OptionMapRWMutex.Unlock()
 
-	require.NoError(t, updateOptionMap("checkin_setting.stage_rules", `[{"request_threshold":5,"allow_checkin":true,"min_quota":1000,"max_quota":2000}]`))
+	require.NoError(t, updateOptionMap("checkin_setting.stage_rules", `[{"request_threshold":5,"amount_threshold":100,"allow_checkin":true,"min_quota":1000,"max_quota":2000}]`))
 	require.Len(t, setting.StageRules, 1)
+	assert.Equal(t, 100, setting.StageRules[0].AmountThreshold)
 
 	require.NoError(t, updateOptionMap("checkin_setting.stage_rules", ""))
 	assert.Empty(t, setting.StageRules)
+}
+
+func TestUpdateOptionRejectsInvalidCheckinStageAmountThreshold(t *testing.T) {
+	require.Error(t, updateOptionMap("checkin_setting.stage_rules", `[{"amount_threshold":-1,"allow_checkin":true,"min_quota":1000,"max_quota":2000}]`))
 }
 
 func TestUpdateOptionRejectsInvalidMembershipTiersBeforePersist(t *testing.T) {

@@ -61,6 +61,7 @@ export const useLogsData = () => {
     COST: 'cost',
     RETRY: 'retry',
     IP: 'ip',
+    CLIENT: 'client',
     DETAILS: 'details',
   };
 
@@ -124,6 +125,7 @@ export const useLogsData = () => {
       [COLUMN_KEYS.COST]: true,
       [COLUMN_KEYS.RETRY]: isAdminUser,
       [COLUMN_KEYS.IP]: true,
+      [COLUMN_KEYS.CLIENT]: true,
       [COLUMN_KEYS.DETAILS]: true,
     };
   };
@@ -145,6 +147,7 @@ export const useLogsData = () => {
         merged[COLUMN_KEYS.USERNAME] = false;
         merged[COLUMN_KEYS.RETRY] = false;
       }
+      merged[COLUMN_KEYS.CLIENT] = true;
 
       return merged;
     } catch (e) {
@@ -196,6 +199,9 @@ export const useLogsData = () => {
 
   // Handle column visibility change
   const handleColumnVisibilityChange = (columnKey, checked) => {
+    if (columnKey === COLUMN_KEYS.CLIENT) {
+      return;
+    }
     const updatedColumns = { ...visibleColumns, [columnKey]: checked };
     setVisibleColumns(updatedColumns);
   };
@@ -214,7 +220,7 @@ export const useLogsData = () => {
       ) {
         updatedColumns[key] = false;
       } else {
-        updatedColumns[key] = checked;
+        updatedColumns[key] = key === COLUMN_KEYS.CLIENT ? true : checked;
       }
     });
 
