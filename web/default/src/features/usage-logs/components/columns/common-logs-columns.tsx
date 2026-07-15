@@ -37,6 +37,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { DataTableColumnHeader } from '@/components/data-table'
+import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
@@ -514,10 +515,23 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             <span className='text-muted-foreground/60 flex min-w-0 items-center gap-1 truncate [font-family:var(--font-body)] !text-xs'>
               {group && (
                 <span className='inline-flex min-w-0 items-center gap-1'>
-                  {groupIcon && <span className='shrink-0'>{groupIcon}</span>}
-                  <span className='truncate'>
-                    {sensitiveVisible ? group : '••••'}
-                  </span>
+                  {sensitiveVisible ? (
+                    <GroupBadge
+                      group={group}
+                      prefixIcon={groupIcon}
+                      copyable={false}
+                      showDot={false}
+                      className='border-border/60 bg-muted/30 h-4 max-w-[120px] rounded px-1 text-[11px] leading-none'
+                    />
+                  ) : (
+                    <StatusBadge
+                      label='••••'
+                      variant='neutral'
+                      copyable={false}
+                      showDot={false}
+                      className='border-border/60 bg-muted/30 h-4 rounded px-1 text-[11px] leading-none'
+                    />
+                  )}
                 </span>
               )}
               {group && groupRatioText && <span className='shrink-0'>·</span>}
@@ -790,7 +804,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <span className='border-border/70 bg-muted/40 inline-block h-6 w-[180px] max-w-full overflow-hidden rounded-md border px-2 text-left text-xs leading-6 text-ellipsis whitespace-nowrap align-bottom' />
+                  <span className='border-border/70 bg-muted/40 inline-block h-6 w-fit max-w-[128px] overflow-hidden rounded-md border px-1.5 text-left text-xs leading-6 text-ellipsis whitespace-nowrap align-bottom' />
                 }
               >
                 {client}
@@ -804,8 +818,8 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       },
       enableHiding: false,
       meta: { label: t('Client') },
-      size: 190,
-      maxSize: 200,
+      size: 128,
+      maxSize: 140,
     },
 
     {

@@ -277,13 +277,7 @@ function renderBillingTag(record, t) {
 }
 
 function renderUsageLogGroup(group) {
-  const groupIcon = getModelGroupIcon(group);
-  return (
-    <span className='inline-flex items-center gap-1'>
-      {groupIcon && <span className='inline-flex shrink-0'>{groupIcon}</span>}
-      {renderGroup(group)}
-    </span>
-  );
+  return renderGroup(group, { getPrefixIcon: getModelGroupIcon });
 }
 
 function renderModelName(record, copyText, t, isAdminUser) {
@@ -914,7 +908,7 @@ export const getLogsColumns = ({
                 color='white'
                 shape='circle'
                 className='!inline-flex !items-center !justify-start'
-                style={{ width: 180, textAlign: 'left' }}
+                style={{ maxWidth: 128, textAlign: 'left' }}
                 onClick={(event) => {
                   copyText(event, text);
                 }}
@@ -937,7 +931,7 @@ export const getLogsColumns = ({
           </Tooltip>
         );
       },
-      width: 200,
+      width: 140,
     },
     {
       key: COLUMN_KEYS.RETRY,

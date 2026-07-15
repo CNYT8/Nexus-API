@@ -30,7 +30,7 @@ export function Header({ className, children, style, ...props }: HeaderProps) {
   return (
     <header
       className={cn(
-        'border-border/30 bg-background/60 supports-[backdrop-filter]:bg-background/50 sticky top-0 z-40 isolate h-[var(--app-header-height,3rem)] w-full shrink-0 overflow-hidden border-b shadow-[inset_0_1px_0_rgba(255,255,255,0.38),0_12px_32px_-30px_rgba(15,23,42,0.75)] backdrop-blur-xl backdrop-saturate-150 before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-white/40 after:pointer-events-none after:absolute after:inset-x-3 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-foreground/10 after:to-transparent dark:border-white/10 dark:bg-background/50 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_12px_32px_-30px_rgba(0,0,0,0.95)] dark:before:bg-white/10',
+        'border-transparent bg-background/60 supports-[backdrop-filter]:bg-background/50 sticky top-0 z-40 isolate h-[var(--app-header-height,3rem)] w-full shrink-0 overflow-hidden border-b shadow-[inset_0_1px_0_rgba(255,255,255,0.52),inset_0_-1px_0_rgba(255,255,255,0.16),0_18px_42px_-32px_rgba(15,23,42,0.78)] backdrop-blur-2xl backdrop-brightness-105 backdrop-contrast-125 backdrop-saturate-200 before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-white/60 after:pointer-events-none after:absolute after:inset-x-3 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-white/30 after:to-transparent dark:bg-background/50 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(255,255,255,0.06),0_18px_42px_-32px_rgba(0,0,0,0.98)] dark:before:bg-white/15 dark:after:via-white/15',
         className
       )}
       style={{
@@ -41,13 +41,21 @@ export function Header({ className, children, style, ...props }: HeaderProps) {
       }}
       {...props}
     >
+      <div
+        aria-hidden='true'
+        className='pointer-events-none absolute inset-0 z-0 opacity-95'
+        style={{
+          background:
+            'linear-gradient(115deg, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.12) 28%, rgba(255,255,255,0.03) 52%, rgba(255,255,255,0.18) 100%), radial-gradient(30rem 10rem at 12% -5rem, rgba(255,255,255,0.34), transparent 72%), radial-gradient(18rem 7rem at 88% -3rem, rgba(255,255,255,0.16), transparent 70%)',
+        }}
+      />
       {logoAccent.active && (
         <div
           aria-hidden='true'
-          className='pointer-events-none absolute inset-0 opacity-75 mix-blend-normal'
+          className='pointer-events-none absolute inset-0 z-0 opacity-90 mix-blend-normal'
           style={{
             background:
-              'radial-gradient(24rem 8rem at 2.5rem -2rem, rgba(var(--header-logo-accent), 0.22), transparent 72%), radial-gradient(18rem 6rem at 42% -2.5rem, rgba(var(--header-logo-accent), 0.08), transparent 74%)',
+              'radial-gradient(26rem 9rem at 2.5rem -2rem, rgba(var(--header-logo-accent), 0.28), transparent 72%), radial-gradient(20rem 7rem at 42% -2.5rem, rgba(var(--header-logo-accent), 0.12), transparent 74%)',
           }}
         />
       )}

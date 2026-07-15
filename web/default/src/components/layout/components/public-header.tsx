@@ -193,7 +193,7 @@ export function PublicHeader(props: PublicHeaderProps) {
             className={cn(
               'relative isolate overflow-hidden flex items-center justify-between transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
               scrolled
-                ? 'bg-background/60 supports-[backdrop-filter]:bg-background/50 ring-border/50 h-12 rounded-2xl pr-1.5 pl-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.42),0_14px_34px_-28px_rgba(15,23,42,0.78),0_0_0_0.5px_rgba(255,255,255,0.18)] ring-[0.5px] backdrop-blur-2xl backdrop-saturate-150 before:pointer-events-none before:absolute before:inset-x-3 before:top-0 before:h-px before:bg-white/50 after:pointer-events-none after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-foreground/10 after:to-transparent dark:bg-background/50 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_14px_34px_-28px_rgba(0,0,0,0.96),0_0_0_0.5px_rgba(255,255,255,0.08)] dark:before:bg-white/10'
+                ? 'bg-background/60 supports-[backdrop-filter]:bg-background/50 ring-white/40 h-12 rounded-2xl pr-1.5 pl-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.56),inset_0_-1px_0_rgba(255,255,255,0.18),0_18px_42px_-30px_rgba(15,23,42,0.8),0_0_0_0.5px_rgba(255,255,255,0.2)] ring-[0.5px] backdrop-blur-2xl backdrop-brightness-105 backdrop-contrast-125 backdrop-saturate-200 before:pointer-events-none before:absolute before:inset-x-3 before:top-0 before:h-px before:bg-white/60 after:pointer-events-none after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-white/30 after:to-transparent dark:bg-background/50 dark:ring-white/15 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(255,255,255,0.06),0_18px_42px_-30px_rgba(0,0,0,0.98),0_0_0_0.5px_rgba(255,255,255,0.08)] dark:before:bg-white/15 dark:after:via-white/15'
                 : 'h-16 px-2'
             )}
             style={
@@ -202,13 +202,23 @@ export function PublicHeader(props: PublicHeaderProps) {
                 : undefined
             }
           >
+            {scrolled && (
+              <div
+                aria-hidden='true'
+                className='pointer-events-none absolute inset-0 z-0 opacity-95'
+                style={{
+                  background:
+                    'linear-gradient(115deg, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.12) 28%, rgba(255,255,255,0.03) 52%, rgba(255,255,255,0.18) 100%), radial-gradient(26rem 9rem at 12% -5rem, rgba(255,255,255,0.34), transparent 72%), radial-gradient(16rem 6rem at 88% -3rem, rgba(255,255,255,0.16), transparent 70%)',
+                }}
+              />
+            )}
             {logoAccent.active && (
               <div
                 aria-hidden='true'
-                className='pointer-events-none absolute inset-0 z-0 opacity-75'
+                className='pointer-events-none absolute inset-0 z-0 opacity-90'
                 style={{
                   background:
-                    'radial-gradient(22rem 8rem at 2rem -2rem, rgba(var(--header-logo-accent), 0.22), transparent 72%), radial-gradient(16rem 6rem at 45% -2.5rem, rgba(var(--header-logo-accent), 0.08), transparent 74%)',
+                    'radial-gradient(24rem 9rem at 2rem -2rem, rgba(var(--header-logo-accent), 0.28), transparent 72%), radial-gradient(18rem 7rem at 45% -2.5rem, rgba(var(--header-logo-accent), 0.12), transparent 74%)',
                 }}
               />
             )}

@@ -46,6 +46,7 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
 import type { UsageLog } from '../../data/schema'
@@ -576,14 +577,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 <DetailRow
                   label={t('Group')}
                   value={
-                    <span className='flex min-w-0 items-center gap-1'>
-                      {detailGroupIcon && (
-                        <span className='shrink-0'>{detailGroupIcon}</span>
-                      )}
-                      <span className='break-all'>{detailGroup}</span>
-                    </span>
+                    <GroupBadge
+                      group={detailGroup}
+                      prefixIcon={detailGroupIcon}
+                      copyable={false}
+                      showDot={false}
+                      className='border-border/60 bg-muted/30 max-w-full rounded-md px-2'
+                    />
                   }
-                  mono
                 />
               )}
 
