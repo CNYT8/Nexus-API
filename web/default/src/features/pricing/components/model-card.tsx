@@ -42,6 +42,7 @@ export interface ModelCardProps {
   tokenUnit?: TokenUnit
   showRechargePrice?: boolean
   perf?: ModelPerfBadgeData
+  onPrefetch?: () => void
 }
 
 export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
@@ -87,8 +88,15 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
     copyToClipboard(props.model.model_name || '')
   }
 
+  const handleDetailsClick = () => {
+    props.onPrefetch?.()
+    props.onClick()
+  }
+
   return (
     <div
+      onPointerEnter={props.onPrefetch}
+      onFocus={props.onPrefetch}
       className={cn(
         'group relative flex flex-col rounded-xl border p-3 transition-colors sm:p-5',
         'hover:bg-muted/20'
@@ -205,7 +213,11 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         <div className='flex shrink-0 items-center gap-1.5'>
           <button
             type='button'
-            onClick={props.onClick}
+            onFocus={props.onPrefetch}
+            onPointerEnter={props.onPrefetch}
+            onTouchStart={props.onPrefetch}
+            onPointerDown={props.onPrefetch}
+            onClick={handleDetailsClick}
             className='text-muted-foreground hover:text-foreground hover:bg-muted inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors sm:px-2.5 sm:py-1.5'
           >
             {t('Details')}

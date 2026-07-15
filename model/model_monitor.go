@@ -201,6 +201,29 @@ func modelMonitorLatencyScore(avgUseTime float64, slowRate float64) float64 {
 	return math.Max(0, score-clampModelMonitorRatio(slowRate)*18)
 }
 
+func modelMonitorPromptLatencyFactor(avgPromptTokens float64) float64 {
+	if avgPromptTokens <= 800 {
+		return 1
+	}
+	factor := 1 + math.Log1p((avgPromptTokens-800)/4000)*0.55
+	return math.Min(2.2, factor)
+}
+
+func modelMonitorPromptAdjustedUseTime(useTime float64, avgPromptTokens float64) float64 {
+	if useTime <= 0 {
+		return useTime
+	}
+	return useTime / modelMonitorPromptLatencyFactor(avgPromptTokens)
+}
+
+func modelMonitorOutputRatioFloor(avgPromptTokens float64) float64 {
+	if avgPromptTokens <= 2000 {
+		return 0.02
+	}
+	factor := 1 + math.Log1p((avgPromptTokens-2000)/2000)
+	return 0.02 / math.Min(6, factor)
+}
+
 func modelMonitorThroughputScore(completionTokens float64, useTime float64, hasSuccess bool) float64 {
 	if !hasSuccess {
 		return 0
@@ -237,6 +260,8 @@ func modelMonitorOutputBalanceScore(avgPromptTokens float64, avgCompletionTokens
 		return 75
 	}
 	outputRatio := avgCompletionTokens / avgPromptTokens
+	scale := 0.02 / modelMonitorOutputRatioFloor(avgPromptTokens)
+	outputRatio *= scale
 	switch {
 	case outputRatio >= 0.2:
 		return 100
@@ -278,14 +303,18 @@ func scoreModelMonitorBucket(bucket modelMonitorBucket) int {
 	avgUseTime := modelMonitorSafeRatio(bucket.weightedUseTime, bucket.weightedRequests)
 	avgPromptTokens := modelMonitorSafeRatio(bucket.weightedPromptTokens, bucket.weightedSuccess)
 	avgCompletionTokens := modelMonitorSafeRatio(bucket.weightedCompletionTokens, bucket.weightedSuccess)
+	promptLatencyFactor := modelMonitorPromptLatencyFactor(avgPromptTokens)
+	adjustedUseTime := modelMonitorPromptAdjustedUseTime(avgUseTime, avgPromptTokens)
+	adjustedTotalUseTime := modelMonitorPromptAdjustedUseTime(bucket.weightedUseTime, avgPromptTokens)
+	adjustedSlowRate := slowRate / promptLatencyFactor
 
 	reliabilityScore := successRate * 100
 	emptyOutputScore := 100 * (1 - emptyRate)
 	if !hasSuccess {
 		emptyOutputScore = 0
 	}
-	latencyScore := modelMonitorLatencyScore(avgUseTime, slowRate)
-	throughputScore := modelMonitorThroughputScore(bucket.weightedCompletionTokens, bucket.weightedUseTime, hasSuccess)
+	latencyScore := modelMonitorLatencyScore(adjustedUseTime, adjustedSlowRate)
+	throughputScore := modelMonitorThroughputScore(bucket.weightedCompletionTokens, adjustedTotalUseTime, hasSuccess)
 	outputBalanceScore := modelMonitorOutputBalanceScore(avgPromptTokens, avgCompletionTokens, hasSuccess)
 	tokenVolumeScore := 0.0
 	if hasSuccess {
@@ -306,7 +335,7 @@ func scoreModelMonitorBucket(bucket modelMonitorBucket) int {
 	if emptyRate >= 0.7 {
 		score = math.Min(score, 50)
 	}
-	if hasSuccess && avgPromptTokens > 0 && avgCompletionTokens/avgPromptTokens < 0.02 {
+	if hasSuccess && avgPromptTokens > 0 && avgCompletionTokens/avgPromptTokens < modelMonitorOutputRatioFloor(avgPromptTokens) {
 		score = math.Min(score, 72)
 	}
 	if hasSuccess && bucket.weightedCompletionTokens <= 0 {

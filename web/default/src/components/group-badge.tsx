@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
+import type { ReactNode } from 'react'
 import { formatRatioDisplay } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { StatusBadge, type StatusBadgeProps } from './status-badge'
@@ -27,6 +28,7 @@ type GroupBadgeProps = Omit<
 > & {
   group?: string | null
   label?: string
+  prefixIcon?: ReactNode
   ratio?: number | null
 }
 
@@ -58,6 +60,7 @@ export function GroupBadge(props: GroupBadgeProps) {
   const {
     group,
     label: labelOverride,
+    prefixIcon,
     ratio,
     copyable = false,
     showDot,
@@ -83,7 +86,16 @@ export function GroupBadge(props: GroupBadgeProps) {
       showDot={showDot ?? (isSpecialGroup ? false : undefined)}
       variant={isSpecialGroup ? 'neutral' : undefined}
       autoColor={isSpecialGroup ? undefined : groupName}
-    />
+    >
+      {prefixIcon ? (
+        <>
+          <span className='inline-flex size-3.5 shrink-0 items-center justify-center [&>svg]:size-full'>
+            {prefixIcon}
+          </span>
+          <span className='truncate'>{label}</span>
+        </>
+      ) : undefined}
+    </StatusBadge>
   )
 
   if (ratio == null) {

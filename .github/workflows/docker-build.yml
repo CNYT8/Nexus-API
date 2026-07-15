@@ -28,6 +28,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Check version sync
+        run: bin/check-version-sync.sh "${{ github.event.inputs.image_tag }}"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 

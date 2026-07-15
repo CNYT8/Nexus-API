@@ -43,6 +43,10 @@ import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 import ParamOverrideEntry from '../../components/table/usage-logs/components/ParamOverrideEntry';
 
+const LOG_STAT_DEFER_MS = 350;
+const LOG_STAT_CACHE_MS = 30 * 1000;
+const logStatCache = new Map();
+
 export const useLogsData = () => {
   const { t } = useTranslation();
 
@@ -267,6 +271,37 @@ export const useLogsData = () => {
     };
   };
 
+  const setCachedStat = (url, data) => {
+    if (logStatCache.size > 40) {
+      logStatCache.delete(logStatCache.keys().next().value);
+    }
+    logStatCache.set(url, {
+      data,
+      expiresAt: Date.now() + LOG_STAT_CACHE_MS,
+    });
+  };
+
+  const fetchLogStat = async (url) => {
+    const cached = logStatCache.get(url);
+    if (cached && cached.expiresAt > Date.now()) {
+      setStat(cached.data);
+      return;
+    }
+
+    try {
+      let res = await API.get(url);
+      const { success, message, data } = res.data;
+      if (success) {
+        setCachedStat(url, data);
+        setStat(data);
+      } else {
+        showError(message);
+      }
+    } catch (error) {
+      showError(error?.message || t('加载失败'));
+    }
+  };
+
   // Statistics functions
   const getLogSelfStat = async () => {
     const {
@@ -282,13 +317,7 @@ export const useLogsData = () => {
     let localEndTimestamp = Date.parse(end_timestamp) / 1000;
     let url = `/api/log/self/stat?type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}`;
     url = encodeURI(url);
-    let res = await API.get(url);
-    const { success, message, data } = res.data;
-    if (success) {
-      setStat(data);
-    } else {
-      showError(message);
-    }
+    await fetchLogStat(url);
   };
 
   const getLogStat = async () => {
@@ -307,13 +336,7 @@ export const useLogsData = () => {
     let localEndTimestamp = Date.parse(end_timestamp) / 1000;
     let url = `/api/log/stat?type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}`;
     url = encodeURI(url);
-    let res = await API.get(url);
-    const { success, message, data } = res.data;
-    if (success) {
-      setStat(data);
-    } else {
-      showError(message);
-    }
+    await fetchLogStat(url);
   };
 
   const handleEyeClick = async () => {
@@ -321,13 +344,16 @@ export const useLogsData = () => {
       return;
     }
     setLoadingStat(true);
-    if (isAdminUser) {
-      await getLogStat();
-    } else {
-      await getLogSelfStat();
+    try {
+      if (isAdminUser) {
+        await getLogStat();
+      } else {
+        await getLogSelfStat();
+      }
+      setShowStat(true);
+    } finally {
+      setLoadingStat(false);
     }
-    setShowStat(true);
-    setLoadingStat(false);
   };
 
   // User info function
@@ -844,8 +870,10 @@ export const useLogsData = () => {
   // Refresh function
   const refresh = async () => {
     setActivePage(1);
-    handleEyeClick();
     await loadLogs(1, pageSize);
+    window.setTimeout(() => {
+      handleEyeClick();
+    }, LOG_STAT_DEFER_MS);
   };
 
   // Copy text function
@@ -873,7 +901,10 @@ export const useLogsData = () => {
   // Initialize statistics when formApi is available
   useEffect(() => {
     if (formApi) {
-      handleEyeClick();
+      const timer = window.setTimeout(() => {
+        handleEyeClick();
+      }, LOG_STAT_DEFER_MS);
+      return () => window.clearTimeout(timer);
     }
   }, [formApi]);
 

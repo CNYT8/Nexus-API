@@ -27,6 +27,7 @@ import {
   formatLogQuota,
   formatTimestampToDate,
 } from '@/lib/format'
+import { getModelGroupIcon } from '@/lib/model-group-icon'
 import { cn } from '@/lib/utils'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
@@ -483,12 +484,10 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       let group = log.group
       if (!group) group = other?.group || ''
 
-      const metaParts: string[] = []
       const groupRatioText = getGroupRatioText(other)
-      if (group) {
-        metaParts.push(sensitiveVisible ? group : '••••')
-      }
-      if (groupRatioText) metaParts.push(groupRatioText)
+      const groupIcon =
+        group && sensitiveVisible ? getModelGroupIcon(group, 12) : undefined
+      const hasMeta = Boolean(group || groupRatioText)
 
       return (
         <div className='flex max-w-[200px] flex-col gap-0.5'>
@@ -511,9 +510,20 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               )}
             </Tooltip>
           </TooltipProvider>
-          {metaParts.length > 0 && (
-            <span className='text-muted-foreground/60 truncate [font-family:var(--font-body)] !text-xs'>
-              {metaParts.join(' · ')}
+          {hasMeta && (
+            <span className='text-muted-foreground/60 flex min-w-0 items-center gap-1 truncate [font-family:var(--font-body)] !text-xs'>
+              {group && (
+                <span className='inline-flex min-w-0 items-center gap-1'>
+                  {groupIcon && <span className='shrink-0'>{groupIcon}</span>}
+                  <span className='truncate'>
+                    {sensitiveVisible ? group : '••••'}
+                  </span>
+                </span>
+              )}
+              {group && groupRatioText && <span className='shrink-0'>·</span>}
+              {groupRatioText && (
+                <span className='shrink-0'>{groupRatioText}</span>
+              )}
             </span>
           )}
         </div>
@@ -780,7 +790,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <span className='border-border/70 bg-muted/40 inline-flex h-6 max-w-[180px] items-center truncate rounded-md border px-2 text-xs' />
+                  <span className='border-border/70 bg-muted/40 inline-block h-6 w-[180px] max-w-full overflow-hidden rounded-md border px-2 text-left text-xs leading-6 text-ellipsis whitespace-nowrap align-bottom' />
                 }
               >
                 {client}
@@ -794,6 +804,8 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       },
       enableHiding: false,
       meta: { label: t('Client') },
+      size: 190,
+      maxSize: 200,
     },
 
     {

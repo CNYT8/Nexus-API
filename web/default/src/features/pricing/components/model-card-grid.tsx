@@ -16,12 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useCallback, useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
-import { getPerfMetricsSummary } from '@/features/performance-metrics/api'
+import {
+  getPerfMetrics,
+  getPerfMetricsSummary,
+} from '@/features/performance-metrics/api'
 import { DEFAULT_PRICING_PAGE_SIZE, DEFAULT_TOKEN_UNIT } from '../constants'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelCard } from './model-card'
@@ -38,6 +41,7 @@ export interface ModelCardGridProps {
 
 export function ModelCardGrid(props: ModelCardGridProps) {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
   const pageSize = DEFAULT_PRICING_PAGE_SIZE
   const tokenUnit = props.tokenUnit ?? DEFAULT_TOKEN_UNIT
@@ -64,6 +68,18 @@ export function ModelCardGrid(props: ModelCardGridProps) {
     return map
   }, [perfQuery.data])
 
+  const prefetchModelMetrics = useCallback(
+    (modelName: string) => {
+      if (!modelName) return
+      void queryClient.prefetchQuery({
+        queryKey: ['perf-metrics', modelName],
+        queryFn: () => getPerfMetrics(modelName, 24),
+        staleTime: 60 * 1000,
+      })
+    },
+    [queryClient]
+  )
+
   if (props.models.length === 0) {
     return null
   }
@@ -80,6 +96,7 @@ export function ModelCardGrid(props: ModelCardGridProps) {
             usdExchangeRate={props.usdExchangeRate}
             showRechargePrice={props.showRechargePrice}
             perf={perfMap.get(model.model_name || '')}
+            onPrefetch={() => prefetchModelMetrics(model.model_name || '')}
             onClick={() => props.onModelClick(model.model_name || '')}
           />
         ))}

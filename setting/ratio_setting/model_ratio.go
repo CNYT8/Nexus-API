@@ -449,7 +449,7 @@ func UpdateCompletionRatioByJSONString(jsonStr string) error {
 func GetCompletionRatio(name string) float64 {
 	name = FormatMatchingModelName(name)
 
-	if strings.Contains(name, "/") {
+	if strings.Contains(name, "/") || IsCompletionRatioOverrideEnabled() {
 		if ratio, ok := completionRatioMap.Get(name); ok {
 			return ratio
 		}
@@ -482,6 +482,18 @@ func GetCompletionRatioInfo(name string) CompletionRatioInfo {
 	}
 
 	hardCodedRatio, locked := getHardcodedCompletionModelRatio(name)
+	if IsCompletionRatioOverrideEnabled() {
+		if ratio, ok := completionRatioMap.Get(name); ok {
+			return CompletionRatioInfo{
+				Ratio:  ratio,
+				Locked: false,
+			}
+		}
+		return CompletionRatioInfo{
+			Ratio:  hardCodedRatio,
+			Locked: false,
+		}
+	}
 	if locked {
 		return CompletionRatioInfo{
 			Ratio:  hardCodedRatio,

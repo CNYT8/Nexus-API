@@ -18,15 +18,24 @@ var hotBuckets sync.Map
 
 // seriesSchema is a stable client cache/schema marker. Do not change it when
 // hiding fields or making response-only privacy hardening changes.
-const seriesSchema = "dbcd0a3c01b55203"
+const seriesSchema = "2bf39497c475bb46"
+
+const (
+	perfMetricPromptBaselineTokens = 512
+	perfMetricPromptScaleTokens    = 2048
+	perfMetricMaxPromptTtftFactor  = 1.85
+)
 
 func Init() {
 	go flushLoop()
 }
 
-func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64) {
+func RecordRelaySample(info *relaycommon.RelayInfo, success bool, promptTokens int64, outputTokens int64) {
 	if info == nil {
 		return
+	}
+	if promptTokens <= 0 {
+		promptTokens = int64(info.GetEstimatePromptTokens())
 	}
 	now := time.Now()
 	hasTtft := info.IsStream && info.HasSendResponse()
@@ -48,6 +57,7 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 		LatencyMs:    latencyMs,
 		TtftMs:       ttftMs,
 		HasTtft:      hasTtft,
+		PromptTokens: promptTokens,
 		Success:      success,
 		OutputTokens: outputTokens,
 		GenerationMs: generationMs,
@@ -102,6 +112,7 @@ func Query(params QueryParams) (QueryResult, error) {
 			totalLatencyMs: row.TotalLatencyMs,
 			ttftSumMs:      row.TtftSumMs,
 			ttftCount:      row.TtftCount,
+			promptTokens:   row.PromptTokens,
 			outputTokens:   row.OutputTokens,
 			generationMs:   row.GenerationMs,
 		})
@@ -119,7 +130,7 @@ func Query(params QueryParams) (QueryResult, error) {
 		return true
 	})
 
-	return buildQueryResult(params.Model, merged), nil
+	return buildQueryResult(params.Model, merged, endTs, params.Hours), nil
 }
 
 func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
@@ -139,14 +150,33 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 	}
 
 	totals := map[string]counters{}
+	weightedTotals := map[string]weightedCounters{}
+	windowSeconds := int64(hours) * 3600
 	for _, row := range rows {
-		totals[row.ModelName] = counters{
+		current := totals[row.ModelName]
+		value := counters{
 			requestCount:   row.RequestCount,
 			successCount:   row.SuccessCount,
 			totalLatencyMs: row.TotalLatencyMs,
+			ttftSumMs:      row.TtftSumMs,
+			ttftCount:      row.TtftCount,
+			promptTokens:   row.PromptTokens,
 			outputTokens:   row.OutputTokens,
 			generationMs:   row.GenerationMs,
 		}
+		current.requestCount += value.requestCount
+		current.successCount += value.successCount
+		current.totalLatencyMs += value.totalLatencyMs
+		current.ttftSumMs += value.ttftSumMs
+		current.ttftCount += value.ttftCount
+		current.promptTokens += value.promptTokens
+		current.outputTokens += value.outputTokens
+		current.generationMs += value.generationMs
+		totals[row.ModelName] = current
+
+		weighted := weightedTotals[row.ModelName]
+		weighted.add(value, perfMetricTimeWeight(row.BucketTs, endTs, windowSeconds))
+		weightedTotals[row.ModelName] = weighted
 	}
 
 	hotBuckets.Range(func(key, value any) bool {
@@ -167,9 +197,16 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 		cur.requestCount += snap.requestCount
 		cur.successCount += snap.successCount
 		cur.totalLatencyMs += snap.totalLatencyMs
+		cur.ttftSumMs += snap.ttftSumMs
+		cur.ttftCount += snap.ttftCount
+		cur.promptTokens += snap.promptTokens
 		cur.outputTokens += snap.outputTokens
 		cur.generationMs += snap.generationMs
 		totals[k.model] = cur
+
+		weighted := weightedTotals[k.model]
+		weighted.add(snap, perfMetricTimeWeight(k.bucketTs, endTs, windowSeconds))
+		weightedTotals[k.model] = weighted
 		return true
 	})
 
@@ -184,12 +221,17 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 		if total.generationMs > 0 {
 			avgTps = float64(total.outputTokens) / (float64(total.generationMs) / 1000.0)
 		}
+		weighted := weightedTotals[name]
 		models = append(models, ModelSummary{
-			ModelName:    name,
-			AvgLatencyMs: avgLatency,
-			SuccessRate:  math.Round(successRate*100) / 100,
-			AvgTps:       math.Round(avgTps*100) / 100,
-			RequestCount: total.requestCount,
+			ModelName:            name,
+			AvgLatencyMs:         avgLatency,
+			SuccessRate:          math.Round(successRate*100) / 100,
+			AvgTps:               math.Round(avgTps*100) / 100,
+			WeightedRequestCount: roundFloat(weighted.requestCount, 2),
+			WeightedAvgLatencyMs: weightedAvg(weighted.totalLatencyMs, weighted.requestCount),
+			WeightedSuccessRate:  weightedSuccessRate(weighted),
+			WeightedAvgTps:       weightedAvgTps(weighted),
+			RequestCount:         total.requestCount,
 		})
 	}
 	sort.Slice(models, func(i, j int) bool {
@@ -228,12 +270,13 @@ func mergeCounters(merged map[bucketKey]counters, key bucketKey, value counters)
 	current.totalLatencyMs += value.totalLatencyMs
 	current.ttftSumMs += value.ttftSumMs
 	current.ttftCount += value.ttftCount
+	current.promptTokens += value.promptTokens
 	current.outputTokens += value.outputTokens
 	current.generationMs += value.generationMs
 	merged[key] = current
 }
 
-func buildQueryResult(modelName string, merged map[bucketKey]counters) QueryResult {
+func buildQueryResult(modelName string, merged map[bucketKey]counters, endTs int64, hours int) QueryResult {
 	groupBuckets := map[string]map[int64]counters{}
 	for key, value := range merged {
 		if value.requestCount == 0 {
@@ -252,6 +295,7 @@ func buildQueryResult(modelName string, merged map[bucketKey]counters) QueryResu
 	sort.Strings(groups)
 
 	results := make([]GroupResult, 0, len(groups))
+	windowSeconds := int64(hours) * 3600
 	for _, group := range groups {
 		buckets := groupBuckets[group]
 		timestamps := make([]int64, 0, len(buckets))
@@ -263,6 +307,7 @@ func buildQueryResult(modelName string, merged map[bucketKey]counters) QueryResu
 		})
 
 		total := counters{}
+		weighted := weightedCounters{}
 		series := make([]BucketPoint, 0, len(timestamps))
 		for _, ts := range timestamps {
 			value := buckets[ts]
@@ -271,18 +316,29 @@ func buildQueryResult(modelName string, merged map[bucketKey]counters) QueryResu
 			total.totalLatencyMs += value.totalLatencyMs
 			total.ttftSumMs += value.ttftSumMs
 			total.ttftCount += value.ttftCount
+			total.promptTokens += value.promptTokens
 			total.outputTokens += value.outputTokens
 			total.generationMs += value.generationMs
+			weighted.add(value, perfMetricTimeWeight(ts, endTs, windowSeconds))
 			series = append(series, bucketPoint(ts, value))
 		}
 
 		results = append(results, GroupResult{
-			Group:        group,
-			AvgTtftMs:    avg(total.ttftSumMs, total.ttftCount),
-			AvgLatencyMs: avg(total.totalLatencyMs, total.requestCount),
-			SuccessRate:  successRate(total),
-			AvgTps:       avgTps(total),
-			Series:       series,
+			Group:                group,
+			AvgTtftMs:            avg(total.ttftSumMs, total.ttftCount),
+			AdjustedTtftMs:       adjustedTtft(total),
+			AvgLatencyMs:         avg(total.totalLatencyMs, total.requestCount),
+			SuccessRate:          successRate(total),
+			AvgTps:               avgTps(total),
+			RequestCount:         total.requestCount,
+			SuccessCount:         total.successCount,
+			PromptTokens:         total.promptTokens,
+			WeightedRequestCount: roundFloat(weighted.requestCount, 2),
+			WeightedAvgTtftMs:    weightedAdjustedTtft(weighted),
+			WeightedAvgLatencyMs: weightedAvg(weighted.totalLatencyMs, weighted.requestCount),
+			WeightedSuccessRate:  weightedSuccessRate(weighted),
+			WeightedAvgTps:       weightedAvgTps(weighted),
+			Series:               series,
 		})
 	}
 
@@ -295,12 +351,67 @@ func buildQueryResult(modelName string, merged map[bucketKey]counters) QueryResu
 
 func bucketPoint(ts int64, value counters) BucketPoint {
 	return BucketPoint{
-		Ts:           ts,
-		AvgTtftMs:    avg(value.ttftSumMs, value.ttftCount),
-		AvgLatencyMs: avg(value.totalLatencyMs, value.requestCount),
-		SuccessRate:  successRate(value),
-		AvgTps:       avgTps(value),
+		Ts:             ts,
+		AvgTtftMs:      avg(value.ttftSumMs, value.ttftCount),
+		AdjustedTtftMs: adjustedTtft(value),
+		AvgLatencyMs:   avg(value.totalLatencyMs, value.requestCount),
+		SuccessRate:    successRate(value),
+		AvgTps:         avgTps(value),
+		RequestCount:   value.requestCount,
+		SuccessCount:   value.successCount,
+		PromptTokens:   value.promptTokens,
 	}
+}
+
+type weightedCounters struct {
+	requestCount   float64
+	successCount   float64
+	totalLatencyMs float64
+	ttftSumMs      float64
+	ttftCount      float64
+	promptTokens   float64
+	outputTokens   float64
+	generationMs   float64
+}
+
+func (c *weightedCounters) add(value counters, weight float64) {
+	if value.requestCount == 0 || weight <= 0 {
+		return
+	}
+	c.requestCount += float64(value.requestCount) * weight
+	c.successCount += float64(value.successCount) * weight
+	c.totalLatencyMs += float64(value.totalLatencyMs) * weight
+	c.ttftSumMs += float64(value.ttftSumMs) * weight
+	c.ttftCount += float64(value.ttftCount) * weight
+	c.promptTokens += float64(value.promptTokens) * weight
+	c.outputTokens += float64(value.outputTokens) * weight
+	c.generationMs += float64(value.generationMs) * weight
+}
+
+func perfMetricTimeWeight(bucketTs int64, endTs int64, windowSeconds int64) float64 {
+	if windowSeconds <= 0 {
+		return 1
+	}
+	age := endTs - bucketTs
+	if age < 0 {
+		age = 0
+	}
+	hotSeconds := windowSeconds * 3 / 7
+	if hotSeconds <= 0 {
+		hotSeconds = windowSeconds
+	}
+	if age <= hotSeconds {
+		return 2.0 - float64(age)/float64(hotSeconds)*0.5
+	}
+	if age >= windowSeconds {
+		return 0.2
+	}
+	restAge := age - hotSeconds
+	restWindow := windowSeconds - hotSeconds
+	if restWindow <= 0 {
+		return 1
+	}
+	return 1.0 - float64(restAge)/float64(restWindow)*0.65
 }
 
 func avg(sum int64, count int64) int64 {
@@ -308,6 +419,41 @@ func avg(sum int64, count int64) int64 {
 		return 0
 	}
 	return sum / count
+}
+
+func weightedAvg(sum float64, count float64) int64 {
+	if count <= 0 {
+		return 0
+	}
+	return int64(math.Round(sum / count))
+}
+
+func adjustedTtft(value counters) int64 {
+	rawTtft := avg(value.ttftSumMs, value.ttftCount)
+	if rawTtft <= 0 || value.promptTokens <= 0 || value.requestCount <= 0 {
+		return rawTtft
+	}
+	return promptAdjustedTtft(float64(rawTtft), float64(value.promptTokens)/float64(value.requestCount))
+}
+
+func weightedAdjustedTtft(value weightedCounters) int64 {
+	rawTtft := weightedAvg(value.ttftSumMs, value.ttftCount)
+	if rawTtft <= 0 || value.promptTokens <= 0 || value.requestCount <= 0 {
+		return rawTtft
+	}
+	return promptAdjustedTtft(float64(rawTtft), value.promptTokens/value.requestCount)
+}
+
+func promptAdjustedTtft(rawTtftMs float64, avgPromptTokens float64) int64 {
+	if rawTtftMs <= 0 || avgPromptTokens <= perfMetricPromptBaselineTokens {
+		return int64(math.Round(rawTtftMs))
+	}
+	excessTokens := avgPromptTokens - perfMetricPromptBaselineTokens
+	factor := 1 + math.Log1p(excessTokens/perfMetricPromptScaleTokens)*0.28
+	if factor > perfMetricMaxPromptTtftFactor {
+		factor = perfMetricMaxPromptTtftFactor
+	}
+	return int64(math.Round(rawTtftMs / factor))
 }
 
 func successRate(value counters) float64 {
@@ -322,6 +468,28 @@ func avgTps(value counters) float64 {
 		return 0
 	}
 	return float64(value.outputTokens) / (float64(value.generationMs) / 1000)
+}
+
+func weightedSuccessRate(value weightedCounters) float64 {
+	if value.requestCount <= 0 {
+		return 0
+	}
+	return roundFloat(value.successCount/value.requestCount*100, 2)
+}
+
+func weightedAvgTps(value weightedCounters) float64 {
+	if value.outputTokens <= 0 || value.generationMs <= 0 {
+		return 0
+	}
+	return roundFloat(value.outputTokens/(value.generationMs/1000), 2)
+}
+
+func roundFloat(value float64, precision int) float64 {
+	if precision < 0 {
+		return value
+	}
+	factor := math.Pow10(precision)
+	return math.Round(value*factor) / factor
 }
 
 func recordRedis(key bucketKey, sample Sample) {
@@ -343,6 +511,9 @@ func recordRedis(key bucketKey, sample Sample) {
 	if sample.HasTtft && sample.TtftMs >= 0 {
 		pipe.HIncrBy(ctx, redisKey, "ttft", sample.TtftMs)
 		pipe.HIncrBy(ctx, redisKey, "ttft_n", 1)
+	}
+	if sample.PromptTokens > 0 {
+		pipe.HIncrBy(ctx, redisKey, "prompt", sample.PromptTokens)
 	}
 	if sample.OutputTokens > 0 && sample.GenerationMs > 0 {
 		pipe.HIncrBy(ctx, redisKey, "out", sample.OutputTokens)

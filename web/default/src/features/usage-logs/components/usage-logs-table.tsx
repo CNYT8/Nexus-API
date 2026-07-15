@@ -50,6 +50,7 @@ import { TaskLogsFilterBar } from './task-logs-filter-bar'
 import { UsageLogsMobileList } from './usage-logs-mobile-card'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
+const LOGS_STALE_MS = 4.5 * 1000
 
 const logTypeRowTint: Record<number, string> = {
   [LOG_TYPE_ENUM.ERROR]: 'bg-rose-50/40 dark:bg-rose-950/20',
@@ -137,6 +138,9 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
 
       return result.data || DEFAULT_LOGS_DATA
     },
+    staleTime: LOGS_STALE_MS,
+    gcTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
     placeholderData: (previousData, previousQuery) => {
       if (previousQuery?.queryKey[1] === logCategory) {
         return previousData

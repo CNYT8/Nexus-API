@@ -232,10 +232,7 @@ export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
         const groupIcon = getModelGroupIcon(group)
 
         return (
-          <span className='inline-flex items-center gap-1.5'>
-            {groupIcon && <span className='shrink-0'>{groupIcon}</span>}
-            <GroupBadge group={group} ratio={ratio} />
-          </span>
+          <GroupBadge group={group} prefixIcon={groupIcon} ratio={ratio} />
         )
       },
       meta: { label: t('Group'), mobileHidden: true },

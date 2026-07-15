@@ -382,7 +382,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
             <p className='text-muted-foreground text-xs sm:text-sm'>
               {recordIpLogForced
                 ? t(
-                    'Admin has disabled user changes to the request and error log IP switch'
+                    'Admin has disabled user changes to this switch'
                   )
                 : t('Log IP address for usage and error logs')}
             </p>

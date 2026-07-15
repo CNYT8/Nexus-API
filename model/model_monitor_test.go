@@ -37,6 +37,19 @@ func TestScoreModelMonitorBucket(t *testing.T) {
 		t.Fatalf("healthy score = %d, want >= 85", score)
 	}
 
+	longInputHealthy := modelMonitorBucket{
+		weightedRequests:         10,
+		weightedSuccess:          10,
+		weightedPromptTokens:     240000,
+		weightedCompletionTokens: 4000,
+		weightedTokens:           244000,
+		weightedUseTime:          120,
+		weightedSlowRequests:     1,
+	}
+	if score := scoreModelMonitorBucket(longInputHealthy); score < 80 {
+		t.Fatalf("long input healthy score = %d, want >= 80", score)
+	}
+
 	poor := modelMonitorBucket{
 		weightedRequests:     10,
 		weightedErrors:       10,

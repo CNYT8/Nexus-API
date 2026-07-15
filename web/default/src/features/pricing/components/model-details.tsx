@@ -46,12 +46,22 @@ import { CopyButton } from '@/components/copy-button'
 import { sideDrawerContentClassName } from '@/components/drawer-layout'
 import { GroupBadge } from '@/components/group-badge'
 import { PublicLayout } from '@/components/layout'
-import { getPerfMetrics } from '@/features/performance-metrics/api'
+import {
+  getPerfMetrics,
+  getPerfMetricsSummary,
+} from '@/features/performance-metrics/api'
 import {
   formatLatency,
   formatThroughput,
   formatUptimePct,
 } from '@/features/performance-metrics/lib/format'
+import {
+  groupWeight,
+  weightedAverage,
+  weightedMetric,
+  weightedSummaryMetric,
+} from '@/features/performance-metrics/lib/weighted'
+import type { PerfModelSummary } from '@/features/performance-metrics/types'
 import { DEFAULT_TOKEN_UNIT, QUOTA_TYPE_VALUES } from '../constants'
 import { usePricingData } from '../hooks/use-pricing-data'
 import {
@@ -200,45 +210,69 @@ function OverviewMetric(props: {
   )
 }
 
-function OverviewSummaryGrid(props: { model: PricingModel }) {
+function OverviewSummaryGrid(props: {
+  model: PricingModel
+  perfSummary?: PerfModelSummary
+}) {
   const { t } = useTranslation()
   const metricsQuery = useQuery({
     queryKey: ['perf-metrics', props.model.model_name],
     queryFn: () => getPerfMetrics(props.model.model_name, 24),
     staleTime: 60 * 1000,
   })
+  const summaryQuery = useQuery({
+    queryKey: ['perf-metrics-summary', 24],
+    queryFn: () => getPerfMetricsSummary(24),
+    staleTime: 60 * 1000,
+    retry: false,
+    enabled: !props.perfSummary,
+  })
 
   const groups = metricsQuery.data?.data.groups ?? []
-  const successRates = groups
-    .map((group) => group.success_rate)
-    .filter((rate) => Number.isFinite(rate))
+  const summary =
+    props.perfSummary ??
+    summaryQuery.data?.data.models.find(
+      (model) => model.model_name === props.model.model_name
+    )
   const successRate =
-    successRates.length > 0
-      ? successRates.reduce((sum, rate) => sum + rate, 0) / successRates.length
-      : Number.NaN
+    groups.length > 0
+      ? weightedAverage(
+          groups,
+          (group) => weightedMetric(group, 'weighted_success_rate'),
+          groupWeight,
+          Number.isFinite
+        )
+      : summary
+        ? weightedSummaryMetric(summary, 'weighted_success_rate')
+        : Number.NaN
   let successIntent: 'default' | 'warning' | 'success' = 'warning'
   if (successRate >= 99.9) {
     successIntent = 'success'
   } else if (successRate >= 99) {
     successIntent = 'default'
   }
-  const tpsValues = groups
-    .map((group) => group.avg_tps)
-    .filter((value) => value > 0)
   const avgTps =
-    tpsValues.length > 0
-      ? tpsValues.reduce((sum, value) => sum + value, 0) / tpsValues.length
-      : 0
-  const latencyValues = groups
-    .map((group) => group.avg_latency_ms)
-    .filter((value) => value > 0)
-  const avgLatency =
-    latencyValues.length > 0
-      ? Math.round(
-          latencyValues.reduce((sum, value) => sum + value, 0) /
-            latencyValues.length
+    groups.length > 0
+      ? weightedAverage(
+          groups,
+          (group) => weightedMetric(group, 'weighted_avg_tps'),
+          groupWeight,
+          (value) => value > 0
         )
-      : 0
+      : weightedSummaryMetric(summary, 'weighted_avg_tps')
+  const avgLatency =
+    groups.length > 0
+      ? Math.round(
+          weightedAverage(
+            groups,
+            (group) => weightedMetric(group, 'weighted_avg_latency_ms'),
+            groupWeight,
+            (value) => value > 0
+          )
+        )
+      : Math.round(
+          weightedSummaryMetric(summary, 'weighted_avg_latency_ms')
+        )
 
   return (
     <div className='bg-muted/20 grid overflow-hidden rounded-lg border sm:grid-cols-3 sm:divide-x'>
@@ -899,6 +933,7 @@ const TAB_META: Record<
 
 export interface ModelDetailsContentProps {
   model: PricingModel
+  perfSummary?: PerfModelSummary
   groupRatio: Record<string, number>
   usableGroup: Record<string, { desc: string; ratio: number }>
   endpointMap: Record<string, { path?: string; method?: string }>
@@ -940,7 +975,10 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
         </TabsList>
 
         <TabsContent value='overview' className='space-y-6 outline-none'>
-          <OverviewSummaryGrid model={props.model} />
+          <OverviewSummaryGrid
+            model={props.model}
+            perfSummary={props.perfSummary}
+          />
 
           <section className='bg-card/60 space-y-5 rounded-xl border p-4 shadow-sm'>
             <SectionTitle>{t('Pricing')}</SectionTitle>
@@ -978,7 +1016,10 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
         </TabsContent>
 
         <TabsContent value='performance' className='outline-none'>
-          <ModelDetailsPerformance model={props.model} />
+          <ModelDetailsPerformance
+            model={props.model}
+            perfSummary={props.perfSummary}
+          />
         </TabsContent>
 
         <TabsContent value='api' className='outline-none'>

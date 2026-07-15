@@ -149,6 +149,7 @@ func InitOptionMap() {
 	common.OptionMap["GroupGroupRatio"] = ratio_setting.GroupGroupRatio2JSONString()
 	common.OptionMap["UserUsableGroups"] = setting.UserUsableGroups2JSONString()
 	common.OptionMap["CompletionRatio"] = ratio_setting.CompletionRatio2JSONString()
+	common.OptionMap["CompletionRatioOverrideEnabled"] = strconv.FormatBool(ratio_setting.IsCompletionRatioOverrideEnabled())
 	common.OptionMap["ImageRatio"] = ratio_setting.ImageRatio2JSONString()
 	common.OptionMap["AudioRatio"] = ratio_setting.AudioRatio2JSONString()
 	common.OptionMap["AudioCompletionRatio"] = ratio_setting.AudioCompletionRatio2JSONString()
@@ -241,6 +242,17 @@ func validateOptionBeforeSave(key string, value string) error {
 		return error_mask_setting.CheckRules(value)
 	}
 	return nil
+}
+
+func shouldInvalidatePricingCache(key string) bool {
+	switch key {
+	case "ModelPrice", "ModelRatio", "CacheRatio", "CreateCacheRatio", "CompletionRatio",
+		"CompletionRatioOverrideEnabled", "ImageRatio", "AudioRatio", "AudioCompletionRatio",
+		"GroupRatio", "GroupGroupRatio", "UserUsableGroups":
+		return true
+	default:
+		return false
+	}
 }
 
 // UpdateOptionsBulk persists multiple key/value pairs in a single database
@@ -411,6 +423,8 @@ func updateOptionMap(key string, value string) (err error) {
 			setting.DefaultUseAutoGroup = boolValue
 		case "ExposeRatioEnabled":
 			ratio_setting.SetExposeRatioEnabled(boolValue)
+		case "CompletionRatioOverrideEnabled":
+			ratio_setting.SetCompletionRatioOverrideEnabled(boolValue)
 		}
 	}
 	switch key {
@@ -621,6 +635,9 @@ func updateOptionMap(key string, value string) (err error) {
 		// WaffoPayMethods is read directly from OptionMap via setting.GetWaffoPayMethods().
 		// The value is already stored in OptionMap at the top of this function (line: common.OptionMap[key] = value).
 		// No additional in-memory variable to update.
+	}
+	if err == nil && shouldInvalidatePricingCache(key) {
+		InvalidatePricingCache()
 	}
 	return err
 }

@@ -17,9 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { PublicLayout } from '@/components/layout'
 import { PageTransition } from '@/components/page-transition'
+import { getPerfMetricsSummary } from '@/features/performance-metrics/api'
+import type { PerfModelSummary } from '@/features/performance-metrics/types'
 import {
   LoadingSkeleton,
   EmptyState,
@@ -94,6 +97,25 @@ export function Pricing() {
         : null,
     [models, selectedModelName]
   )
+
+  const perfQuery = useQuery({
+    queryKey: ['perf-metrics-summary', 24],
+    queryFn: () => getPerfMetricsSummary(24),
+    staleTime: 60 * 1000,
+    retry: false,
+  })
+
+  const perfMap = useMemo(() => {
+    const map = new Map<string, PerfModelSummary>()
+    for (const model of perfQuery.data?.data?.models ?? []) {
+      map.set(model.model_name, model)
+    }
+    return map
+  }, [perfQuery.data])
+
+  const selectedPerfSummary = selectedModelName
+    ? perfMap.get(selectedModelName)
+    : undefined
 
   const availableGroups = useMemo(
     () =>
@@ -266,6 +288,7 @@ export function Pricing() {
                 if (!open) setSelectedModelName(null)
               }}
               model={selectedModel}
+              perfSummary={selectedPerfSummary}
               groupRatio={groupRatio || {}}
               usableGroup={usableGroup || {}}
               endpointMap={

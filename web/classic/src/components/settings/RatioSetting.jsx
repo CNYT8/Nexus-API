@@ -46,6 +46,7 @@ const RatioSetting = () => {
     AutoGroups: '',
     DefaultUseAutoGroup: false,
     ExposeRatioEnabled: false,
+    CompletionRatioOverrideEnabled: true,
     UserUsableGroups: '',
     'group_ratio_setting.group_special_usable_group': '',
   });
@@ -65,7 +66,13 @@ const RatioSetting = () => {
             // 如果后端返回的不是合法 JSON，直接展示
           }
         }
-        if (['DefaultUseAutoGroup', 'ExposeRatioEnabled'].includes(item.key)) {
+        if (
+          [
+            'DefaultUseAutoGroup',
+            'ExposeRatioEnabled',
+            'CompletionRatioOverrideEnabled',
+          ].includes(item.key)
+        ) {
           newInputs[item.key] = toBoolean(item.value);
         } else {
           newInputs[item.key] = item.value;

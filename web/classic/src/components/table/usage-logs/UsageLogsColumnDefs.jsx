@@ -37,6 +37,7 @@ import {
 } from '../../../helpers';
 import { IconHelpCircle } from '@douyinfe/semi-icons';
 import { CircleAlert, Route, Sparkles } from 'lucide-react';
+import { getModelGroupIcon } from '../../common/ModelGroupIcon';
 
 const colors = [
   'amber',
@@ -273,6 +274,16 @@ function renderBillingTag(record, t) {
     );
   }
   return null;
+}
+
+function renderUsageLogGroup(group) {
+  const groupIcon = getModelGroupIcon(group);
+  return (
+    <span className='inline-flex items-center gap-1'>
+      {groupIcon && <span className='inline-flex shrink-0'>{groupIcon}</span>}
+      {renderGroup(group)}
+    </span>
+  );
 }
 
 function renderModelName(record, copyText, t, isAdminUser) {
@@ -665,7 +676,7 @@ export const getLogsColumns = ({
           record.type === 6
         ) {
           if (record.group) {
-            return <>{renderGroup(record.group)}</>;
+            return <>{renderUsageLogGroup(record.group)}</>;
           } else {
             let other = null;
             try {
@@ -680,7 +691,7 @@ export const getLogsColumns = ({
               return <></>;
             }
             if (other.group !== undefined) {
-              return <>{renderGroup(other.group)}</>;
+              return <>{renderUsageLogGroup(other.group)}</>;
             } else {
               return <></>;
             }
@@ -902,18 +913,21 @@ export const getLogsColumns = ({
               <Tag
                 color='white'
                 shape='circle'
+                className='!inline-flex !items-center !justify-start'
+                style={{ width: 180, textAlign: 'left' }}
                 onClick={(event) => {
                   copyText(event, text);
                 }}
               >
                 <span
                   style={{
-                    display: 'inline-block',
-                    maxWidth: 180,
+                    display: 'block',
+                    width: '100%',
+                    minWidth: 0,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
-                    verticalAlign: 'bottom',
+                    textAlign: 'left',
                   }}
                 >
                   {text}
@@ -923,6 +937,7 @@ export const getLogsColumns = ({
           </Tooltip>
         );
       },
+      width: 200,
     },
     {
       key: COLUMN_KEYS.RETRY,

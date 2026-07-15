@@ -22,31 +22,53 @@ import { Avatar, Empty, Spin, Table, Tag, Typography } from '@douyinfe/semi-ui';
 import { IconPulse } from '@douyinfe/semi-icons';
 import { VChart } from '@visactor/react-vchart';
 
-import { API } from '../../../../../helpers';
 import { useActualTheme } from '../../../../../context/Theme';
 import { useDashboardChartTheme } from '../../../../../hooks/dashboard/useDashboardChartTheme';
 import { CHART_CONFIG } from '../../../../../constants/dashboard.constants';
+import {
+  getCachedModelPerformanceMetrics,
+  prefetchModelPerformanceMetrics,
+} from '../../../../../helpers/modelPerformanceMetrics';
 
 const { Text } = Typography;
-const PERFORMANCE_WINDOW_HOURS = 24;
 
 function getFiniteNumber(value, fallback = 0) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : fallback;
 }
 
-function average(values) {
-  const filtered = values.filter((value) => Number.isFinite(value) && value > 0);
-  if (filtered.length === 0) return 0;
-  return filtered.reduce((sum, value) => sum + value, 0) / filtered.length;
+function getWeightedMetric(source, weightedKey, fallbackKey) {
+  const weightedValue = Number(source?.[weightedKey]);
+  if (Number.isFinite(weightedValue)) return weightedValue;
+  return getFiniteNumber(source?.[fallbackKey]);
 }
 
-function averageSuccessRate(values) {
-  const filtered = values.filter((value) => Number.isFinite(value));
-  if (filtered.length === 0) return 0;
-  const value =
-    filtered.reduce((sum, current) => sum + current, 0) / filtered.length;
-  return Math.min(100, Math.max(0, value));
+function getMetricWeight(source) {
+  const weightedCount = getFiniteNumber(source?.weighted_request_count);
+  if (weightedCount > 0) return weightedCount;
+  const requestCount = getFiniteNumber(source?.request_count);
+  return requestCount > 0 ? requestCount : 1;
+}
+
+function getPointTtft(point) {
+  const adjusted = getFiniteNumber(point?.adjusted_avg_ttft_ms);
+  if (adjusted > 0) return adjusted;
+  return getFiniteNumber(point?.avg_ttft_ms);
+}
+
+function weightedAverage(items, valueSelector, predicate = Number.isFinite) {
+  let weightedSum = 0;
+  let weightSum = 0;
+
+  items.forEach((item) => {
+    const value = valueSelector(item);
+    const weight = getMetricWeight(item);
+    if (!predicate(value) || !Number.isFinite(weight) || weight <= 0) return;
+    weightedSum += value * weight;
+    weightSum += weight;
+  });
+
+  return weightSum > 0 ? weightedSum / weightSum : 0;
 }
 
 function formatLatency(ms) {
@@ -87,11 +109,30 @@ function normalizeGroups(groups) {
 
   return groups.map((group) => ({
     group: group.group || 'default',
-    avg_tps: getFiniteNumber(group.avg_tps),
-    avg_ttft_ms: getFiniteNumber(group.avg_ttft_ms),
-    avg_latency_ms: getFiniteNumber(group.avg_latency_ms),
-    success_rate: getFiniteNumber(group.success_rate),
-    series: Array.isArray(group.series) ? group.series : [],
+    avg_tps: getWeightedMetric(group, 'weighted_avg_tps', 'avg_tps'),
+    avg_ttft_ms: getWeightedMetric(
+      group,
+      'weighted_avg_ttft_ms',
+      'avg_ttft_ms',
+    ),
+    avg_latency_ms: getWeightedMetric(
+      group,
+      'weighted_avg_latency_ms',
+      'avg_latency_ms',
+    ),
+    success_rate: getWeightedMetric(
+      group,
+      'weighted_success_rate',
+      'success_rate',
+    ),
+    request_count: getFiniteNumber(group.request_count),
+    weighted_request_count: getFiniteNumber(group.weighted_request_count),
+    series: Array.isArray(group.series)
+      ? group.series.map((point) => ({
+          ...point,
+          request_count: getFiniteNumber(point?.request_count),
+        }))
+      : [],
   }));
 }
 
@@ -101,22 +142,22 @@ function buildLatencySeries(groups) {
   groups.forEach((group) => {
     group.series.forEach((point) => {
       const timestamp = Number(point.ts);
-      const ttft = getFiniteNumber(point.avg_ttft_ms);
+      const ttft = getPointTtft(point);
       if (!Number.isFinite(timestamp) || ttft <= 0) return;
 
-      const values = byTimestamp.get(timestamp) || [];
-      values.push(ttft);
-      byTimestamp.set(timestamp, values);
+      const weight = getMetricWeight(point);
+      const current = byTimestamp.get(timestamp) || { sum: 0, weight: 0 };
+      current.sum += ttft * weight;
+      current.weight += weight;
+      byTimestamp.set(timestamp, current);
     });
   });
 
   return Array.from(byTimestamp.entries())
     .sort(([left], [right]) => left - right)
-    .map(([timestamp, values]) => ({
+    .map(([timestamp, value]) => ({
       time: formatTimeLabel(timestamp),
-      value: Math.round(
-        values.reduce((sum, current) => sum + current, 0) / values.length,
-      ),
+      value: value.weight > 0 ? Math.round(value.sum / value.weight) : 0,
     }));
 }
 
@@ -201,7 +242,9 @@ const ModelPerformanceInfo = ({ modelData, t }) => {
   const modelName = modelData?.model_name || modelData?.modelName || '';
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [groups, setGroups] = useState([]);
+  const [groups, setGroups] = useState(
+    () => normalizeGroups(getCachedModelPerformanceMetrics(modelName)),
+  );
 
   useEffect(() => {
     let isCurrent = true;
@@ -212,26 +255,23 @@ const ModelPerformanceInfo = ({ modelData, t }) => {
         return;
       }
 
+      const cachedGroups = getCachedModelPerformanceMetrics(modelName);
+      if (cachedGroups) {
+        setGroups(normalizeGroups(cachedGroups));
+        setLoading(false);
+        setFailed(false);
+        return;
+      }
+
       setLoading(true);
       setFailed(false);
 
       try {
-        const res = await API.get('/api/perf-metrics', {
-          params: {
-            model: modelName,
-            hours: PERFORMANCE_WINDOW_HOURS,
-          },
-          skipErrorHandler: true,
-        });
+        const nextGroups = await prefetchModelPerformanceMetrics(modelName);
 
         if (!isCurrent) return;
 
-        if (res.data?.success) {
-          setGroups(normalizeGroups(res.data?.data?.groups));
-        } else {
-          setGroups([]);
-          setFailed(true);
-        }
+        setGroups(normalizeGroups(nextGroups));
       } catch (error) {
         if (!isCurrent) return;
         console.error(error);
@@ -252,10 +292,26 @@ const ModelPerformanceInfo = ({ modelData, t }) => {
   }, [modelName]);
 
   const stats = useMemo(() => {
-    const avgTps = average(groups.map((group) => group.avg_tps));
-    const avgTtft = average(groups.map((group) => group.avg_ttft_ms));
-    const successRate = averageSuccessRate(
-      groups.map((group) => group.success_rate),
+    const avgTps = weightedAverage(
+      groups,
+      (group) => group.avg_tps,
+      (value) => value > 0,
+    );
+    const avgTtft = weightedAverage(
+      groups,
+      (group) => group.avg_ttft_ms,
+      (value) => value > 0,
+    );
+    const successRate = Math.min(
+      100,
+      Math.max(
+        0,
+        weightedAverage(
+          groups,
+          (group) => group.success_rate,
+          Number.isFinite,
+        ),
+      ),
     );
 
     return {

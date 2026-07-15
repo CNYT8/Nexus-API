@@ -165,7 +165,7 @@ const ModelRow = ({ model, t }) => {
         borderLeftWidth: status === 'unknown' ? 1 : 3,
       }}
     >
-      <div className='min-w-0'>
+      <div className='min-w-0 md:flex-1'>
         <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
           <Text className='block min-w-0 max-w-full truncate'>
             {model.model_name}
@@ -174,7 +174,8 @@ const ModelRow = ({ model, t }) => {
             color='grey'
             size='small'
             shape='circle'
-            className='max-w-[8rem] truncate'
+            className='max-w-full whitespace-normal break-words [&_.semi-tag-content]:whitespace-normal [&_.semi-tag-content]:break-words'
+            style={{ height: 'auto' }}
           >
             {group}
           </Tag>
@@ -334,7 +335,7 @@ const ModelMonitor = () => {
         <Text strong>{t('模型监控')}</Text>
         <div>
           <Text type='secondary' size='small'>
-            {t('近7天全局模型体验评分，依靠 Dawn 智能调度算法给出多维度综合评分。')}
+            {t('近7天全局模型体验评分，依靠智能调度算法给出多维度综合评分。')}
           </Text>
         </div>
       </div>

@@ -26,6 +26,7 @@ import MobileMenuButton from './MobileMenuButton';
 import HeaderLogo from './HeaderLogo';
 import Navigation from './Navigation';
 import ActionButtons from './ActionButtons';
+import { useLogoAccent } from '../../../hooks/common/useLogoAccent';
 
 const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
   const {
@@ -63,9 +64,17 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
   } = useNotifications(statusState);
 
   const { mainNavLinks } = useNavigation(t, docsLink, headerNavModules);
+  const logoAccent = useLogoAccent(logo);
 
   return (
-    <header className='classic-header text-semi-color-text-0 sticky top-0 z-50 transition-colors duration-300 bg-white/75 dark:bg-zinc-900/75 backdrop-blur-lg'>
+    <header
+      className='classic-header text-semi-color-text-0 sticky top-0 z-50 isolate overflow-hidden border-b border-white/30 bg-white/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.46),0_14px_34px_-30px_rgba(15,23,42,0.78)] backdrop-blur-xl backdrop-saturate-150 transition-colors duration-300 before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-white/50 after:pointer-events-none after:absolute after:inset-x-3 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-black/10 after:to-transparent dark:border-white/10 dark:bg-zinc-950/50 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_14px_34px_-30px_rgba(0,0,0,0.95)] dark:before:bg-white/10 dark:after:via-white/10'
+      style={
+        logoAccent.active
+          ? { '--classic-header-logo-accent': logoAccent.rgb }
+          : undefined
+      }
+    >
       <NoticeModal
         visible={noticeVisible}
         onClose={handleNoticeClose}
@@ -74,7 +83,18 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
         unreadKeys={getUnreadKeys()}
       />
 
-      <div className='w-full px-2'>
+      {logoAccent.active && (
+        <div
+          aria-hidden='true'
+          className='pointer-events-none absolute inset-0 z-0 opacity-75'
+          style={{
+            background:
+              'radial-gradient(24rem 8rem at 2.5rem -2rem, rgba(var(--classic-header-logo-accent), 0.22), transparent 72%), radial-gradient(18rem 6rem at 42% -2.5rem, rgba(var(--classic-header-logo-accent), 0.08), transparent 74%)',
+          }}
+        />
+      )}
+
+      <div className='relative z-10 w-full px-2'>
         <div className='flex items-center justify-between h-16'>
           <div className='flex items-center'>
             <MobileMenuButton

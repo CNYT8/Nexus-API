@@ -23,6 +23,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { cn } from '@/lib/utils'
 import { useNotifications } from '@/hooks/use-notifications'
 import { useSystemConfig } from '@/hooks/use-system-config'
+import { useLogoAccent } from '@/hooks/use-logo-accent'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
 import { Button } from '@/components/ui/button'
 import {
@@ -102,6 +103,7 @@ export function PublicHeader(props: PublicHeaderProps) {
   const isAuthenticated = !!user
   const displaySiteName = customSiteName || systemName
   const links = dynamicLinks.length > 0 ? dynamicLinks : navLinks
+  const logoAccent = useLogoAccent(customLogo ? undefined : systemLogo)
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20)
@@ -189,16 +191,31 @@ export function PublicHeader(props: PublicHeaderProps) {
         >
           <nav
             className={cn(
-              'flex items-center justify-between transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
+              'relative isolate overflow-hidden flex items-center justify-between transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
               scrolled
-                ? 'bg-background/60 ring-border/50 h-12 rounded-2xl pr-1.5 pl-4 shadow-[0_2px_16px_-6px_rgba(0,0,0,0.08),0_0_0_0.5px_rgba(0,0,0,0.02)] ring-[0.5px] backdrop-blur-2xl dark:shadow-[0_2px_16px_-6px_rgba(0,0,0,0.4)]'
+                ? 'bg-background/60 supports-[backdrop-filter]:bg-background/50 ring-border/50 h-12 rounded-2xl pr-1.5 pl-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.42),0_14px_34px_-28px_rgba(15,23,42,0.78),0_0_0_0.5px_rgba(255,255,255,0.18)] ring-[0.5px] backdrop-blur-2xl backdrop-saturate-150 before:pointer-events-none before:absolute before:inset-x-3 before:top-0 before:h-px before:bg-white/50 after:pointer-events-none after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-foreground/10 after:to-transparent dark:bg-background/50 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_14px_34px_-28px_rgba(0,0,0,0.96),0_0_0_0.5px_rgba(255,255,255,0.08)] dark:before:bg-white/10'
                 : 'h-16 px-2'
             )}
+            style={
+              logoAccent.active
+                ? ({ '--header-logo-accent': logoAccent.rgb } as React.CSSProperties)
+                : undefined
+            }
           >
+            {logoAccent.active && (
+              <div
+                aria-hidden='true'
+                className='pointer-events-none absolute inset-0 z-0 opacity-75'
+                style={{
+                  background:
+                    'radial-gradient(22rem 8rem at 2rem -2rem, rgba(var(--header-logo-accent), 0.22), transparent 72%), radial-gradient(16rem 6rem at 45% -2.5rem, rgba(var(--header-logo-accent), 0.08), transparent 74%)',
+                }}
+              />
+            )}
             {/* Logo */}
             <Link
               to={homeUrl}
-              className='group flex shrink-0 items-center gap-2.5'
+              className='group relative z-10 flex shrink-0 items-center gap-2.5'
             >
               <div className='flex size-7 shrink-0 items-center justify-center transition-all duration-300 group-hover:scale-105'>
                 {loading ? (
@@ -220,7 +237,7 @@ export function PublicHeader(props: PublicHeaderProps) {
             </Link>
 
             {/* Desktop nav */}
-            <div className='hidden items-center gap-0.5 sm:flex'>
+            <div className='relative z-10 hidden items-center gap-0.5 sm:flex'>
               {links.map((link, i) => {
                 const isActive = pathname === link.href
                 if (link.external) {
@@ -303,7 +320,7 @@ export function PublicHeader(props: PublicHeaderProps) {
             </div>
 
             {/* Mobile: compact actions + hamburger */}
-            <div className='flex items-center gap-2 sm:hidden'>
+            <div className='relative z-10 flex items-center gap-2 sm:hidden'>
               {showThemeSwitch && <ThemeSwitch />}
               {showAuthButtons && !loading && isAuthenticated && (
                 <ProfileDropdown />

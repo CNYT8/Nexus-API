@@ -53,6 +53,7 @@ type ModelFormValues = {
   AudioRatio: string
   AudioCompletionRatio: string
   ExposeRatioEnabled: boolean
+  CompletionRatioOverrideEnabled: boolean
   BillingMode: string
   BillingExpr: string
 }
@@ -205,6 +206,31 @@ export const ModelRatioForm = memo(function ModelRatioForm({
                     <FormDescription>
                       {t(
                         'Allow clients to query configured ratios via `/api/ratio`.'
+                      )}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='CompletionRatioOverrideEnabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>
+                      {t('Allow overriding fixed completion ratio')}
+                    </FormLabel>
+                    <FormDescription>
+                      {t(
+                        'When enabled, custom completion ratios override backend fixed ratios for billing.'
                       )}
                     </FormDescription>
                   </SettingsSwitchContent>
@@ -380,6 +406,31 @@ export const ModelRatioForm = memo(function ModelRatioForm({
                     <FormDescription>
                       {t(
                         'Allow clients to query configured ratios via `/api/ratio`.'
+                      )}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='CompletionRatioOverrideEnabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>
+                      {t('Allow overriding fixed completion ratio')}
+                    </FormLabel>
+                    <FormDescription>
+                      {t(
+                        'When enabled, custom completion ratios override backend fixed ratios for billing.'
                       )}
                     </FormDescription>
                   </SettingsSwitchContent>

@@ -23,6 +23,7 @@ import { API, copy, showError, showInfo, showSuccess } from '../../helpers';
 import { Modal } from '@douyinfe/semi-ui';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
+import { prefetchModelPerformanceMetrics } from '../../helpers/modelPerformanceMetrics';
 
 export const useModelPricingData = () => {
   const { t } = useTranslation();
@@ -307,6 +308,10 @@ export const useModelPricingData = () => {
   };
 
   const openModelDetail = (model) => {
+    const modelName = model?.model_name || model?.modelName || '';
+    if (modelName) {
+      prefetchModelPerformanceMetrics(modelName).catch(() => {});
+    }
     setSelectedModel(model);
     setShowModelDetail(true);
   };

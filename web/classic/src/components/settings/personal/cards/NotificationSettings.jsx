@@ -823,7 +823,7 @@ const NotificationSettings = ({
                   extraText={
                     recordIpLogForced
                       ? t(
-                          '管理员已关闭用户自行调节开启记录请求与错误日志IP开关',
+                          '管理员已关闭用户自行调节此开关',
                         )
                       : t(
                           '开启后，仅"消费"和"错误"日志将记录您的客户端IP地址',

@@ -112,6 +112,7 @@ const modelSchema = z.object({
     }
   }),
   ExposeRatioEnabled: z.boolean(),
+  CompletionRatioOverrideEnabled: z.boolean(),
   BillingMode: z.string().superRefine((value, ctx) => {
     const result = validateJsonString(value)
     if (!result.valid) {
@@ -258,6 +259,8 @@ export function RatioSettingsCard({
       modelDefaults.AudioCompletionRatio
     ),
     ExposeRatioEnabled: modelDefaults.ExposeRatioEnabled,
+    CompletionRatioOverrideEnabled:
+      modelDefaults.CompletionRatioOverrideEnabled,
     BillingMode: normalizeJsonString(modelDefaults.BillingMode),
     BillingExpr: normalizeJsonString(modelDefaults.BillingExpr),
   })
@@ -323,6 +326,8 @@ export function RatioSettingsCard({
         modelDefaults.AudioCompletionRatio
       ),
       ExposeRatioEnabled: modelDefaults.ExposeRatioEnabled,
+      CompletionRatioOverrideEnabled:
+        modelDefaults.CompletionRatioOverrideEnabled,
       BillingMode: normalizeJsonString(modelDefaults.BillingMode),
       BillingExpr: normalizeJsonString(modelDefaults.BillingExpr),
     }
@@ -382,6 +387,8 @@ export function RatioSettingsCard({
         AudioRatio: normalizeJsonString(values.AudioRatio),
         AudioCompletionRatio: normalizeJsonString(values.AudioCompletionRatio),
         ExposeRatioEnabled: values.ExposeRatioEnabled,
+        CompletionRatioOverrideEnabled:
+          values.CompletionRatioOverrideEnabled,
         BillingMode: normalizeJsonString(values.BillingMode),
         BillingExpr: normalizeJsonString(values.BillingExpr),
       }

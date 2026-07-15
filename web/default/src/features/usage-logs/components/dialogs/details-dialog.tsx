@@ -33,6 +33,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
+import { getModelGroupIcon } from '@/lib/model-group-icon'
 import { cn } from '@/lib/utils'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { Button } from '@/components/ui/button'
@@ -420,6 +421,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const showTiming = isTimingLogType(props.log.type)
   const showAdminIp =
     !!props.log.ip && (showTiming || (props.isAdmin && isTopup))
+  const detailGroup = props.log.group || other?.group || ''
+  const detailGroupIcon = getModelGroupIcon(detailGroup, 12)
   const adminInfo = other?.admin_info
   const upstreamModel =
     adminInfo?.upstream_model_name ||
@@ -569,10 +572,17 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 />
               )}
 
-              {(props.log.group || other?.group) && (
+              {detailGroup && (
                 <DetailRow
                   label={t('Group')}
-                  value={props.log.group || other?.group || ''}
+                  value={
+                    <span className='flex min-w-0 items-center gap-1'>
+                      {detailGroupIcon && (
+                        <span className='shrink-0'>{detailGroupIcon}</span>
+                      )}
+                      <span className='break-all'>{detailGroup}</span>
+                    </span>
+                  }
                   mono
                 />
               )}

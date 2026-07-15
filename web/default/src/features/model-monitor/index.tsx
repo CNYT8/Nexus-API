@@ -149,14 +149,14 @@ function ModelScoreCard(props: { model: ModelMonitorModel }) {
   return (
     <div className={cn('rounded-lg border p-3', cardClassName[status])}>
       <div className='flex items-start justify-between gap-3'>
-        <div className='min-w-0'>
+        <div className='min-w-0 flex-1'>
           <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
             <span className='min-w-0 max-w-full truncate font-mono text-sm font-semibold'>
               {props.model.model_name}
             </span>
             <Badge
               variant='outline'
-              className='h-5 max-w-32 truncate px-1.5 text-[10px]'
+              className='h-auto min-h-5 max-w-full justify-start overflow-visible whitespace-normal break-words px-1.5 py-0.5 text-left text-[10px] leading-4'
             >
               {group}
             </Badge>
@@ -255,7 +255,7 @@ export function ModelMonitor() {
                   {t('Model Monitor')}
                 </CardTitle>
                 <CardDescription>
-                  {t('近7天全局模型体验评分，依靠 Dawn 智能调度算法给出多维度综合评分。')}
+                  {t('近7天全局模型体验评分，依靠智能调度算法给出多维度综合评分。')}
                 </CardDescription>
               </CardHeader>
               <CardContent className='flex flex-wrap gap-2 pt-0'>

@@ -108,6 +108,14 @@ import {
 } from 'react-icons/si';
 import { FaLinkedin, FaSlack } from 'react-icons/fa';
 
+const lobeIconAliases = {
+  MiMo: 'XiaomiMiMo',
+  'MiMo.Color': 'XiaomiMiMo',
+};
+
+const normalizeLobeIconName = (iconName) =>
+  lobeIconAliases[iconName] || iconName;
+
 // 获取侧边栏Lucide图标组件
 export function getLucideIcon(key, selected = false) {
   const size = 16;
@@ -437,8 +445,10 @@ export function getLobeHubIcon(iconName, size = 14) {
     return <Avatar size='extra-extra-small'>?</Avatar>;
   }
 
+  const normalizedIconName = normalizeLobeIconName(iconName);
+
   // 解析组件路径与点号链式属性
-  const segments = String(iconName).split('.');
+  const segments = String(normalizedIconName).split('.');
   const baseKey = segments[0];
   const BaseIcon = LobeIcons[baseKey];
 
@@ -787,7 +797,8 @@ export function renderText(text, limit) {
  * @param {string} group - The input group string
  * @returns {JSX.Element} - The rendered group tags
  */
-export function renderGroup(group) {
+export function renderGroup(group, options = {}) {
+  const { getPrefixIcon } = options;
   if (group === '') {
     return (
         <Tag key='default' color='white' shape='circle'>
@@ -807,7 +818,9 @@ export function renderGroup(group) {
 
   return (
       <span key={group}>
-      {groups.map((group) => (
+      {groups.map((group) => {
+        const prefixIcon = getPrefixIcon?.(group);
+        return (
           <Tag
               color={tagColors[group] || stringToColor(group)}
               key={group}
@@ -824,9 +837,24 @@ export function renderGroup(group) {
                 }
               }}
           >
-            {group}
+            <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  maxWidth: '100%',
+                }}
+            >
+              {prefixIcon && (
+                  <span style={{ display: 'inline-flex', flexShrink: 0 }}>
+                    {prefixIcon}
+                  </span>
+              )}
+              <span>{group}</span>
+            </span>
           </Tag>
-      ))}
+        );
+      })}
     </span>
   );
 }
@@ -848,22 +876,6 @@ export function formatRatioDisplay(value, digits = 6) {
 
 export const isMembershipDiscountApplied = (membershipDiscount) =>
   membershipDiscount?.applied === true || membershipDiscount?.Applied === true;
-
-export function renderMembershipDiscountBadge(options = {}) {
-  const { size = 'small', shape = 'circle' } = options;
-  const iconSize = size === 'small' ? 12 : 14;
-
-  return (
-      <Tag
-          color='amber'
-          size={size}
-          shape={shape}
-          title={i18next.t('会员')}
-      >
-        <Crown size={iconSize} strokeWidth={2.4} />
-      </Tag>
-  );
-}
 
 export function renderRatio(ratio, options = {}) {
   const {
@@ -891,20 +903,29 @@ export function renderRatio(ratio, options = {}) {
   }
   const ratioTag = (
       <Tag color={color} {...tagProps}>
-        {formatRatioDisplay(ratio)}x{compact ? '' : ` ${i18next.t('倍率')}`}
+        <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: membershipApplied ? 4 : 0,
+              maxWidth: '100%',
+            }}
+        >
+          {membershipApplied && showMembershipBadge && (
+              <Crown
+                  size={size === 'small' ? 12 : 14}
+                  strokeWidth={2.4}
+                  aria-label={i18next.t('会员')}
+              />
+          )}
+          <span>
+            {formatRatioDisplay(ratio)}x{compact ? '' : ` ${i18next.t('倍率')}`}
+          </span>
+        </span>
       </Tag>
   );
 
-  if (!membershipApplied || !showMembershipBadge) {
-    return ratioTag;
-  }
-
-  return (
-      <span className='inline-flex items-center gap-1 align-middle'>
-        {ratioTag}
-        {renderMembershipDiscountBadge({ size, shape })}
-      </span>
-  );
+  return ratioTag;
 }
 
 const measureTextWidth = (

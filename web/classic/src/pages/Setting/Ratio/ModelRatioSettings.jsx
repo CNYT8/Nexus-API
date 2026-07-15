@@ -49,6 +49,7 @@ export default function ModelRatioSettings(props) {
     AudioRatio: '',
     AudioCompletionRatio: '',
     ExposeRatioEnabled: false,
+    CompletionRatioOverrideEnabled: true,
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -326,6 +327,23 @@ export default function ModelRatioSettings(props) {
               field={'ExposeRatioEnabled'}
               onChange={(value) =>
                 setInputs({ ...inputs, ExposeRatioEnabled: value })
+              }
+            />
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col span={16}>
+            <Form.Switch
+              label={t('允许覆盖后端固定补全倍率')}
+              extraText={t(
+                '开启后，自定义补全倍率会覆盖后端固定倍率并参与实际计费',
+              )}
+              field={'CompletionRatioOverrideEnabled'}
+              onChange={(value) =>
+                setInputs({
+                  ...inputs,
+                  CompletionRatioOverrideEnabled: value,
+                })
               }
             />
           </Col>

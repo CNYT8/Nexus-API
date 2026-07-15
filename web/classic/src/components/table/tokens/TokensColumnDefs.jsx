@@ -113,11 +113,9 @@ const renderGroupColumn = (
     );
   }
   const ratio = groupRatios[text];
-  const groupIcon = getModelGroupIcon(text);
   return (
     <span className='flex items-center gap-1'>
-      {groupIcon && <span className='inline-flex shrink-0'>{groupIcon}</span>}
-      {renderGroup(text)}
+      {renderGroup(text, { getPrefixIcon: getModelGroupIcon })}
       {ratio !== undefined &&
         renderRatio(ratio, {
           membershipDiscount: groupMembershipDiscounts[text],

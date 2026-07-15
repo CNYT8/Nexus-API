@@ -24,6 +24,9 @@ export type ModelPerfBadgeData = {
   avg_latency_ms: number
   success_rate: number
   avg_tps: number
+  weighted_avg_latency_ms?: number
+  weighted_success_rate?: number
+  weighted_avg_tps?: number
 }
 
 export interface ModelPerfBadgeProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -47,6 +50,22 @@ function formatCompactThroughput(tps: number): string {
   return `${formatCompactNumber(tps)}tps`
 }
 
+function pickWeightedValue(
+  source: ModelPerfBadgeData,
+  weightedKey: keyof Pick<
+    ModelPerfBadgeData,
+    'weighted_avg_latency_ms' | 'weighted_success_rate' | 'weighted_avg_tps'
+  >,
+  fallbackKey: keyof Pick<
+    ModelPerfBadgeData,
+    'avg_latency_ms' | 'success_rate' | 'avg_tps'
+  >
+): number {
+  const weightedValue = Number(source[weightedKey])
+  if (Number.isFinite(weightedValue)) return weightedValue
+  return Number(source[fallbackKey])
+}
+
 export const ModelPerfBadge = memo(function ModelPerfBadge(
   props: ModelPerfBadgeProps
 ) {
@@ -56,7 +75,21 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
     return null
   }
 
-  const { avg_latency_ms, avg_tps, success_rate } = props.perf
+  const avg_latency_ms = pickWeightedValue(
+    props.perf,
+    'weighted_avg_latency_ms',
+    'avg_latency_ms'
+  )
+  const avg_tps = pickWeightedValue(
+    props.perf,
+    'weighted_avg_tps',
+    'avg_tps'
+  )
+  const success_rate = pickWeightedValue(
+    props.perf,
+    'weighted_success_rate',
+    'success_rate'
+  )
 
   let statusColor = 'bg-emerald-500'
   if (success_rate < 99) {

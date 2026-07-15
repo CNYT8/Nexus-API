@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
@@ -29,6 +30,8 @@ import { buildApiParams } from '../lib/utils'
 import { useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
+const LOG_STATS_DEFER_MS = 350
+const LOG_STATS_STALE_MS = 30 * 1000
 
 function StatBadge(props: {
   label: string
@@ -51,9 +54,21 @@ export function CommonLogsStats() {
   const isAdmin = useIsAdmin()
   const searchParams = route.useSearch()
   const { sensitiveVisible } = useUsageLogsContext()
+  const [statsEnabled, setStatsEnabled] = useState(false)
+  const searchParamsKey = JSON.stringify(searchParams)
+
+  useEffect(() => {
+    setStatsEnabled(false)
+    const timer = window.setTimeout(
+      () => setStatsEnabled(true),
+      LOG_STATS_DEFER_MS
+    )
+    return () => window.clearTimeout(timer)
+  }, [isAdmin, searchParamsKey])
 
   const { data: stats, isLoading } = useQuery({
     queryKey: ['usage-logs-stats', isAdmin, searchParams],
+    enabled: statsEnabled,
     queryFn: async () => {
       const params = buildApiParams({
         page: 1,
@@ -71,10 +86,13 @@ export function CommonLogsStats() {
         ? result.data || DEFAULT_LOG_STATS
         : DEFAULT_LOG_STATS
     },
+    staleTime: LOG_STATS_STALE_MS,
+    gcTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,
   })
 
-  if (isLoading) {
+  if (!stats || isLoading) {
     return (
       <div className='flex items-center gap-2'>
         <Skeleton className='h-7 w-[150px] rounded-md' />

@@ -27,6 +27,15 @@ For commercial licensing, please contact support@quantumnous.com
  */
 import * as LobeIcons from '@lobehub/icons'
 
+const lobeIconAliases: Record<string, string> = {
+  MiMo: 'XiaomiMiMo',
+  'MiMo.Color': 'XiaomiMiMo',
+}
+
+function normalizeLobeIconName(iconName: string): string {
+  return lobeIconAliases[iconName] || iconName
+}
+
 /**
  * Parse a property value from string to appropriate type
  * @param raw - Raw string value
@@ -99,8 +108,10 @@ export function getLobeIcon(
     )
   }
 
+  const normalizedName = normalizeLobeIconName(trimmedName)
+
   // Parse component path and chained properties
-  const segments = trimmedName.split('.')
+  const segments = normalizedName.split('.')
   const baseKey = segments[0]
   const BaseIcon = (LobeIcons as Record<string, unknown>)[baseKey] as
     | Record<string, unknown>
