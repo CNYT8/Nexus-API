@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -18,19 +19,40 @@ func TestModelMonitorWeight(t *testing.T) {
 	if hotEdge < 1.49 || hotEdge > 1.51 {
 		t.Fatalf("hot edge weight = %v, want about 1.5", hotEdge)
 	}
+	afterHotEdge := modelMonitorWeight(now-modelMonitorHotSeconds-1, now)
+	if math.Abs(hotEdge-afterHotEdge) > 0.001 {
+		t.Fatalf("hot edge is discontinuous: at=%v after=%v", hotEdge, afterHotEdge)
+	}
 
 	if got := modelMonitorWeight(now-modelMonitorWindowSeconds, now); got != 0.2 {
 		t.Fatalf("window edge weight = %v, want 0.2", got)
+	}
+	beforeWindowEdge := modelMonitorWeight(now-modelMonitorWindowSeconds+1, now)
+	if math.Abs(beforeWindowEdge-modelMonitorWindowEdgeWeight) > 0.001 {
+		t.Fatalf("window edge is discontinuous: before=%v at=%v", beforeWindowEdge, modelMonitorWindowEdgeWeight)
+	}
+
+	for _, age := range []int64{0, 1, modelMonitorHotSeconds, modelMonitorHotSeconds + 1, modelMonitorWindowSeconds - 1, modelMonitorWindowSeconds} {
+		args := appendModelMonitorWeightSQLArgs(nil, now)
+		args = append(args, now-age)
+		var row struct {
+			Weight float64
+		}
+		err := DB.Raw(
+			"SELECT "+modelMonitorWeightSQL()+" AS weight FROM (SELECT ? AS created_at) AS monitor_sample",
+			args...,
+		).Scan(&row).Error
+		require.NoError(t, err)
+		require.InDelta(t, modelMonitorWeight(now-age, now), row.Weight, 0.000001)
 	}
 }
 
 func TestScoreModelMonitorBucket(t *testing.T) {
 	healthy := modelMonitorBucket{
-		weightedRequests:         10,
+		sampleCount:              10,
 		weightedSuccess:          10,
 		weightedPromptTokens:     6000,
 		weightedCompletionTokens: 4000,
-		weightedTokens:           10000,
 		weightedUseTime:          20,
 	}
 	if score := scoreModelMonitorBucket(healthy); score < 85 {
@@ -38,11 +60,10 @@ func TestScoreModelMonitorBucket(t *testing.T) {
 	}
 
 	longInputHealthy := modelMonitorBucket{
-		weightedRequests:         10,
+		sampleCount:              10,
 		weightedSuccess:          10,
 		weightedPromptTokens:     240000,
 		weightedCompletionTokens: 4000,
-		weightedTokens:           244000,
 		weightedUseTime:          120,
 		weightedSlowRequests:     1,
 	}
@@ -51,21 +72,20 @@ func TestScoreModelMonitorBucket(t *testing.T) {
 	}
 
 	poor := modelMonitorBucket{
-		weightedRequests:     10,
-		weightedErrors:       10,
-		weightedUseTime:      200,
-		weightedSlowRequests: 10,
+		rawErrorLogCount: 10,
+		sampleCount:      10,
+		errorSampleCount: 10,
+		weightedErrors:   10,
 	}
 	if score := scoreModelMonitorBucket(poor); score >= 45 {
 		t.Fatalf("poor score = %d, want < 45", score)
 	}
 
 	lowSample := modelMonitorBucket{
-		weightedRequests:         1,
+		sampleCount:              1,
 		weightedSuccess:          1,
 		weightedPromptTokens:     600,
 		weightedCompletionTokens: 400,
-		weightedTokens:           1000,
 		weightedUseTime:          1,
 	}
 	if score := scoreModelMonitorBucket(lowSample); score > 68 {
@@ -73,10 +93,9 @@ func TestScoreModelMonitorBucket(t *testing.T) {
 	}
 
 	emptyOutput := modelMonitorBucket{
-		weightedRequests:     8,
+		sampleCount:          8,
 		weightedSuccess:      8,
 		weightedPromptTokens: 8000,
-		weightedTokens:       8000,
 		weightedUseTime:      16,
 		weightedEmptyOutputs: 8,
 	}
@@ -85,16 +104,103 @@ func TestScoreModelMonitorBucket(t *testing.T) {
 	}
 
 	thinOutput := modelMonitorBucket{
-		weightedRequests:         10,
+		sampleCount:              10,
 		weightedSuccess:          10,
 		weightedPromptTokens:     10000,
 		weightedCompletionTokens: 80,
-		weightedTokens:           10080,
 		weightedUseTime:          60,
 		weightedSlowRequests:     3,
 	}
 	if score := scoreModelMonitorBucket(thinOutput); score >= 75 {
 		t.Fatalf("thin output score = %d, want < 75", score)
+	}
+
+	longOutputHealthy := modelMonitorBucket{
+		sampleCount:              10,
+		weightedSuccess:          10,
+		weightedPromptTokens:     5000,
+		weightedCompletionTokens: 10000,
+		weightedUseTime:          500,
+	}
+	if score := scoreModelMonitorBucket(longOutputHealthy); score < 85 {
+		t.Fatalf("long output healthy score = %d, want >= 85", score)
+	}
+
+	partialFailure := modelMonitorBucket{
+		rawErrorLogCount:         1,
+		sampleCount:              2,
+		errorSampleCount:         1,
+		weightedSuccess:          1,
+		weightedErrors:           1,
+		weightedPromptTokens:     600,
+		weightedCompletionTokens: 400,
+		weightedUseTime:          1,
+	}
+	if score := scoreModelMonitorBucket(partialFailure); score > 58 {
+		t.Fatalf("half-failing score = %d, want <= 58", score)
+	}
+}
+
+func TestModelMonitorSubsecondAndOutputLatencyAdjustments(t *testing.T) {
+	if score := modelMonitorLatencyScore(0, 0); score != 100 {
+		t.Fatalf("sub-second latency score = %v, want 100", score)
+	}
+	if score := modelMonitorThroughputScore(100, 0, true); score != 100 {
+		t.Fatalf("sub-second throughput score = %v, want 100", score)
+	}
+
+	adjusted := modelMonitorOutputAdjustedUseTime(50, 1000)
+	if adjusted >= 50 || adjusted < 7.5 {
+		t.Fatalf("long-output adjusted use time = %v, want in [7.5, 50)", adjusted)
+	}
+	if got := modelMonitorOutputAdjustedUseTime(12, 0); got != 12 {
+		t.Fatalf("zero-output adjusted use time = %v, want 12", got)
+	}
+}
+
+func TestScoreModelMonitorBucketDoesNotTreatWeightAsSampleCount(t *testing.T) {
+	bucket := modelMonitorBucket{
+		sampleCount:              1,
+		weightedSuccess:          modelMonitorFreshWeight,
+		weightedPromptTokens:     600 * modelMonitorFreshWeight,
+		weightedCompletionTokens: 400 * modelMonitorFreshWeight,
+		weightedUseTime:          modelMonitorFreshWeight,
+	}
+	if score := scoreModelMonitorBucket(bucket); score > 68 {
+		t.Fatalf("one fresh sample score = %d, want <= 68", score)
+	}
+}
+
+func TestScoreModelMonitorBucketIgnoresUniformWeightDecay(t *testing.T) {
+	recent := modelMonitorBucket{
+		sampleCount:              10,
+		weightedSuccess:          10,
+		weightedPromptTokens:     6000,
+		weightedCompletionTokens: 4000,
+		weightedUseTime:          20,
+	}
+	older := recent
+	older.weightedSuccess *= 0.35
+	older.weightedPromptTokens *= 0.35
+	older.weightedCompletionTokens *= 0.35
+	older.weightedUseTime *= 0.35
+
+	recentScore := scoreModelMonitorBucket(recent)
+	olderScore := scoreModelMonitorBucket(older)
+	if olderScore != recentScore {
+		t.Fatalf("uniform time decay changed score: recent=%d older=%d", recentScore, olderScore)
+	}
+}
+
+func TestModelMonitorEffectiveErrorWeightDiscountsRetryFanOut(t *testing.T) {
+	bucket := modelMonitorBucket{
+		rawErrorLogCount: 3,
+		sampleCount:      1,
+		errorSampleCount: 1,
+		weightedErrors:   6,
+	}
+	if got := modelMonitorEffectiveErrorWeight(bucket); math.Abs(got-2) > 0.001 {
+		t.Fatalf("effective retry error weight = %v, want 2", got)
 	}
 }
 
@@ -251,6 +357,75 @@ func TestGetModelMonitorSummarySeparatesSameModelByGroup(t *testing.T) {
 	require.Equal(t, "svip", svipModel.Group)
 	require.False(t, svipModel.HasData)
 	require.Greater(t, defaultModel.Score, vipModel.Score)
+}
+
+func TestGetModelMonitorSummaryDeduplicatesRetryErrorSamples(t *testing.T) {
+	InvalidateModelMonitorCache()
+	t.Cleanup(InvalidateModelMonitorCache)
+	InvalidatePricingCache()
+	t.Cleanup(InvalidatePricingCache)
+	resetModelMonitorTables(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&Channel{
+		Id:     997,
+		Type:   1,
+		Status: common.ChannelStatusEnabled,
+	}).Error)
+	modelNames := []string{"gpt-retry-error-sample-test", "gpt-independent-error-sample-test"}
+	for _, modelName := range modelNames {
+		require.NoError(t, DB.Create(&Ability{
+			Group:     "default",
+			Model:     modelName,
+			ChannelId: 997,
+			Enabled:   true,
+		}).Error)
+	}
+
+	for _, modelName := range modelNames {
+		for i := 0; i < 10; i++ {
+			require.NoError(t, LOG_DB.Create(&Log{
+				CreatedAt:        now - int64(i+1),
+				Type:             LogTypeConsume,
+				ModelName:        modelName,
+				Group:            "default",
+				PromptTokens:     600,
+				CompletionTokens: 400,
+				UseTime:          2,
+			}).Error)
+		}
+	}
+	for i, requestID := range []string{"same-retry-request", "same-retry-request", "same-retry-request"} {
+		require.NoError(t, LOG_DB.Create(&Log{
+			CreatedAt: now - int64(i+1),
+			Type:      LogTypeError,
+			ModelName: "gpt-retry-error-sample-test",
+			Group:     "default",
+			UseTime:   8,
+			RequestId: requestID,
+		}).Error)
+	}
+	for i, requestID := range []string{"independent-error-1", "independent-error-2", "independent-error-3"} {
+		require.NoError(t, LOG_DB.Create(&Log{
+			CreatedAt: now - int64(i+1),
+			Type:      LogTypeError,
+			ModelName: "gpt-independent-error-sample-test",
+			Group:     "default",
+			UseTime:   8,
+			RequestId: requestID,
+		}).Error)
+	}
+
+	summary, err := GetModelMonitorSummary()
+	require.NoError(t, err)
+	require.Len(t, summary.Vendors, 1)
+	models := make(map[string]ModelMonitorModel)
+	for _, item := range summary.Vendors[0].Models {
+		models[item.ModelName] = item
+	}
+	retryErrors := models["gpt-retry-error-sample-test"]
+	independentErrors := models["gpt-independent-error-sample-test"]
+	require.Greater(t, retryErrors.Score, independentErrors.Score)
 }
 
 func TestGetModelMonitorSummaryIncludesUnknownEnabledModels(t *testing.T) {

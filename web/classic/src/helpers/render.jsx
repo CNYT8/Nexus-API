@@ -1916,7 +1916,7 @@ export function renderModelPrice(opts) {
       }),
       cacheTokens > 0
           ? buildBillingPriceText(
-              '缓存读取价格：{{symbol}}{{total}} / 1M tokens',
+              '缓存命中价格：{{symbol}}{{total}} / 1M tokens',
               {
                 symbol,
                 usdAmount: inputRatioPrice * cacheRatio,
@@ -2220,7 +2220,7 @@ export function renderLogContent(opts) {
     appendPricePart(
         parts,
         cacheRatio !== 1.0,
-        '缓存读取价格 {{symbol}}{{price}} / 1M tokens',
+        '缓存命中价格 {{symbol}}{{price}} / 1M tokens',
         {
           symbol,
           price: (modelRatio * 2.0 * cacheRatio * rate).toFixed(6),
@@ -2618,7 +2618,7 @@ export function renderAudioModelPrice(opts) {
       }),
       cacheTokens > 0
           ? buildBillingPriceText(
-              '缓存读取价格：{{symbol}}{{price}} / 1M tokens',
+              '缓存命中价格：{{symbol}}{{price}} / 1M tokens',
               {
                 symbol,
                 usdAmount: inputRatioPrice * cacheRatio,
@@ -2631,7 +2631,7 @@ export function renderAudioModelPrice(opts) {
         usdAmount: inputRatioPrice * audioRatio,
         rate,
       }),
-      buildBillingPriceText('音频补全价格：{{symbol}}{{price}} / 1M tokens', {
+      buildBillingPriceText('音频输出价格：{{symbol}}{{price}} / 1M tokens', {
         symbol,
         usdAmount: inputRatioPrice * audioRatio * audioCompletionRatio,
         rate,
@@ -2990,7 +2990,7 @@ export function renderClaudeModelPrice(opts) {
       }),
       cacheTokens > 0
           ? buildBillingPriceText(
-              '缓存读取价格：{{symbol}}{{price}} / 1M tokens',
+              '缓存命中价格：{{symbol}}{{price}} / 1M tokens',
               {
                 symbol,
                 usdAmount: cacheRatioPrice,
@@ -3000,7 +3000,7 @@ export function renderClaudeModelPrice(opts) {
           : null,
       !hasSplitCacheCreation && cacheCreationTokens > 0
           ? buildBillingPriceText(
-              '缓存创建价格：{{symbol}}{{price}} / 1M tokens',
+              '缓存写入价格：{{symbol}}{{price}} / 1M tokens',
               {
                 symbol,
                 usdAmount: cacheCreationRatioPrice,
@@ -3010,7 +3010,7 @@ export function renderClaudeModelPrice(opts) {
           : null,
       hasSplitCacheCreation && cacheCreationTokens5m > 0
           ? buildBillingPriceText(
-              '5m缓存创建价格：{{symbol}}{{price}} / 1M tokens',
+              '5m缓存写入价格：{{symbol}}{{price}} / 1M tokens',
               {
                 symbol,
                 usdAmount: cacheCreationRatioPrice5m,
@@ -3020,7 +3020,7 @@ export function renderClaudeModelPrice(opts) {
           : null,
       hasSplitCacheCreation && cacheCreationTokens1h > 0
           ? buildBillingPriceText(
-              '1h缓存创建价格：{{symbol}}{{price}} / 1M tokens',
+              '1h缓存写入价格：{{symbol}}{{price}} / 1M tokens',
               {
                 symbol,
                 usdAmount: cacheCreationRatioPrice1h,
@@ -3267,7 +3267,7 @@ export function renderClaudeLogContent(opts) {
         symbol,
         price: (modelRatio * 2.0 * completionRatio * rate).toFixed(6),
       }),
-      i18next.t('缓存读取价格 {{symbol}}{{price}} / 1M tokens', {
+      i18next.t('缓存命中价格 {{symbol}}{{price}} / 1M tokens', {
         symbol,
         price: (modelRatio * 2.0 * cacheRatio * rate).toFixed(6),
       }),
@@ -3277,7 +3277,7 @@ export function renderClaudeLogContent(opts) {
     appendPricePart(
         parts,
         hasSplitCacheCreation && cacheCreationTokens5m > 0,
-        '5m缓存创建价格 {{symbol}}{{price}} / 1M tokens',
+        '5m缓存写入价格 {{symbol}}{{price}} / 1M tokens',
         {
           symbol,
           price: (modelRatio * 2.0 * cacheCreationRatio5m * rate).toFixed(6),
@@ -3286,7 +3286,7 @@ export function renderClaudeLogContent(opts) {
     appendPricePart(
         parts,
         hasSplitCacheCreation && cacheCreationTokens1h > 0,
-        '1h缓存创建价格 {{symbol}}{{price}} / 1M tokens',
+        '1h缓存写入价格 {{symbol}}{{price}} / 1M tokens',
         {
           symbol,
           price: (modelRatio * 2.0 * cacheCreationRatio1h * rate).toFixed(6),
@@ -3295,7 +3295,7 @@ export function renderClaudeLogContent(opts) {
     appendPricePart(
         parts,
         !hasSplitCacheCreation,
-        '缓存创建价格 {{symbol}}{{price}} / 1M tokens',
+        '缓存写入价格 {{symbol}}{{price}} / 1M tokens',
         {
           symbol,
           price: (modelRatio * 2.0 * cacheCreationRatio * rate).toFixed(6),

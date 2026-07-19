@@ -114,8 +114,9 @@ func RefreshCodexChannelCredential(ctx context.Context, channelID int, opts Code
 			ch.ChannelInfo.MultiKeyMode = constant.MultiKeyModeRandom
 		}
 	}
+	encodedKey := strings.Join(encodedLines, "\n")
 	updates := map[string]interface{}{
-		"key": strings.Join(encodedLines, "\n"),
+		"key": encodedKey,
 	}
 	if ch.ChannelInfo.IsMultiKey {
 		updates["channel_info"] = ch.ChannelInfo
@@ -123,6 +124,7 @@ func RefreshCodexChannelCredential(ctx context.Context, channelID int, opts Code
 	if err := model.DB.Model(&model.Channel{}).Where("id = ?", ch.Id).Updates(updates).Error; err != nil {
 		return nil, nil, err
 	}
+	ch.Key = encodedKey
 
 	if opts.ResetCaches {
 		model.InitChannelCache()

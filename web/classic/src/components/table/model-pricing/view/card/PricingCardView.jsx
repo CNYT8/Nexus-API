@@ -266,10 +266,10 @@ const PricingCardView = ({
                   <div className='flex items-start space-x-3 flex-1 min-w-0'>
                     {getModelIcon(model)}
                     <div className='flex-1 min-w-0'>
-                      <h3 className='text-lg font-bold text-gray-900 truncate'>
+                      <h3 className='text-xl font-bold text-gray-900 truncate'>
                         {model.model_name}
                       </h3>
-                      <div className='flex flex-col gap-1 text-xs mt-1'>
+                      <div className='flex flex-col gap-1 text-sm mt-1'>
                         {priceData.isDynamicPricing ? (
                           formatDynamicPriceSummary(priceData.billingExpr, t, priceData.usedGroupRatio)
                         ) : (
@@ -347,7 +347,7 @@ const PricingCardView = ({
                           {model.quota_type === 0 ? model.model_ratio : t('无')}
                         </div>
                         <div>
-                          {t('补全')}:{' '}
+                          {t('输出')}:{' '}
                           {model.quota_type === 0
                             ? parseFloat(model.completion_ratio.toFixed(3))
                             : t('无')}

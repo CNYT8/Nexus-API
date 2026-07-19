@@ -431,7 +431,7 @@ const DEPRECATED_DOUBAO_CODING_PLAN_BASE_URL = 'doubao-coding-plan';
 
 // 支持并且已适配通过接口获取模型列表的渠道类型
 const MODEL_FETCHABLE_TYPES = new Set([
-  1, 4, 14, 34, 17, 26, 27, 24, 47, 25, 20, 23, 31, 40, 42, 48, 43,
+  1, 4, 14, 34, 17, 26, 27, 24, 47, 25, 20, 23, 31, 40, 42, 48, 43, 57, 58,
 ]);
 
 function type2secretPrompt(type) {
@@ -510,6 +510,8 @@ const EditChannelModal = (props) => {
     allow_inference_geo: false,
     allow_speed: false,
     claude_beta_query: false,
+    // 高级自定义渠道路由配置（存入 settings.advanced_custom）
+    advanced_custom: '',
     upstream_model_update_check_enabled: false,
     upstream_model_update_auto_sync_enabled: false,
     upstream_model_update_last_check_time: 0,
@@ -1228,6 +1230,9 @@ const EditChannelModal = (props) => {
           )
             ? parsedSettings.upstream_model_update_ignored_models.join(',')
             : '';
+          data.advanced_custom = parsedSettings.advanced_custom
+            ? JSON.stringify(parsedSettings.advanced_custom, null, 2)
+            : '';
         } catch (error) {
           console.error('解析其他设置失败:', error);
           data.azure_responses_version = '';
@@ -1247,6 +1252,7 @@ const EditChannelModal = (props) => {
           data.upstream_model_update_last_check_time = 0;
           data.upstream_model_update_last_detected_models = [];
           data.upstream_model_update_ignored_models = '';
+          data.advanced_custom = '';
         }
       } else {
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
@@ -1265,6 +1271,7 @@ const EditChannelModal = (props) => {
         data.upstream_model_update_last_check_time = 0;
         data.upstream_model_update_last_detected_models = [];
         data.upstream_model_update_ignored_models = '';
+        data.advanced_custom = '';
       }
 
       if (
@@ -1328,6 +1335,7 @@ const EditChannelModal = (props) => {
         (data.param_override && data.param_override.trim()) ||
         (data.status_code_mapping && data.status_code_mapping.trim()) ||
         (data.header_override && data.header_override.trim()) ||
+        (data.advanced_custom && data.advanced_custom.trim()) ||
         (data.tag && data.tag.trim()) ||
         (data.remark && data.remark.trim()) ||
         (data.priority && data.priority !== 0) ||
@@ -1358,7 +1366,7 @@ const EditChannelModal = (props) => {
     const models = [];
     let err = false;
 
-    if (isEdit) {
+    if (isEdit && inputs.type !== 58) {
       // 如果是编辑模式，使用已有的 channelId 获取模型列表
       const res = await API.get('/api/channel/fetch_models/' + channelId, {
         skipErrorHandler: true,
@@ -1369,8 +1377,9 @@ const EditChannelModal = (props) => {
         err = true;
       }
     } else {
-      // 如果是新建模式，通过后端代理获取模型列表
-      if (!inputs?.['key']) {
+      // 新建或高级自定义编辑均通过预览接口获取模型列表。
+      const needsKey = !isEdit && !inputs?.['key'];
+      if (needsKey) {
         showError(t('请填写密钥'));
         err = true;
       } else {
@@ -1380,7 +1389,13 @@ const EditChannelModal = (props) => {
             {
               base_url: inputs['base_url'],
               type: inputs['type'],
-              key: inputs['key'],
+              key: isEdit ? undefined : inputs['key'],
+              channel_id: isEdit ? channelId : undefined,
+              advanced_custom:
+                inputs.type === 58 ? inputs.advanced_custom : undefined,
+              header_override:
+                inputs.type === 58 ? inputs.header_override : undefined,
+              proxy: inputs.type === 58 ? inputs.proxy : undefined,
             },
             { skipErrorHandler: true },
           );
@@ -2054,6 +2069,29 @@ const EditChannelModal = (props) => {
       localInputs.other = 'v2.1';
     }
 
+    let advancedCustomConfig = null;
+    if (localInputs.type === 58) {
+      if (!localInputs.advanced_custom?.trim()) {
+        showInfo(t('请配置高级自定义路由！'));
+        return;
+      }
+      try {
+        advancedCustomConfig = JSON.parse(localInputs.advanced_custom);
+        if (
+          !advancedCustomConfig ||
+          typeof advancedCustomConfig !== 'object' ||
+          Array.isArray(advancedCustomConfig) ||
+          !Array.isArray(advancedCustomConfig.advanced_routes) ||
+          advancedCustomConfig.advanced_routes.length === 0
+        ) {
+          throw new Error('invalid advanced custom routes');
+        }
+      } catch (error) {
+        showInfo(t('高级自定义路由必须是包含 advanced_routes 的合法 JSON！'));
+        return;
+      }
+    }
+
     // 生成渠道额外设置JSON
     const channelExtraSettings = {
       force_format: localInputs.force_format || false,
@@ -2137,6 +2175,11 @@ const EditChannelModal = (props) => {
     if (typeof settings.upstream_model_update_last_check_time !== 'number') {
       settings.upstream_model_update_last_check_time = 0;
     }
+    if (localInputs.type === 58) {
+      settings.advanced_custom = advancedCustomConfig;
+    } else if ('advanced_custom' in settings) {
+      delete settings.advanced_custom;
+    }
 
     localInputs.settings = JSON.stringify(settings);
 
@@ -2165,6 +2208,7 @@ const EditChannelModal = (props) => {
     delete localInputs.upstream_model_update_last_check_time;
     delete localInputs.upstream_model_update_last_detected_models;
     delete localInputs.upstream_model_update_ignored_models;
+    delete localInputs.advanced_custom;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -2535,6 +2579,28 @@ const EditChannelModal = (props) => {
           {() => {
             const advancedSettingsContent = (
               <div className='space-y-4'>
+                {inputs.type === 58 && (
+                  <div className='pb-3 border-b border-gray-100'>
+                    <Text className='text-sm font-medium text-gray-500 mb-3 block'>
+                      {t('高级自定义路由')}
+                    </Text>
+                    <Form.TextArea
+                      field='advanced_custom'
+                      label={t('路由配置 JSON')}
+                      placeholder={t(
+                        '请输入包含 advanced_routes 的 JSON，例如：{"advanced_routes":[{"incoming_path":"/v1/models","upstream_path":"/v1/models","converter":"none"}]}',
+                      )}
+                      autosize
+                      onChange={(value) =>
+                        handleInputChange('advanced_custom', value)
+                      }
+                      extraText={t(
+                        '高级自定义渠道支持按路径转发；启用上游模型检测时必须配置 /v1/models 路由。',
+                      )}
+                    />
+                  </div>
+                )}
+
                 {/* Upstream Model Management Section */}
                 {MODEL_FETCHABLE_CHANNEL_TYPES.has(inputs.type) && (
                 <div className='pb-3 border-b border-gray-100'>

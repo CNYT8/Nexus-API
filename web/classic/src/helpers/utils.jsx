@@ -850,19 +850,19 @@ export const getModelPriceItems = (
       },
       {
         key: 'completion',
-        label: t('补全价格'),
+        label: t('输出价格'),
         value: priceData.completionPrice,
         suffix: unitSuffix,
       },
       {
         key: 'cache',
-        label: t('缓存读取价格'),
+        label: t('缓存命中价格'),
         value: priceData.cachePrice,
         suffix: unitSuffix,
       },
       {
         key: 'create-cache',
-        label: t('缓存创建价格'),
+        label: t('缓存写入价格'),
         value: priceData.createCachePrice,
         suffix: unitSuffix,
       },
@@ -880,7 +880,7 @@ export const getModelPriceItems = (
       },
       {
         key: 'audio-output',
-        label: t('音频补全价格'),
+        label: t('音频输出价格'),
         value: priceData.audioOutputPrice,
         suffix: unitSuffix,
       },

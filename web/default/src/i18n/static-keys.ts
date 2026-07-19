@@ -511,6 +511,11 @@ export const STATIC_I18N_KEYS = [
   'Batch detection failed',
   'Batch detection complete: {{channels}} channels, {{add}} to add, {{remove}} to remove, {{fails}} failed',
 
+  // Advanced Custom model discovery validation
+  'OpenAI Models route must use native forwarding',
+  'OpenAI Models upstream path must not contain {model}',
+  'OpenAI Models route is required to enable upstream model checks',
+
   // Misc
   'Cancel',
   'Status',

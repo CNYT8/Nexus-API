@@ -377,14 +377,14 @@ function PriceInput({ unitCost, field, index, onUpdate, placeholder }) {
 // ---------------------------------------------------------------------------
 
 const CACHE_FIELDS_TIMED = [
-  { field: 'cache_read_unit_cost', labelKey: '缓存读取价格' },
-  { field: 'cache_create_unit_cost', labelKey: '缓存创建价格（5分钟）' },
-  { field: 'cache_create_1h_unit_cost', labelKey: '缓存创建价格（1小时）' },
+  { field: 'cache_read_unit_cost', labelKey: '缓存命中价格' },
+  { field: 'cache_create_unit_cost', labelKey: '缓存写入价格（5分钟）' },
+  { field: 'cache_create_1h_unit_cost', labelKey: '缓存写入价格（1小时）' },
 ];
 
 const CACHE_FIELDS_GENERIC = [
-  { field: 'cache_read_unit_cost', labelKey: '缓存读取价格' },
-  { field: 'cache_create_unit_cost', labelKey: '缓存创建价格' },
+  { field: 'cache_read_unit_cost', labelKey: '缓存命中价格' },
+  { field: 'cache_create_unit_cost', labelKey: '缓存写入价格' },
 ];
 
 function ExtendedPriceBlock({ tier, index, onUpdate, t }) {

@@ -3,10 +3,13 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -103,18 +106,18 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 	return channelQuery, nil
 }
 
-func GetChannel(group string, model string, retry int) (*Channel, error) {
+func GetChannel(group string, model string, retry int, requestPath string) (*Channel, error) {
 	var abilities []Ability
 
-	var err error = nil
-	channelQuery, err := getChannelQuery(group, model, retry)
-	if err != nil {
-		return nil, err
-	}
-	if common.UsingSQLite || common.UsingPostgreSQL {
+	var err error
+	if requestPath == "" {
+		channelQuery, queryErr := getChannelQuery(group, model, retry)
+		if queryErr != nil {
+			return nil, queryErr
+		}
 		err = channelQuery.Order("weight DESC").Find(&abilities).Error
 	} else {
-		err = channelQuery.Order("weight DESC").Find(&abilities).Error
+		abilities, err = getPathAwareAbilities(group, model, retry, requestPath)
 	}
 	if err != nil {
 		return nil, err
@@ -141,6 +144,86 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 	}
 	err = DB.First(&channel, "id = ?", channel.Id).Error
 	return &channel, err
+}
+
+type pathAwareAbilityCandidate struct {
+	Ability
+	MatchedChannelID *int   `gorm:"column:matched_channel_id"`
+	ChannelType      int    `gorm:"column:channel_type"`
+	ChannelSettings  string `gorm:"column:channel_settings"`
+}
+
+func getPathAwareAbilities(group string, model string, retry int, requestPath string) ([]Ability, error) {
+	var candidates []pathAwareAbilityCandidate
+	err := DB.Table("abilities").
+		Select("abilities.*, channels.id AS matched_channel_id, channels.type AS channel_type, channels.settings AS channel_settings").
+		Joins("LEFT JOIN channels ON channels.id = abilities.channel_id").
+		Where("abilities."+commonGroupCol+" = ? AND abilities.model = ? AND abilities.enabled = ?", group, model, true).
+		Scan(&candidates).Error
+	if err != nil {
+		return nil, err
+	}
+
+	abilities := make([]Ability, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.MatchedChannelID == nil {
+			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", candidate.ChannelId)
+		}
+		if candidate.ChannelType != constant.ChannelTypeAdvancedCustom {
+			abilities = append(abilities, candidate.Ability)
+			continue
+		}
+
+		settings := dto.ChannelOtherSettings{}
+		if candidate.ChannelSettings == "" || common.UnmarshalJsonStr(candidate.ChannelSettings, &settings) != nil {
+			continue
+		}
+		if settings.AdvancedCustom != nil && settings.AdvancedCustom.SupportsPath(requestPath) {
+			abilities = append(abilities, candidate.Ability)
+		}
+	}
+
+	return abilitiesAtRetryPriority(abilities, retry), nil
+}
+
+func abilitiesAtRetryPriority(abilities []Ability, retry int) []Ability {
+	if len(abilities) == 0 {
+		return nil
+	}
+
+	prioritySet := make(map[int64]struct{}, len(abilities))
+	priorities := make([]int64, 0, len(abilities))
+	for _, ability := range abilities {
+		priority := abilityPriority(ability)
+		if _, exists := prioritySet[priority]; exists {
+			continue
+		}
+		prioritySet[priority] = struct{}{}
+		priorities = append(priorities, priority)
+	}
+	sort.Slice(priorities, func(i int, j int) bool { return priorities[i] > priorities[j] })
+	if retry < 0 {
+		retry = 0
+	}
+	if retry >= len(priorities) {
+		retry = len(priorities) - 1
+	}
+	targetPriority := priorities[retry]
+
+	selected := make([]Ability, 0, len(abilities))
+	for _, ability := range abilities {
+		if abilityPriority(ability) == targetPriority {
+			selected = append(selected, ability)
+		}
+	}
+	return selected
+}
+
+func abilityPriority(ability Ability) int64 {
+	if ability.Priority == nil {
+		return 0
+	}
+	return *ability.Priority
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {

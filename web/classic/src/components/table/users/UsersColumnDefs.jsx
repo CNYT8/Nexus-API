@@ -147,6 +147,7 @@ const renderQuotaUsage = (text, record, t) => {
   const remain = parseInt(record.quota) || 0;
   const total = used + remain;
   const percent = total > 0 ? (remain / total) * 100 : 0;
+  const quotaSummary = `${renderQuota(remain)} / ${renderQuota(total)}`;
   const popoverContent = (
     <div className='text-xs p-2'>
       <Paragraph copyable={{ content: renderQuota(used) }}>
@@ -162,9 +163,11 @@ const renderQuotaUsage = (text, record, t) => {
   );
   return (
     <Popover content={popoverContent} position='top'>
-      <Tag color='white' shape='circle'>
-        <div className='flex flex-col items-end'>
-          <span className='text-xs leading-none'>{`${renderQuota(remain)} / ${renderQuota(total)}`}</span>
+      <Tag color='white' shape='circle' style={{ maxWidth: '100%' }}>
+        <div className='flex min-w-[180px] max-w-[240px] flex-col items-stretch overflow-hidden'>
+          <span className='block truncate text-right text-xs leading-none'>
+            {quotaSummary}
+          </span>
           <Progress
             percent={percent}
             aria-label='quota usage'

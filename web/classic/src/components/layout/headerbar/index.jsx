@@ -68,7 +68,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
 
   return (
     <header
-      className='classic-header text-semi-color-text-0 sticky top-0 z-50 isolate overflow-hidden border-b border-transparent bg-white/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.58),inset_0_-1px_0_rgba(255,255,255,0.16),0_18px_42px_-32px_rgba(15,23,42,0.78)] backdrop-blur-2xl backdrop-brightness-105 backdrop-contrast-125 backdrop-saturate-200 transition-colors duration-300 before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-white/60 after:pointer-events-none after:absolute after:inset-x-3 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-white/30 after:to-transparent dark:bg-zinc-950/50 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(255,255,255,0.06),0_18px_42px_-32px_rgba(0,0,0,0.98)] dark:before:bg-white/15 dark:after:via-white/15'
+      className='classic-header text-semi-color-text-0 sticky top-0 z-50 isolate border-0 transition-colors duration-300'
       style={
         logoAccent.active
           ? { '--classic-header-logo-accent': logoAccent.rgb }
@@ -85,21 +85,13 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
 
       <div
         aria-hidden='true'
-        className='pointer-events-none absolute inset-0 z-0 opacity-95'
-        style={{
-          background:
-            'linear-gradient(115deg, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.12) 28%, rgba(255,255,255,0.03) 52%, rgba(255,255,255,0.18) 100%), radial-gradient(30rem 10rem at 12% -5rem, rgba(255,255,255,0.34), transparent 72%), radial-gradient(18rem 7rem at 88% -3rem, rgba(255,255,255,0.16), transparent 70%)',
-        }}
+        className='classic-header-liquid-overlay pointer-events-none absolute inset-0 z-0'
       />
 
       {logoAccent.active && (
         <div
           aria-hidden='true'
-          className='pointer-events-none absolute inset-0 z-0 opacity-90'
-          style={{
-            background:
-              'radial-gradient(26rem 9rem at 2.5rem -2rem, rgba(var(--classic-header-logo-accent), 0.28), transparent 72%), radial-gradient(20rem 7rem at 42% -2.5rem, rgba(var(--classic-header-logo-accent), 0.12), transparent 74%)',
-          }}
+          className='classic-header-logo-accent pointer-events-none absolute inset-0 z-0'
         />
       )}
 

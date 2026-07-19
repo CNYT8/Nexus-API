@@ -37,6 +37,130 @@ html.theme-switching *::after {
   transition: none !important;
 }
 
+.classic-header {
+  --classic-header-glass-fallback: rgba(255, 255, 255, 0.94);
+  --classic-header-glass-tint: rgba(255, 255, 255, 0.34);
+  --classic-header-glass-highlight: rgba(255, 255, 255, 0.3);
+  --classic-header-glass-highlight-soft: rgba(255, 255, 255, 0.1);
+  --classic-header-glass-lowlight: rgba(15, 23, 42, 0.025);
+  --classic-header-glass-edge: rgba(255, 255, 255, 0.64);
+  --classic-header-logo-accent-opacity: 0.66;
+  background-color: var(--classic-header-glass-fallback);
+  border-bottom: 0 !important;
+  box-shadow: inset 0 1px 0 var(--classic-header-glass-edge);
+}
+
+.dark .classic-header {
+  --classic-header-glass-fallback: rgba(9, 9, 11, 0.94);
+  --classic-header-glass-tint: rgba(9, 9, 11, 0.4);
+  --classic-header-glass-highlight: rgba(255, 255, 255, 0.13);
+  --classic-header-glass-highlight-soft: rgba(255, 255, 255, 0.045);
+  --classic-header-glass-lowlight: rgba(0, 0, 0, 0.08);
+  --classic-header-glass-edge: rgba(255, 255, 255, 0.16);
+  --classic-header-logo-accent-opacity: 0.54;
+}
+
+.classic-header-liquid-overlay {
+  overflow: hidden;
+  background:
+    linear-gradient(
+      106deg,
+      var(--classic-header-glass-highlight) 0%,
+      transparent 23%,
+      var(--classic-header-glass-highlight-soft) 48%,
+      transparent 73%,
+      var(--classic-header-glass-highlight-soft) 100%
+    ),
+    linear-gradient(
+      180deg,
+      var(--classic-header-glass-edge) 0%,
+      transparent 18%,
+      transparent 100%
+    );
+  opacity: 0.86;
+}
+
+.classic-header-liquid-overlay::before,
+.classic-header-liquid-overlay::after {
+  position: absolute;
+  content: '';
+  pointer-events: none;
+}
+
+.classic-header-liquid-overlay::before {
+  inset: 0 0 44%;
+  background: linear-gradient(
+    102deg,
+    var(--classic-header-glass-highlight-soft) 0%,
+    transparent 32%,
+    var(--classic-header-glass-highlight-soft) 58%,
+    transparent 88%
+  );
+  opacity: 0.72;
+}
+
+.classic-header-liquid-overlay::after {
+  inset: 0;
+  background: linear-gradient(
+    96deg,
+    transparent 0%,
+    var(--classic-header-glass-lowlight) 18%,
+    transparent 39%,
+    var(--classic-header-glass-highlight-soft) 67%,
+    transparent 100%
+  );
+  box-shadow: inset 0 1px 0 var(--classic-header-glass-edge);
+}
+
+.classic-header-logo-accent {
+  background: linear-gradient(
+    102deg,
+    rgba(var(--classic-header-logo-accent), 0.2) 0%,
+    rgba(var(--classic-header-logo-accent), 0.08) 28%,
+    transparent 62%
+  );
+  opacity: var(--classic-header-logo-accent-opacity);
+}
+
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .classic-header {
+    background-color: var(--classic-header-glass-tint);
+    -webkit-backdrop-filter: blur(8px) saturate(190%) contrast(138%)
+      brightness(104%);
+    backdrop-filter: blur(8px) saturate(190%) contrast(138%) brightness(104%);
+  }
+
+  .classic-header-liquid-overlay::before {
+    -webkit-backdrop-filter: saturate(135%) contrast(116%) brightness(103%);
+    backdrop-filter: saturate(135%) contrast(116%) brightness(103%);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .classic-header {
+    background-color: var(--classic-header-glass-fallback);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .classic-header-liquid-overlay::before {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .classic-header {
+    background-color: Canvas;
+    box-shadow: none;
+  }
+
+  .classic-header-liquid-overlay,
+  .classic-header-logo-accent {
+    display: none;
+  }
+}
+
 /* 暖黄模式沿用 Semi CSS 变量覆盖方式，保持组件原有取色链路 */
 body[theme-mode='warm'] {
   --classic-warm-surface: #fff9ef;
@@ -77,8 +201,14 @@ body[theme-mode='warm'] {
 }
 
 body[theme-mode='warm'] .classic-header {
-  background-color: rgba(255, 253, 248, 0.86) !important;
-  border-bottom: 1px solid rgba(120, 53, 15, 0.08);
+  --classic-header-glass-fallback: rgba(255, 253, 248, 0.94);
+  --classic-header-glass-tint: rgba(255, 249, 239, 0.42);
+  --classic-header-glass-highlight: rgba(255, 255, 255, 0.34);
+  --classic-header-glass-highlight-soft: rgba(255, 248, 230, 0.13);
+  --classic-header-glass-lowlight: rgba(120, 53, 15, 0.035);
+  --classic-header-glass-edge: rgba(255, 255, 255, 0.62);
+  --classic-header-logo-accent-opacity: 0.58;
+  border-bottom-color: transparent;
 }
 
 body[theme-mode='warm'] .semi-layout,

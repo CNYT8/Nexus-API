@@ -126,8 +126,10 @@ import {
 import { useChannelMutateForm } from '../../hooks/use-channel-mutate-form'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
+  CHANNEL_TYPE_ADVANCED_CUSTOM,
   channelFormSchema,
   channelsQueryKeys,
+  getAdvancedCustomStats,
   transformChannelToFormDefaults,
   type ChannelFormValues,
   deduplicateKeys,
@@ -148,6 +150,7 @@ import {
 } from '../../lib/status-code-risk-guard'
 import type { Channel } from '../../types'
 import { useChannels } from '../channels-provider'
+import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
 import { CodexOAuthDialog } from '../dialogs/codex-oauth-dialog'
 import { FetchModelsDialog } from '../dialogs/fetch-models-dialog'
 import {
@@ -196,6 +199,7 @@ const MODEL_MAPPING_PREVIEW_FALLBACK: Array<{
 }> = [{ source: 'client-model', target: 'upstream-model' }]
 
 const ADVANCED_SETTINGS_EXPANDED_KEY = 'channel-advanced-settings-expanded'
+const ADVANCED_CUSTOM_ROUTE_TYPE_PREVIEW_LIMIT = 3
 const UPSTREAM_DETECTED_MODEL_PREVIEW_LIMIT = 8
 
 function readAdvancedSettingsPreference(): boolean {
@@ -207,6 +211,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
   return Boolean(
     values.param_override?.trim() ||
     values.header_override?.trim() ||
+    values.advanced_custom?.trim() ||
     values.status_code_mapping?.trim() ||
     values.tag?.trim() ||
     values.remark?.trim() ||
@@ -301,6 +306,8 @@ export function ChannelMutateDrawer({
   >(null)
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false)
   const [paramOverrideEditorOpen, setParamOverrideEditorOpen] = useState(false)
+  const [advancedCustomEditorOpen, setAdvancedCustomEditorOpen] =
+    useState(false)
 
   const isEditing = Boolean(currentRow)
   const channelId = currentRow?.id ?? null
@@ -377,6 +384,7 @@ export function ChannelMutateDrawer({
     'upstream_model_update_check_enabled'
   )
   const currentSettings = form.watch('settings')
+  const currentAdvancedCustom = form.watch('advanced_custom')
   const {
     unlocked: doubaoApiEditUnlocked,
     handleClick: handleApiConfigSecretClick,
@@ -399,6 +407,25 @@ export function ChannelMutateDrawer({
   const isBatchMode =
     multiKeyMode === 'batch' || multiKeyMode === 'multi_to_single'
   const isChannelDetailLoading = isEditing && isChannelLoading
+  const shouldPreviewUnsavedModels =
+    !isEditing || currentType === CHANNEL_TYPE_ADVANCED_CUSTOM
+
+  const advancedCustomStats = useMemo(
+    () => getAdvancedCustomStats(currentAdvancedCustom),
+    [currentAdvancedCustom]
+  )
+  const advancedCustomRouteTypeLabels =
+    advancedCustomStats.routeTypeLabels.slice(
+      0,
+      ADVANCED_CUSTOM_ROUTE_TYPE_PREVIEW_LIMIT
+    )
+  const hiddenAdvancedCustomRouteTypeCount =
+    advancedCustomStats.routeTypeLabels.length -
+    advancedCustomRouteTypeLabels.length
+  const advancedCustomRouteTypeTitle =
+    hiddenAdvancedCustomRouteTypeCount > 0
+      ? advancedCustomStats.routeTypeLabels.map((label) => t(label)).join(', ')
+      : undefined
 
   // Get all models list
   const allModelsList = useMemo(
@@ -745,8 +772,8 @@ export function ChannelMutateDrawer({
       return
     }
 
-    // For creation mode, validate key before opening dialog
-    if (!isEditing) {
+    // Advanced Custom may use a model discovery route with no authentication.
+    if (!isEditing && type !== CHANNEL_TYPE_ADVANCED_CUSTOM) {
       const key = form.getValues('key')
       if (!key?.trim()) {
         toast.error(t('Please enter API key first'))
@@ -757,17 +784,27 @@ export function ChannelMutateDrawer({
     setFetchModelsDialogOpen(true)
   }, [isEditing, form, t])
 
-  const createModeFetcher = useCallback(async (): Promise<string[]> => {
+  const formPreviewFetcher = useCallback(async (): Promise<string[]> => {
+    const type = form.getValues('type')
+    const editingAdvancedCustom =
+      isEditing && type === CHANNEL_TYPE_ADVANCED_CUSTOM
+    if (editingAdvancedCustom && channelId === null) {
+      throw new Error(t('No channel selected'))
+    }
     const response = await fetchModels({
-      type: form.getValues('type'),
-      key: form.getValues('key'),
+      type,
+      key: isEditing ? undefined : form.getValues('key'),
+      channel_id: editingAdvancedCustom ? channelId || undefined : undefined,
       base_url: form.getValues('base_url') || '',
+      advanced_custom: form.getValues('advanced_custom'),
+      header_override: form.getValues('header_override'),
+      proxy: form.getValues('proxy'),
     })
     if (response.success && response.data) {
       return response.data
     }
-    throw new Error(response.message || 'No models fetched from upstream')
-  }, [form])
+    throw new Error(response.message || t('No models fetched from upstream'))
+  }, [channelId, form, isEditing, t])
 
   // Handle model operations
   const handleFillRelatedModels = useCallback(() => {
@@ -1796,6 +1833,71 @@ export function ChannelMutateDrawer({
                       />
                     )}
 
+                    {currentType === CHANNEL_TYPE_ADVANCED_CUSTOM && (
+                      <FormField
+                        control={form.control}
+                        name='advanced_custom'
+                        render={({ field }) => (
+                          <FormItem className='space-y-3 border-y py-4'>
+                            <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                              <div className='space-y-2'>
+                                <FormLabel>
+                                  {t('Advanced Custom Routes')}
+                                </FormLabel>
+                                <div className='flex flex-wrap gap-2'>
+                                  <Badge variant='secondary'>
+                                    {t('Routes')}: {advancedCustomStats.routeCount}
+                                  </Badge>
+                                  {advancedCustomRouteTypeLabels.map(
+                                    (label) => (
+                                      <Badge
+                                        key={label}
+                                        variant='outline'
+                                        className='max-w-[12rem]'
+                                        title={t(label)}
+                                      >
+                                        <span className='truncate'>
+                                          {t(label)}
+                                        </span>
+                                      </Badge>
+                                    )
+                                  )}
+                                  {hiddenAdvancedCustomRouteTypeCount > 0 && (
+                                    <Badge
+                                      variant='outline'
+                                      title={advancedCustomRouteTypeTitle}
+                                    >
+                                      +{hiddenAdvancedCustomRouteTypeCount}
+                                    </Badge>
+                                  )}
+                                  {!advancedCustomStats.valid && (
+                                    <Badge variant='destructive'>
+                                      {t('Incomplete')}
+                                    </Badge>
+                                  )}
+                                </div>
+                              </div>
+                              <Button
+                                type='button'
+                                variant='outline'
+                                size='sm'
+                                onClick={() =>
+                                  setAdvancedCustomEditorOpen(true)
+                                }
+                              >
+                                <Route className='mr-2 h-4 w-4' />
+                                {t('Configure routes')}
+                              </Button>
+                            </div>
+                            <FormControl>
+                              <input type='hidden' {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
+
                     <ChannelAuthSection>
                       {!isEditing && (
                         <FormField
@@ -2183,6 +2285,7 @@ export function ChannelMutateDrawer({
                                   allowCreate
                                   createLabel='Add custom model "{{value}}"'
                                   maxVisibleChips={8}
+                                  copyChipOnClick
                                 />
                               </FormControl>
                               {modelMappingGuardrail.exposedTargetModels
@@ -3282,6 +3385,7 @@ export function ChannelMutateDrawer({
                                         'Periodically check for upstream model changes'
                                       )}
                                     </FormDescription>
+                                    <FormMessage />
                                   </div>
                                   <FormControl>
                                     <Switch
@@ -3420,6 +3524,20 @@ export function ChannelMutateDrawer({
         />
       )}
 
+      {advancedCustomEditorOpen && (
+        <AdvancedCustomEditorDialog
+          open={advancedCustomEditorOpen}
+          value={form.watch('advanced_custom') || ''}
+          onOpenChange={setAdvancedCustomEditorOpen}
+          onSave={(nextValue) => {
+            form.setValue('advanced_custom', nextValue, {
+              shouldDirty: true,
+              shouldValidate: true,
+            })
+          }}
+        />
+      )}
+
       {/* Fetch Models Dialog */}
       <FetchModelsDialog
         open={fetchModelsDialogOpen}
@@ -3429,10 +3547,14 @@ export function ChannelMutateDrawer({
         }}
         redirectModels={redirectModelList}
         redirectSourceModels={redirectModelKeyList}
-        customFetcher={!isEditing ? createModeFetcher : undefined}
-        channelName={!isEditing ? currentName?.trim() : undefined}
+        customFetcher={
+          shouldPreviewUnsavedModels ? formPreviewFetcher : undefined
+        }
+        channelName={
+          shouldPreviewUnsavedModels ? currentName?.trim() : undefined
+        }
         existingModelsOverride={
-          !isEditing
+          shouldPreviewUnsavedModels
             ? parseModelsString(form.getValues('models') || '')
             : undefined
         }

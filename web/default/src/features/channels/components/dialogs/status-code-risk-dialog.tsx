@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -31,6 +31,12 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+
+const Markdown = lazy(() =>
+  import('@/components/ui/markdown').then((module) => ({
+    default: module.Markdown,
+  }))
+)
 
 interface StatusCodeRiskDialogProps {
   open: boolean
@@ -85,18 +91,35 @@ export function StatusCodeRiskDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='max-w-lg'>
+      <DialogContent className='max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-3xl'>
         <DialogHeader>
           <DialogTitle className='text-destructive flex items-center gap-2'>
             <AlertTriangle className='h-5 w-5' />
             {t('High-risk operation confirmation')}
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className='sr-only'>
             {t('High-risk status code retry risk disclaimer')}
           </DialogDescription>
         </DialogHeader>
 
         <div className='space-y-4'>
+          {open ? (
+            <div className='border-warning/40 bg-warning/5 rounded-lg border p-3 sm:p-4'>
+              <Suspense
+                fallback={
+                  <div
+                    aria-hidden='true'
+                    className='bg-warning/10 h-32 animate-pulse rounded-md'
+                  />
+                }
+              >
+                <Markdown className='[&_h3]:text-warning text-sm [&_h3]:text-base'>
+                  {t('High-risk status code retry risk disclaimer')}
+                </Markdown>
+              </Suspense>
+            </div>
+          ) : null}
+
           {detailItems.length > 0 && (
             <div className='border-destructive/30 bg-destructive/5 rounded-lg border p-3'>
               <p className='mb-2 text-sm font-medium'>

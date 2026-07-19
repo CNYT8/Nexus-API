@@ -396,6 +396,7 @@ function renderDesktop<TData>(
                   row={row}
                   className={props.getRowClassName?.(row, { isMobile: false })}
                   applyCellSize={props.applyHeaderSize}
+                  cellRenderColumns={props.table.options.columns}
                 />
               )
             })
@@ -406,20 +407,31 @@ function renderDesktop<TData>(
   )
 }
 
-function DefaultRow<TData>({
-  row,
-  className,
-  applyCellSize,
-}: {
+type DefaultRowProps<TData> = {
   row: Row<TData>
   className?: string
   applyCellSize?: boolean
-}) {
+  cellRenderColumns: TanstackTable<TData>['options']['columns']
+}
+
+type DefaultRowInnerProps<TData> = DefaultRowProps<TData> & {
+  isSelected: boolean
+  visibleColumnIds: string
+}
+
+function DefaultRowInner<TData>({
+  row,
+  className,
+  applyCellSize,
+  isSelected,
+  cellRenderColumns,
+  visibleColumnIds,
+}: DefaultRowInnerProps<TData>) {
+  void cellRenderColumns
+  void visibleColumnIds
+
   return (
-    <TableRow
-      data-state={row.getIsSelected() && 'selected'}
-      className={className}
-    >
+    <TableRow data-state={isSelected && 'selected'} className={className}>
       {row.getVisibleCells().map((cell) => (
         <TableCell
           key={cell.id}
@@ -429,5 +441,31 @@ function DefaultRow<TData>({
         </TableCell>
       ))}
     </TableRow>
+  )
+}
+
+const MemoizedDefaultRow = React.memo(DefaultRowInner, (prev, next) => {
+  return (
+    prev.row === next.row &&
+    prev.className === next.className &&
+    prev.applyCellSize === next.applyCellSize &&
+    prev.isSelected === next.isSelected &&
+    prev.visibleColumnIds === next.visibleColumnIds &&
+    prev.cellRenderColumns === next.cellRenderColumns
+  )
+}) as typeof DefaultRowInner
+
+function DefaultRow<TData>(props: DefaultRowProps<TData>) {
+  const visibleColumnIds = props.row
+    .getVisibleCells()
+    .map((cell) => cell.column.id)
+    .join('\0')
+
+  return (
+    <MemoizedDefaultRow
+      {...props}
+      isSelected={props.row.getIsSelected()}
+      visibleColumnIds={visibleColumnIds}
+    />
   )
 }

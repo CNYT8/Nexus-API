@@ -15,6 +15,13 @@ const (
 	modelMonitorHotSeconds    = 3 * 24 * 60 * 60
 	modelMonitorCacheSeconds  = 60
 	modelMonitorSlowSeconds   = 30
+	modelMonitorOutputTimeTPS = 10.0
+
+	modelMonitorFreshWeight      = 2.0
+	modelMonitorHotEdgeWeight    = 1.5
+	modelMonitorWindowEdgeWeight = 0.2
+	modelMonitorPriorScore       = 70.0
+	modelMonitorConfidenceScale  = 10.0
 )
 
 type ModelMonitorModel struct {
@@ -61,16 +68,16 @@ var modelMonitorCache = struct {
 var modelMonitorBuildGroup singleflight.Group
 
 type modelMonitorBucket struct {
-	weightedRequests         float64
+	rawErrorLogCount         int64
+	sampleCount              int64
+	errorSampleCount         int64
 	weightedSuccess          float64
 	weightedErrors           float64
 	weightedPromptTokens     float64
 	weightedCompletionTokens float64
-	weightedTokens           float64
 	weightedUseTime          float64
 	weightedEmptyOutputs     float64
 	weightedSlowRequests     float64
-	lastSeen                 int64
 }
 
 type modelMonitorModelKey struct {
@@ -128,14 +135,16 @@ func modelMonitorWeight(createdAt int64, now int64) float64 {
 	}
 	if age <= modelMonitorHotSeconds {
 		// 三天内放大，越近越高。
-		return 2.0 - float64(age)/float64(modelMonitorHotSeconds)*0.5
+		return modelMonitorFreshWeight -
+			float64(age)/float64(modelMonitorHotSeconds)*(modelMonitorFreshWeight-modelMonitorHotEdgeWeight)
 	}
 	if age >= modelMonitorWindowSeconds {
-		return 0.2
+		return modelMonitorWindowEdgeWeight
 	}
 	restAge := age - modelMonitorHotSeconds
 	restWindow := modelMonitorWindowSeconds - modelMonitorHotSeconds
-	return 1.0 - float64(restAge)/float64(restWindow)*0.65
+	return modelMonitorHotEdgeWeight -
+		float64(restAge)/float64(restWindow)*(modelMonitorHotEdgeWeight-modelMonitorWindowEdgeWeight)
 }
 
 func modelMonitorWeightSQL() string {
@@ -149,10 +158,10 @@ func modelMonitorWeightSQL() string {
 
 func modelMonitorWeightSQLArgs(now int64) []any {
 	return []any{
-		now, 2.0,
-		now, modelMonitorHotSeconds, 2.0, now, float64(modelMonitorHotSeconds), 0.5,
-		now, modelMonitorWindowSeconds, 0.2,
-		1.0, now, modelMonitorHotSeconds, float64(modelMonitorWindowSeconds - modelMonitorHotSeconds), 0.65,
+		now, modelMonitorFreshWeight,
+		now, modelMonitorHotSeconds, modelMonitorFreshWeight, now, float64(modelMonitorHotSeconds), modelMonitorFreshWeight - modelMonitorHotEdgeWeight,
+		now, modelMonitorWindowSeconds, modelMonitorWindowEdgeWeight,
+		modelMonitorHotEdgeWeight, now, modelMonitorHotSeconds, float64(modelMonitorWindowSeconds - modelMonitorHotSeconds), modelMonitorHotEdgeWeight - modelMonitorWindowEdgeWeight,
 	}
 }
 
@@ -187,9 +196,35 @@ func modelMonitorSafeRatio(value float64, total float64) float64 {
 	return value / total
 }
 
+func modelMonitorSampleConfidence(sampleCount int64) float64 {
+	if sampleCount <= 0 {
+		return 0
+	}
+	return 1 - math.Exp(-float64(sampleCount)/modelMonitorConfidenceScale)
+}
+
+// A relay request can emit several channel-error logs before it finally
+// succeeds or fails. Discount that retry fan-out so one user request does not
+// look like several independent failures.
+func modelMonitorEffectiveErrorWeight(bucket modelMonitorBucket) float64 {
+	if bucket.weightedErrors <= 0 {
+		return 0
+	}
+	if bucket.rawErrorLogCount <= 0 || bucket.errorSampleCount <= 0 || bucket.rawErrorLogCount <= bucket.errorSampleCount {
+		return bucket.weightedErrors
+	}
+	retryFanOut := float64(bucket.rawErrorLogCount) / float64(bucket.errorSampleCount)
+	return bucket.weightedErrors / retryFanOut
+}
+
+func modelMonitorEffectiveRequestWeight(bucket modelMonitorBucket) float64 {
+	return bucket.weightedSuccess + modelMonitorEffectiveErrorWeight(bucket)
+}
+
 func modelMonitorLatencyScore(avgUseTime float64, slowRate float64) float64 {
 	if avgUseTime <= 0 {
-		return 72
+		// Relay logs use whole seconds, so zero normally means sub-second.
+		return 100
 	}
 	if avgUseTime <= 2 {
 		return 100 * (1 - clampModelMonitorRatio(slowRate)*0.12)
@@ -216,6 +251,15 @@ func modelMonitorPromptAdjustedUseTime(useTime float64, avgPromptTokens float64)
 	return useTime / modelMonitorPromptLatencyFactor(avgPromptTokens)
 }
 
+func modelMonitorOutputAdjustedUseTime(useTime float64, avgCompletionTokens float64) float64 {
+	if useTime <= 0 || avgCompletionTokens <= 0 {
+		return useTime
+	}
+	generationAllowance := avgCompletionTokens / modelMonitorOutputTimeTPS
+	// Keep part of the observed duration as a conservative TTFT proxy.
+	return math.Max(useTime*0.15, useTime-generationAllowance)
+}
+
 func modelMonitorOutputRatioFloor(avgPromptTokens float64) float64 {
 	if avgPromptTokens <= 2000 {
 		return 0.02
@@ -232,7 +276,7 @@ func modelMonitorThroughputScore(completionTokens float64, useTime float64, hasS
 		return 25
 	}
 	if useTime <= 0 {
-		return 70
+		return 100
 	}
 	tokensPerSecond := completionTokens / useTime
 	switch {
@@ -291,20 +335,23 @@ func modelMonitorStatus(score int, hasData bool) (string, string) {
 }
 
 func scoreModelMonitorBucket(bucket modelMonitorBucket) int {
-	if bucket.weightedRequests <= 0 {
+	effectiveRequests := modelMonitorEffectiveRequestWeight(bucket)
+	if bucket.sampleCount <= 0 || effectiveRequests <= 0 {
 		return 1
 	}
 
 	hasSuccess := bucket.weightedSuccess > 0
-	successRate := clampModelMonitorRatio(modelMonitorSafeRatio(bucket.weightedSuccess, bucket.weightedRequests))
-	errorRate := clampModelMonitorRatio(modelMonitorSafeRatio(bucket.weightedErrors, bucket.weightedRequests))
+	effectiveErrors := modelMonitorEffectiveErrorWeight(bucket)
+	successRate := clampModelMonitorRatio(modelMonitorSafeRatio(bucket.weightedSuccess, effectiveRequests))
+	errorRate := clampModelMonitorRatio(modelMonitorSafeRatio(effectiveErrors, effectiveRequests))
 	emptyRate := clampModelMonitorRatio(modelMonitorSafeRatio(bucket.weightedEmptyOutputs, bucket.weightedSuccess))
-	slowRate := clampModelMonitorRatio(modelMonitorSafeRatio(bucket.weightedSlowRequests, bucket.weightedRequests))
-	avgUseTime := modelMonitorSafeRatio(bucket.weightedUseTime, bucket.weightedRequests)
+	slowRate := clampModelMonitorRatio(modelMonitorSafeRatio(bucket.weightedSlowRequests, bucket.weightedSuccess))
+	avgUseTime := modelMonitorSafeRatio(bucket.weightedUseTime, bucket.weightedSuccess)
 	avgPromptTokens := modelMonitorSafeRatio(bucket.weightedPromptTokens, bucket.weightedSuccess)
 	avgCompletionTokens := modelMonitorSafeRatio(bucket.weightedCompletionTokens, bucket.weightedSuccess)
 	promptLatencyFactor := modelMonitorPromptLatencyFactor(avgPromptTokens)
-	adjustedUseTime := modelMonitorPromptAdjustedUseTime(avgUseTime, avgPromptTokens)
+	outputAdjustedUseTime := modelMonitorOutputAdjustedUseTime(avgUseTime, avgCompletionTokens)
+	adjustedUseTime := modelMonitorPromptAdjustedUseTime(outputAdjustedUseTime, avgPromptTokens)
 	adjustedTotalUseTime := modelMonitorPromptAdjustedUseTime(bucket.weightedUseTime, avgPromptTokens)
 	adjustedSlowRate := slowRate / promptLatencyFactor
 
@@ -313,27 +360,35 @@ func scoreModelMonitorBucket(bucket modelMonitorBucket) int {
 	if !hasSuccess {
 		emptyOutputScore = 0
 	}
-	latencyScore := modelMonitorLatencyScore(adjustedUseTime, adjustedSlowRate)
+	latencyScore := 0.0
+	if hasSuccess {
+		latencyScore = modelMonitorLatencyScore(adjustedUseTime, adjustedSlowRate)
+	}
 	throughputScore := modelMonitorThroughputScore(bucket.weightedCompletionTokens, adjustedTotalUseTime, hasSuccess)
 	outputBalanceScore := modelMonitorOutputBalanceScore(avgPromptTokens, avgCompletionTokens, hasSuccess)
-	tokenVolumeScore := 0.0
-	if hasSuccess {
-		tokenVolumeScore = math.Min(1, math.Log1p(avgCompletionTokens)/math.Log1p(800)) * 100
-	}
-	sampleScore := math.Min(1, math.Log1p(bucket.weightedRequests)/math.Log1p(40)) * 100
 
-	score := reliabilityScore*0.32 +
-		emptyOutputScore*0.18 +
-		latencyScore*0.16 +
-		throughputScore*0.12 +
-		outputBalanceScore*0.10 +
-		tokenVolumeScore*0.06 +
-		sampleScore*0.06
+	rawScore := reliabilityScore*0.36 +
+		emptyOutputScore*0.20 +
+		latencyScore*0.20 +
+		throughputScore*0.16 +
+		outputBalanceScore*0.08
+	confidence := modelMonitorSampleConfidence(bucket.sampleCount)
+	score := modelMonitorPriorScore + (rawScore-modelMonitorPriorScore)*confidence
 	if errorRate >= 0.8 {
 		score = math.Min(score, 42)
+	} else if errorRate >= 0.5 {
+		score = math.Min(score, 58)
+	} else if errorRate >= 0.25 {
+		score = math.Min(score, 72)
+	} else if errorRate >= 0.1 {
+		score = math.Min(score, 84)
 	}
 	if emptyRate >= 0.7 {
 		score = math.Min(score, 50)
+	} else if emptyRate >= 0.3 {
+		score = math.Min(score, 65)
+	} else if emptyRate >= 0.1 {
+		score = math.Min(score, 80)
 	}
 	if hasSuccess && avgPromptTokens > 0 && avgCompletionTokens/avgPromptTokens < modelMonitorOutputRatioFloor(avgPromptTokens) {
 		score = math.Min(score, 72)
@@ -341,7 +396,7 @@ func scoreModelMonitorBucket(bucket modelMonitorBucket) int {
 	if hasSuccess && bucket.weightedCompletionTokens <= 0 {
 		score = math.Min(score, 52)
 	}
-	if bucket.weightedRequests < 2 {
+	if bucket.sampleCount < 2 {
 		score = math.Min(score, 68)
 	}
 	return clampModelMonitorScore(score)
@@ -539,19 +594,20 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 	weightSQL := modelMonitorWeightSQL()
 	groupSQL := "COALESCE(NULLIF(TRIM(" + logGroupCol + "), ''), 'default')"
 	selectSQL := "model_name, " + groupSQL + " AS group_name, " +
-		"SUM(" + weightSQL + ") AS weighted_requests, " +
+		"SUM(CASE WHEN type = ? THEN 1 ELSE 0 END) AS raw_error_log_count, " +
+		"SUM(CASE WHEN type = ? THEN 1 ELSE 0 END) AS success_sample_count, " +
+		"(COUNT(DISTINCT CASE WHEN type = ? THEN NULLIF(request_id, '') ELSE NULL END) + " +
+		"SUM(CASE WHEN type = ? AND (request_id IS NULL OR request_id = '') THEN 1 ELSE 0 END)) AS error_sample_count, " +
 		"SUM(CASE WHEN type = ? THEN " + weightSQL + " ELSE 0 END) AS weighted_success, " +
 		"SUM(CASE WHEN type = ? THEN " + weightSQL + " ELSE 0 END) AS weighted_errors, " +
 		"SUM(CASE WHEN type = ? THEN prompt_tokens * (" + weightSQL + ") ELSE 0 END) AS weighted_prompt_tokens, " +
 		"SUM(CASE WHEN type = ? THEN completion_tokens * (" + weightSQL + ") ELSE 0 END) AS weighted_completion_tokens, " +
-		"SUM((prompt_tokens + completion_tokens) * (" + weightSQL + ")) AS weighted_tokens, " +
-		"SUM(use_time * (" + weightSQL + ")) AS weighted_use_time, " +
+		"SUM(CASE WHEN type = ? THEN use_time * (" + weightSQL + ") ELSE 0 END) AS weighted_use_time, " +
 		"SUM(CASE WHEN type = ? AND prompt_tokens > 0 AND completion_tokens <= 0 THEN " + weightSQL + " ELSE 0 END) AS weighted_empty_outputs, " +
-		"SUM(CASE WHEN use_time >= ? THEN " + weightSQL + " ELSE 0 END) AS weighted_slow_requests, " +
-		"MAX(created_at) AS last_seen"
+		"SUM(CASE WHEN type = ? AND use_time >= (? + completion_tokens / ?) THEN " + weightSQL + " ELSE 0 END) AS weighted_slow_requests"
 
-	selectArgs := make([]any, 0, 150)
-	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
+	selectArgs := make([]any, 0, 128)
+	selectArgs = append(selectArgs, LogTypeError, LogTypeConsume, LogTypeError, LogTypeError)
 	selectArgs = append(selectArgs, LogTypeConsume)
 	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
 	selectArgs = append(selectArgs, LogTypeError)
@@ -560,26 +616,26 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
 	selectArgs = append(selectArgs, LogTypeConsume)
 	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
-	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
+	selectArgs = append(selectArgs, LogTypeConsume)
 	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
 	selectArgs = append(selectArgs, LogTypeConsume)
 	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
-	selectArgs = append(selectArgs, modelMonitorSlowSeconds)
+	selectArgs = append(selectArgs, LogTypeConsume, modelMonitorSlowSeconds, modelMonitorOutputTimeTPS)
 	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
 
 	type row struct {
 		ModelName                string
 		GroupName                string
-		WeightedRequests         float64
+		RawErrorLogCount         int64
+		SuccessSampleCount       int64
+		ErrorSampleCount         int64
 		WeightedSuccess          float64
 		WeightedErrors           float64
 		WeightedPromptTokens     float64
 		WeightedCompletionTokens float64
-		WeightedTokens           float64
 		WeightedUseTime          float64
 		WeightedEmptyOutputs     float64
 		WeightedSlowRequests     float64
-		LastSeen                 int64
 	}
 
 	var rows []row
@@ -610,16 +666,16 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 			continue
 		}
 		buckets[key] = modelMonitorBucket{
-			weightedRequests:         item.WeightedRequests,
+			rawErrorLogCount:         item.RawErrorLogCount,
+			sampleCount:              item.SuccessSampleCount + item.ErrorSampleCount,
+			errorSampleCount:         item.ErrorSampleCount,
 			weightedSuccess:          item.WeightedSuccess,
 			weightedErrors:           item.WeightedErrors,
 			weightedPromptTokens:     item.WeightedPromptTokens,
 			weightedCompletionTokens: item.WeightedCompletionTokens,
-			weightedTokens:           item.WeightedTokens,
 			weightedUseTime:          item.WeightedUseTime,
 			weightedEmptyOutputs:     item.WeightedEmptyOutputs,
 			weightedSlowRequests:     item.WeightedSlowRequests,
-			lastSeen:                 item.LastSeen,
 		}
 	}
 
@@ -667,7 +723,7 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 				modelName: item.ModelName,
 				group:     normalizeModelMonitorGroup(item.Group),
 			}]
-			weight := bucket.weightedRequests
+			weight := modelMonitorEffectiveRequestWeight(bucket)
 			if weight <= 0 {
 				weight = 1
 			}

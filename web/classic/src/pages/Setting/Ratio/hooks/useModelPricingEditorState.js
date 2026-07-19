@@ -282,7 +282,7 @@ export const getModelWarnings = (model, t) => {
     hasValue(model.audioOutputPrice) &&
     !hasValue(model.audioInputPrice)
   ) {
-    warnings.push(t('填写音频补全价格前，需要先填写音频输入价格。'));
+    warnings.push(t('填写音频输出价格前，需要先填写音频输入价格。'));
   }
 
   return warnings;
