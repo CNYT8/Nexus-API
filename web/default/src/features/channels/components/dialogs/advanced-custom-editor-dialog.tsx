@@ -23,6 +23,14 @@ import { toast } from 'sonner'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -40,7 +48,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { Dialog } from '@/components/dialog'
 import { cn } from '@/lib/utils'
 import {
   ADVANCED_CUSTOM_AUTH_MODE_OPTIONS,
@@ -283,17 +290,185 @@ export function AdvancedCustomEditorDialog({
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title={t('Advanced Custom Routes')}
-      description={t('Advanced Custom')}
-      contentClassName='flex max-h-[90vh] flex-col gap-0 p-0 sm:max-w-5xl'
-      headerClassName='border-b px-6 py-4'
-      footerClassName='border-t px-6 py-4'
-      contentHeight='70vh'
-      footer={
-        <>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className='flex max-h-[90vh] flex-col gap-0 p-0 sm:max-w-5xl'>
+        <DialogHeader className='border-b px-6 py-4'>
+          <DialogTitle>{t('Advanced Custom Routes')}</DialogTitle>
+          <DialogDescription>{t('Advanced Custom')}</DialogDescription>
+        </DialogHeader>
+
+        <div className='min-h-0 flex-1 overflow-y-auto'>
+          <div className='bg-muted/30 border-b px-4 py-3'>
+            <div className='flex flex-wrap items-center gap-2'>
+              <span className='text-muted-foreground text-xs font-medium'>
+                {t('Mode')}
+              </span>
+              <Button
+                type='button'
+                variant={editMode === 'visual' ? 'default' : 'outline'}
+                size='sm'
+                onClick={switchToVisualMode}
+              >
+                {t('Visual')}
+              </Button>
+              <Button
+                type='button'
+                variant={editMode === 'json' ? 'default' : 'outline'}
+                size='sm'
+                onClick={switchToJsonMode}
+              >
+                {t('JSON Text')}
+              </Button>
+
+              <div className='bg-border mx-1 h-5 w-px' />
+
+              <span className='text-muted-foreground text-xs font-medium'>
+                {t('Template')}
+              </span>
+              <Select
+                value={templateKey}
+                onValueChange={(nextValue) =>
+                  setTemplateKey(
+                    nextValue ||
+                      ADVANCED_CUSTOM_TEMPLATE_OPTIONS[0]?.value ||
+                      ''
+                  )
+                }
+              >
+                <SelectTrigger className='h-8 min-w-[260px] max-w-full flex-1 sm:w-[320px]'>
+                  <SelectValue className='min-w-0 truncate'>
+                    {t(templateLabel)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent
+                  alignItemWithTrigger={false}
+                  className={longSelectContentClass}
+                >
+                  <SelectGroup>
+                    {ADVANCED_CUSTOM_TEMPLATE_OPTIONS.map((option) => (
+                      <SelectItem
+                        key={option.value}
+                        value={option.value}
+                        className={longSelectItemClass}
+                      >
+                        <span className='min-w-0 whitespace-normal break-words leading-snug'>
+                          {t(option.label)}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={() => applyTemplate('fill')}
+              >
+                {t('Fill Template')}
+              </Button>
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                onClick={() => applyTemplate('append')}
+              >
+                {t('Append Template')}
+              </Button>
+            </div>
+          </div>
+
+          {editMode === 'visual' ? (
+            <div className='flex flex-col gap-4 p-4 lg:gap-3'>
+              <div className='flex justify-end border-y py-4 lg:py-2'>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  onClick={addRoute}
+                >
+                  <Plus className='mr-2 h-4 w-4' />
+                  {t('Add route')}
+                </Button>
+              </div>
+
+              {validationError ? (
+                <Alert variant='destructive'>
+                  <AlertDescription>
+                    {validationError.routeIndex !== undefined
+                      ? `${t('Route')} ${validationError.routeIndex + 1}: `
+                      : ''}
+                    {t(validationError.message)}
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+
+              <p className='text-muted-foreground bg-muted/30 hidden rounded-md border px-3 py-2 text-xs leading-relaxed lg:block'>
+                {t(upstreamPathDescriptionKey)}
+              </p>
+
+              <div className='flex flex-col gap-4 lg:gap-2'>
+                <div
+                  className={cn(
+                    'text-muted-foreground hidden items-center gap-2 px-3 text-xs font-medium lg:grid',
+                    routeEditorGridClassName
+                  )}
+                >
+                  <span>{t('Route')}</span>
+                  <span>{t('Incoming path')}</span>
+                  <span>{t('Upstream path')}</span>
+                  <span>{t('Converter')}</span>
+                  <span>{t('Auth')}</span>
+                  <span aria-hidden='true' />
+                </div>
+                {routeRows.map((routeRow, index) => (
+                  <RouteEditor
+                    key={routeRow.routeKey}
+                    route={routeRow.route}
+                    index={index}
+                    onChange={(patch) => updateRoute(index, patch)}
+                    onRemove={() => removeRoute(index)}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className='p-4'>
+              <div className='mb-2 flex items-center gap-2'>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  onClick={formatJson}
+                >
+                  {t('Format')}
+                </Button>
+                <span className='text-muted-foreground text-xs'>
+                  {t('Advanced text editing')}
+                </span>
+              </div>
+              <Textarea
+                value={jsonText}
+                onChange={(event) => handleJsonChange(event.target.value)}
+                placeholder={stringifyAdvancedCustomConfig(
+                  getAdvancedCustomTemplateConfig(templateKey)
+                )}
+                rows={22}
+                className='min-h-[420px] font-mono text-xs'
+              />
+              <p className='text-muted-foreground mt-2 text-xs'>
+                {t(
+                  'Edit JSON text directly. Format will be validated on save.'
+                )}
+              </p>
+              {jsonError ? (
+                <p className='text-destructive mt-1 text-xs'>{jsonError}</p>
+              ) : null}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className='border-t px-6 py-4'>
           <Button
             type='button'
             variant='outline'
@@ -305,173 +480,8 @@ export function AdvancedCustomEditorDialog({
             <Check className='mr-2 h-4 w-4' />
             {t('Save changes')}
           </Button>
-        </>
-      }
-    >
-      <div className='bg-muted/30 border-b px-4 py-3'>
-        <div className='flex flex-wrap items-center gap-2'>
-          <span className='text-muted-foreground text-xs font-medium'>
-            {t('Mode')}
-          </span>
-          <Button
-            type='button'
-            variant={editMode === 'visual' ? 'default' : 'outline'}
-            size='sm'
-            onClick={switchToVisualMode}
-          >
-            {t('Visual')}
-          </Button>
-          <Button
-            type='button'
-            variant={editMode === 'json' ? 'default' : 'outline'}
-            size='sm'
-            onClick={switchToJsonMode}
-          >
-            {t('JSON Text')}
-          </Button>
-
-          <div className='bg-border mx-1 h-5 w-px' />
-
-          <span className='text-muted-foreground text-xs font-medium'>
-            {t('Template')}
-          </span>
-          <Select
-            value={templateKey}
-            onValueChange={(nextValue) =>
-              setTemplateKey(
-                nextValue || ADVANCED_CUSTOM_TEMPLATE_OPTIONS[0]?.value || ''
-              )
-            }
-          >
-            <SelectTrigger className='h-8 min-w-[260px] max-w-full flex-1 sm:w-[320px]'>
-              <SelectValue className='min-w-0 truncate'>
-                {t(templateLabel)}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent
-              alignItemWithTrigger={false}
-              className={longSelectContentClass}
-            >
-              <SelectGroup>
-                {ADVANCED_CUSTOM_TEMPLATE_OPTIONS.map((option) => (
-                  <SelectItem
-                    key={option.value}
-                    value={option.value}
-                    className={longSelectItemClass}
-                  >
-                    <span className='min-w-0 whitespace-normal break-words leading-snug'>
-                      {t(option.label)}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            onClick={() => applyTemplate('fill')}
-          >
-            {t('Fill Template')}
-          </Button>
-          <Button
-            type='button'
-            variant='ghost'
-            size='sm'
-            onClick={() => applyTemplate('append')}
-          >
-            {t('Append Template')}
-          </Button>
-        </div>
-      </div>
-
-      {editMode === 'visual' ? (
-        <div className='flex flex-col gap-4 p-4 lg:gap-3'>
-          <div className='flex justify-end border-y py-4 lg:py-2'>
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              onClick={addRoute}
-            >
-              <Plus className='mr-2 h-4 w-4' />
-              {t('Add route')}
-            </Button>
-          </div>
-
-          {validationError ? (
-            <Alert variant='destructive'>
-              <AlertDescription>
-                {validationError.routeIndex !== undefined
-                  ? `${t('Route')} ${validationError.routeIndex + 1}: `
-                  : ''}
-                {t(validationError.message)}
-              </AlertDescription>
-            </Alert>
-          ) : null}
-
-          <p className='text-muted-foreground bg-muted/30 hidden rounded-md border px-3 py-2 text-xs leading-relaxed lg:block'>
-            {t(upstreamPathDescriptionKey)}
-          </p>
-
-          <div className='flex flex-col gap-4 lg:gap-2'>
-            <div
-              className={cn(
-                'text-muted-foreground hidden items-center gap-2 px-3 text-xs font-medium lg:grid',
-                routeEditorGridClassName
-              )}
-            >
-              <span>{t('Route')}</span>
-              <span>{t('Incoming path')}</span>
-              <span>{t('Upstream path')}</span>
-              <span>{t('Converter')}</span>
-              <span>{t('Auth')}</span>
-              <span aria-hidden='true' />
-            </div>
-            {routeRows.map((routeRow, index) => (
-              <RouteEditor
-                key={routeRow.routeKey}
-                route={routeRow.route}
-                index={index}
-                onChange={(patch) => updateRoute(index, patch)}
-                onRemove={() => removeRoute(index)}
-              />
-            ))}
-          </div>
-        </div>
-      ) : (
-        <div className='p-4'>
-          <div className='mb-2 flex items-center gap-2'>
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              onClick={formatJson}
-            >
-              {t('Format')}
-            </Button>
-            <span className='text-muted-foreground text-xs'>
-              {t('Advanced text editing')}
-            </span>
-          </div>
-          <Textarea
-            value={jsonText}
-            onChange={(event) => handleJsonChange(event.target.value)}
-            placeholder={stringifyAdvancedCustomConfig(
-              getAdvancedCustomTemplateConfig(templateKey)
-            )}
-            rows={22}
-            className='min-h-[420px] font-mono text-xs'
-          />
-          <p className='text-muted-foreground mt-2 text-xs'>
-            {t('Edit JSON text directly. Format will be validated on save.')}
-          </p>
-          {jsonError ? (
-            <p className='text-destructive mt-1 text-xs'>{jsonError}</p>
-          ) : null}
-        </div>
-      )}
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   )
 }
