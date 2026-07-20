@@ -97,6 +97,15 @@ export const STATIC_I18N_KEYS = [
   'All Tags',
   'More...',
   'Less',
+  'Input price',
+  'Output price',
+  'Cache hit price',
+  'Cache write price',
+  'Cache write (1h) price',
+  'Cache Hit',
+  'Cache Write',
+  'Cache Write (1h)',
+  'Cache Write (5m)',
 
   // Roles
   'Super Admin',

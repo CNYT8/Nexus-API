@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,9 +14,10 @@ func insertUserForPaymentGuardTest(t *testing.T, id int, quota int) {
 	t.Helper()
 	user := &User{
 		Id:       id,
-		Username: "payment_guard_user",
+		Username: fmt.Sprintf("pay_guard_%d", id),
 		Status:   common.UserStatusEnabled,
 		Quota:    quota,
+		AffCode:  fmt.Sprintf("pay_guard_aff_%d", id),
 	}
 	require.NoError(t, DB.Create(user).Error)
 }
@@ -93,7 +95,12 @@ func TestRechargeWaffoPancake_RejectsMismatchedPaymentMethod(t *testing.T) {
 	insertUserForPaymentGuardTest(t, 101, 0)
 	insertTopUpForPaymentGuardTest(t, "waffo-pancake-guard", 101, PaymentProviderStripe)
 
-	err := RechargeWaffoPancake("waffo-pancake-guard")
+	err := RechargeWaffoPancake("waffo-pancake-guard", PaymentConfirmation{
+		Amount:           "9.99",
+		Currency:         "USD",
+		ExpectedCurrency: "USD",
+		DecimalPlaces:    2,
+	})
 	require.Error(t, err)
 
 	topUp := GetTopUpByTradeNo("waffo-pancake-guard")
@@ -146,7 +153,13 @@ func TestCompleteSubscriptionOrder_RejectsMismatchedPaymentProvider(t *testing.T
 	plan := insertSubscriptionPlanForPaymentGuardTest(t, 301)
 	insertSubscriptionOrderForPaymentGuardTest(t, "sub-guard-order", 202, plan.Id, PaymentProviderStripe)
 
-	err := CompleteSubscriptionOrder("sub-guard-order", `{"provider":"epay"}`, PaymentProviderEpay, "alipay")
+	err := CompleteSubscriptionOrderWithConfirmation(
+		"sub-guard-order",
+		`{"provider":"epay"}`,
+		PaymentProviderEpay,
+		"alipay",
+		PaymentConfirmation{Amount: "9.99", DecimalPlaces: 2},
+	)
 	require.ErrorIs(t, err, ErrPaymentMethodMismatch)
 
 	order := GetSubscriptionOrderByTradeNo("sub-guard-order")

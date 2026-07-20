@@ -39,11 +39,11 @@ html.theme-switching *::after {
 
 .classic-header {
   --classic-header-glass-fallback: rgba(255, 255, 255, 0.94);
-  --classic-header-glass-tint: rgba(255, 255, 255, 0.34);
-  --classic-header-glass-highlight: rgba(255, 255, 255, 0.3);
-  --classic-header-glass-highlight-soft: rgba(255, 255, 255, 0.1);
-  --classic-header-glass-lowlight: rgba(15, 23, 42, 0.025);
-  --classic-header-glass-edge: rgba(255, 255, 255, 0.64);
+  --classic-header-glass-tint: rgba(255, 255, 255, 0.28);
+  --classic-header-glass-highlight: rgba(255, 255, 255, 0.27);
+  --classic-header-glass-highlight-soft: rgba(255, 255, 255, 0.085);
+  --classic-header-glass-lowlight: rgba(15, 23, 42, 0.018);
+  --classic-header-glass-edge: rgba(255, 255, 255, 0.58);
   --classic-header-logo-accent-opacity: 0.66;
   background-color: var(--classic-header-glass-fallback);
   border-bottom: 0 !important;
@@ -52,11 +52,11 @@ html.theme-switching *::after {
 
 .dark .classic-header {
   --classic-header-glass-fallback: rgba(9, 9, 11, 0.94);
-  --classic-header-glass-tint: rgba(9, 9, 11, 0.4);
-  --classic-header-glass-highlight: rgba(255, 255, 255, 0.13);
-  --classic-header-glass-highlight-soft: rgba(255, 255, 255, 0.045);
-  --classic-header-glass-lowlight: rgba(0, 0, 0, 0.08);
-  --classic-header-glass-edge: rgba(255, 255, 255, 0.16);
+  --classic-header-glass-tint: rgba(9, 9, 11, 0.34);
+  --classic-header-glass-highlight: rgba(255, 255, 255, 0.11);
+  --classic-header-glass-highlight-soft: rgba(255, 255, 255, 0.038);
+  --classic-header-glass-lowlight: rgba(0, 0, 0, 0.065);
+  --classic-header-glass-edge: rgba(255, 255, 255, 0.14);
   --classic-header-logo-accent-opacity: 0.54;
 }
 
@@ -77,7 +77,7 @@ html.theme-switching *::after {
       transparent 18%,
       transparent 100%
     );
-  opacity: 0.86;
+  opacity: 0.78;
 }
 
 .classic-header-liquid-overlay::before,
@@ -96,7 +96,7 @@ html.theme-switching *::after {
     var(--classic-header-glass-highlight-soft) 58%,
     transparent 88%
   );
-  opacity: 0.72;
+  opacity: 0.64;
 }
 
 .classic-header-liquid-overlay::after {
@@ -125,14 +125,15 @@ html.theme-switching *::after {
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .classic-header {
     background-color: var(--classic-header-glass-tint);
-    -webkit-backdrop-filter: blur(8px) saturate(190%) contrast(138%)
-      brightness(104%);
-    backdrop-filter: blur(8px) saturate(190%) contrast(138%) brightness(104%);
+    -webkit-backdrop-filter: blur(16px) saturate(165%) contrast(108%)
+      brightness(103%);
+    backdrop-filter: blur(16px) saturate(165%) contrast(108%) brightness(103%);
   }
 
   .classic-header-liquid-overlay::before {
-    -webkit-backdrop-filter: saturate(135%) contrast(116%) brightness(103%);
-    backdrop-filter: saturate(135%) contrast(116%) brightness(103%);
+    -webkit-backdrop-filter: blur(2px) saturate(120%) contrast(105%)
+      brightness(103%);
+    backdrop-filter: blur(2px) saturate(120%) contrast(105%) brightness(103%);
   }
 }
 
@@ -202,11 +203,11 @@ body[theme-mode='warm'] {
 
 body[theme-mode='warm'] .classic-header {
   --classic-header-glass-fallback: rgba(255, 253, 248, 0.94);
-  --classic-header-glass-tint: rgba(255, 249, 239, 0.42);
-  --classic-header-glass-highlight: rgba(255, 255, 255, 0.34);
-  --classic-header-glass-highlight-soft: rgba(255, 248, 230, 0.13);
-  --classic-header-glass-lowlight: rgba(120, 53, 15, 0.035);
-  --classic-header-glass-edge: rgba(255, 255, 255, 0.62);
+  --classic-header-glass-tint: rgba(255, 249, 239, 0.34);
+  --classic-header-glass-highlight: rgba(255, 255, 255, 0.29);
+  --classic-header-glass-highlight-soft: rgba(255, 248, 230, 0.1);
+  --classic-header-glass-lowlight: rgba(120, 53, 15, 0.026);
+  --classic-header-glass-edge: rgba(255, 255, 255, 0.58);
   --classic-header-logo-accent-opacity: 0.58;
   border-bottom-color: transparent;
 }

@@ -60,10 +60,10 @@ export function UserQuotaCell({ used, remaining }: UserQuotaCellProps) {
     <Tooltip>
       <TooltipTrigger
         render={
-          <div className='w-full min-w-[220px] max-w-[300px] cursor-help space-y-1.5 overflow-hidden' />
+          <div className='w-full min-w-0 max-w-[160px] cursor-help space-y-1.5 overflow-hidden' />
         }
       >
-        <div className='grid min-w-0 grid-cols-2 gap-x-4 text-xs'>
+        <div className='grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-x-2 text-xs'>
           <span className='min-w-0 truncate font-medium tabular-nums'>
             {formattedRemaining}
           </span>

@@ -25,7 +25,9 @@ func isStripeWebhookConfigured() bool {
 }
 
 func isStripeWebhookEnabled() bool {
-	return isStripeTopUpEnabled()
+	// Keep callbacks available for already-created orders even if new checkout
+	// creation is disabled or its API/price configuration changes.
+	return isStripeWebhookConfigured()
 }
 
 func isCreemTopUpEnabled() bool {
@@ -43,7 +45,7 @@ func isCreemWebhookConfigured() bool {
 }
 
 func isCreemWebhookEnabled() bool {
-	return isCreemTopUpEnabled() && isCreemWebhookConfigured()
+	return isCreemWebhookConfigured()
 }
 
 func isWaffoTopUpEnabled() bool {
@@ -70,7 +72,7 @@ func isWaffoWebhookConfigured() bool {
 }
 
 func isWaffoWebhookEnabled() bool {
-	return isWaffoTopUpEnabled()
+	return isWaffoWebhookConfigured()
 }
 
 func isWaffoPancakeTopUpEnabled() bool {
@@ -85,11 +87,20 @@ func isWaffoPancakeTopUpEnabled() bool {
 }
 
 func isWaffoPancakeWebhookConfigured() bool {
-	return isWaffoPancakeTopUpEnabled()
+	// Signature verification uses platform public keys, so callbacks must also
+	// be bound to this deployment's configured merchant store. A gateway-level
+	// product ID is not required for subscription-only checkouts.
+	return strings.TrimSpace(setting.WaffoPancakeMerchantID) != "" &&
+		strings.TrimSpace(setting.WaffoPancakeStoreID) != ""
 }
 
 func isWaffoPancakeWebhookEnabled() bool {
-	return isWaffoPancakeTopUpEnabled()
+	return isWaffoPancakeWebhookConfigured()
+}
+
+func isConfiguredWaffoPancakeStore(storeID string) bool {
+	expectedStoreID := strings.TrimSpace(setting.WaffoPancakeStoreID)
+	return expectedStoreID != "" && strings.TrimSpace(storeID) == expectedStoreID
 }
 
 func isEpayTopUpEnabled() bool {
@@ -106,5 +117,5 @@ func isEpayWebhookConfigured() bool {
 }
 
 func isEpayWebhookEnabled() bool {
-	return isEpayTopUpEnabled()
+	return isEpayWebhookConfigured()
 }

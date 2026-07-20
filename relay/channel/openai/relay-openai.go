@@ -20,6 +20,7 @@ import (
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/tidwall/gjson"
 )
 
 func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat bool, thinkToContent bool) error {
@@ -103,6 +104,26 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 	return helper.ObjectData(c, lastStreamResponse)
 }
 
+func shouldHoldOpenAIUsageChunk(info *relaycommon.RelayInfo, data string) bool {
+	if info == nil || info.RelayFormat != types.RelayFormatOpenAI || info.ShouldIncludeUsage ||
+		data == "" || !strings.Contains(data, `"usage"`) {
+		return false
+	}
+	usage := gjson.Get(data, "usage")
+	if !usage.Exists() || usage.Type == gjson.Null {
+		return false
+	}
+	for _, choice := range gjson.Get(data, "choices").Array() {
+		delta := choice.Get("delta")
+		if delta.Get("content").String() != "" ||
+			delta.Get("reasoning_content").String() != "" ||
+			delta.Get("reasoning").String() != "" {
+			return false
+		}
+	}
+	return true
+}
+
 func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		logger.LogError(c, "invalid response or response body")
@@ -121,12 +142,20 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var usage = &dto.Usage{}
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
+	var pendingOpenAIUsageData string
+	isDirectOpenAIStream := info.RelayFormat == types.RelayFormatOpenAI
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
-		if lastStreamData != "" {
+		if isDirectOpenAIStream && pendingOpenAIUsageData != "" {
+			if err := HandleStreamFormat(c, info, pendingOpenAIUsageData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+				common.SysLog("error handling stream format: " + err.Error())
+				sr.Error(err)
+			}
+			pendingOpenAIUsageData = ""
+		} else if !isDirectOpenAIStream && lastStreamData != "" {
 			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
 				sr.Error(err)
@@ -142,6 +171,15 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			if err := processTokenData(info.RelayMode, data, &responseTextBuilder, &toolCount); err != nil {
 				logger.LogError(c, "error processing stream token data: "+err.Error())
 				sr.Error(err)
+			}
+
+			if isDirectOpenAIStream {
+				if shouldHoldOpenAIUsageChunk(info, data) {
+					pendingOpenAIUsageData = data
+				} else if err := HandleStreamFormat(c, info, data, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+					common.SysLog("error handling stream format: " + err.Error())
+					sr.Error(err)
+				}
 			}
 		}
 	})
@@ -172,8 +210,8 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	}
 
 	if info.RelayFormat == types.RelayFormatOpenAI {
-		if shouldSendLastResp {
-			_ = sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
+		if pendingOpenAIUsageData != "" && shouldSendLastResp {
+			_ = sendStreamData(c, info, pendingOpenAIUsageData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
 		}
 	}
 

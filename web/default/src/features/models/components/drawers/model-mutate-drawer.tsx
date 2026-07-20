@@ -1163,7 +1163,7 @@ export function ModelMutateDrawer({
                         </div>
 
                         <div className='space-y-2'>
-                          <Label>{t('Completion price ($/1M tokens)')}</Label>
+                          <Label>{t('Output price ($/1M tokens)')}</Label>
                           <Input
                             type='text'
                             placeholder='4.0'
@@ -1179,7 +1179,7 @@ export function ModelMutateDrawer({
                             !isNaN(parseFloat(promptPrice)) &&
                             parseFloat(promptPrice) > 0
                               ? `Calculated ratio: ${(parseFloat(completionPrice) / parseFloat(promptPrice)).toFixed(4)}`
-                              : t('Enter Completion price to calculate ratio')}
+                              : t('Enter Output price to calculate ratio')}
                           </p>
                         </div>
                       </div>

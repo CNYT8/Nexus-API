@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useState, useMemo } from 'react'
 import { type Table } from '@tanstack/react-table'
-import { Trash2 } from 'lucide-react'
+import { Eraser, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -30,7 +30,7 @@ import {
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { CopyButton } from '@/components/copy-button'
 import { DataTableBulkActions as BulkActionsToolbar } from '@/components/data-table'
-import { deleteInvalidRedemptions } from '../api'
+import { batchDeleteRedemptions, deleteInvalidRedemptions } from '../api'
 import { type Redemption } from '../types'
 import { useRedemptions } from './redemptions-provider'
 
@@ -43,9 +43,12 @@ export function DataTableBulkActions<TData>({
 }: DataTableBulkActionsProps<TData>) {
   const { t } = useTranslation()
   const { triggerRefresh } = useRedemptions()
+  const [showDeleteSelectedConfirm, setShowDeleteSelectedConfirm] =
+    useState(false)
   const [showDeleteInvalidConfirm, setShowDeleteInvalidConfirm] =
     useState(false)
-  const [isDeleting, setIsDeleting] = useState(false)
+  const [isDeletingSelected, setIsDeletingSelected] = useState(false)
+  const [isDeletingInvalid, setIsDeletingInvalid] = useState(false)
   const selectedRows = table.getFilteredSelectedRowModel().rows
 
   const contentToCopy = useMemo(() => {
@@ -56,8 +59,34 @@ export function DataTableBulkActions<TData>({
     return selectedCodes.join('\n')
   }, [selectedRows])
 
+  const handleDeleteSelected = async () => {
+    const ids = selectedRows.map((row) => (row.original as Redemption).id)
+    if (ids.length === 0) return
+
+    setIsDeletingSelected(true)
+    try {
+      const result = await batchDeleteRedemptions(ids)
+      if (result.success) {
+        toast.success(
+          t('Successfully deleted {{count}} redemption code(s)', {
+            count: result.data ?? ids.length,
+          })
+        )
+        table.resetRowSelection()
+        triggerRefresh()
+        setShowDeleteSelectedConfirm(false)
+      } else {
+        toast.error(result.message || t('Batch delete failed'))
+      }
+    } catch {
+      toast.error(t('Batch delete failed'))
+    } finally {
+      setIsDeletingSelected(false)
+    }
+  }
+
   const handleDeleteInvalid = async () => {
-    setIsDeleting(true)
+    setIsDeletingInvalid(true)
     try {
       const result = await deleteInvalidRedemptions()
 
@@ -71,9 +100,13 @@ export function DataTableBulkActions<TData>({
         table.resetRowSelection()
         triggerRefresh()
         setShowDeleteInvalidConfirm(false)
+      } else {
+        toast.error(result.message || t('Batch delete failed'))
       }
+    } catch {
+      toast.error(t('Batch delete failed'))
     } finally {
-      setIsDeleting(false)
+      setIsDeletingInvalid(false)
     }
   }
 
@@ -96,6 +129,29 @@ export function DataTableBulkActions<TData>({
               <Button
                 variant='destructive'
                 size='icon'
+                onClick={() => setShowDeleteSelectedConfirm(true)}
+                className='size-8'
+                aria-label={t('Delete selected redemption codes')}
+                title={t('Delete selected redemption codes')}
+              />
+            }
+          >
+            <Trash2 />
+            <span className='sr-only'>
+              {t('Delete selected redemption codes')}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>{t('Delete selected redemption codes')}</p>
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='outline'
+                size='icon'
                 onClick={() => setShowDeleteInvalidConfirm(true)}
                 className='size-8'
                 aria-label={t('Delete invalid redemption codes')}
@@ -103,7 +159,7 @@ export function DataTableBulkActions<TData>({
               />
             }
           >
-            <Trash2 />
+            <Eraser />
             <span className='sr-only'>{t('Delete invalid codes')}</span>
           </TooltipTrigger>
           <TooltipContent>
@@ -114,10 +170,32 @@ export function DataTableBulkActions<TData>({
 
       <ConfirmDialog
         destructive
+        open={showDeleteSelectedConfirm}
+        onOpenChange={setShowDeleteSelectedConfirm}
+        handleConfirm={handleDeleteSelected}
+        isLoading={isDeletingSelected}
+        className='max-w-md'
+        title={t('Delete {{count}} redemption code(s)?', {
+          count: selectedRows.length,
+        })}
+        desc={
+          <>
+            {t('You are about to delete {{count}} redemption code(s).', {
+              count: selectedRows.length,
+            })}
+            <br />
+            {t('This action cannot be undone.')}
+          </>
+        }
+        confirmText={t('Delete')}
+      />
+
+      <ConfirmDialog
+        destructive
         open={showDeleteInvalidConfirm}
         onOpenChange={setShowDeleteInvalidConfirm}
         handleConfirm={handleDeleteInvalid}
-        isLoading={isDeleting}
+        isLoading={isDeletingInvalid}
         className='max-w-md'
         title={t('Delete Invalid Redemption Codes?')}
         desc={

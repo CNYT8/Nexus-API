@@ -198,6 +198,7 @@ export const useRedemptionsData = () => {
   const rowSelection = {
     onSelect: (record, selected) => {},
     onSelectAll: (selected, selectedRows) => {},
+    selectedRowKeys: selectedKeys.map((redemption) => redemption.key),
     onChange: (selectedRowKeys, selectedRows) => {
       setSelectedKeys(selectedRows);
     },
@@ -252,22 +253,76 @@ export const useRedemptionsData = () => {
     await copyText(keys);
   };
 
-  // Batch delete redemption codes (clear invalid)
-  const batchDeleteRedemptions = async () => {
+  // Batch delete selected redemption codes
+  const batchDeleteSelectedRedemptions = async () => {
+    if (selectedKeys.length === 0) {
+      showError(t('请至少选择一个兑换码！'));
+      return;
+    }
+
+    Modal.confirm({
+      title: t('批量删除'),
+      content: (
+        <>
+          {t('确定删除所选的 {{count}} 个兑换码？', {
+            count: selectedKeys.length,
+          })}
+          <br />
+          {t('此修改将不可逆')}
+        </>
+      ),
+      onOk: async () => {
+        setLoading(true);
+        try {
+          const ids = selectedKeys.map((redemption) => redemption.id);
+          const res = await API.post('/api/redemption/batch', { ids });
+          const { success, message, data } = res.data;
+          if (success) {
+            const deletedCount = Number(data ?? ids.length);
+            const remainingCount = Math.max(tokenCount - deletedCount, 0);
+            const lastPage = Math.max(Math.ceil(remainingCount / pageSize), 1);
+            showSuccess(t('批量删除成功'));
+            setSelectedKeys([]);
+            await refresh(Math.min(activePage, lastPage));
+          } else {
+            showError(message);
+          }
+        } catch (error) {
+          showError(error?.message || t('批量删除失败'));
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
+  };
+
+  // Clear all used, disabled, and expired redemption codes
+  const clearInvalidRedemptions = async () => {
     Modal.confirm({
       title: t('确定清除所有失效兑换码？'),
       content: t('将删除已使用、已禁用及过期的兑换码，此操作不可撤销。'),
       onOk: async () => {
         setLoading(true);
-        const res = await API.delete('/api/redemption/invalid');
-        const { success, message, data } = res.data;
-        if (success) {
-          showSuccess(t('已删除 {{count}} 条失效兑换码', { count: data }));
-          await refresh();
-        } else {
-          showError(message);
+        try {
+          const res = await API.delete('/api/redemption/invalid');
+          const { success, message, data } = res.data;
+          if (success) {
+            const deletedCount = Number(data ?? 0);
+            const remainingCount = Math.max(tokenCount - deletedCount, 0);
+            const lastPage = Math.max(Math.ceil(remainingCount / pageSize), 1);
+            showSuccess(
+              t('已删除 {{count}} 条失效兑换码', { count: deletedCount }),
+            );
+            setSelectedKeys([]);
+            await refresh(Math.min(activePage, lastPage));
+          } else {
+            showError(message);
+          }
+        } catch (error) {
+          showError(error?.message || t('批量删除失败'));
+        } finally {
+          setLoading(false);
         }
-        setLoading(false);
       },
     });
   };
@@ -352,7 +407,8 @@ export const useRedemptionsData = () => {
 
     // Batch operations
     batchCopyRedemptions,
-    batchDeleteRedemptions,
+    batchDeleteSelectedRedemptions,
+    clearInvalidRedemptions,
 
     // Translation function
     t,

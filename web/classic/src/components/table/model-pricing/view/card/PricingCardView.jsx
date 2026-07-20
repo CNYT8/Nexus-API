@@ -266,10 +266,10 @@ const PricingCardView = ({
                   <div className='flex items-start space-x-3 flex-1 min-w-0'>
                     {getModelIcon(model)}
                     <div className='flex-1 min-w-0'>
-                      <h3 className='text-xl font-bold text-gray-900 truncate'>
+                      <h3 className='text-[19px] font-bold text-gray-900 truncate'>
                         {model.model_name}
                       </h3>
-                      <div className='flex flex-col gap-1 text-sm mt-1'>
+                      <div className='flex flex-col gap-1 text-[13px] mt-1'>
                         {priceData.isDynamicPricing ? (
                           formatDynamicPriceSummary(priceData.billingExpr, t, priceData.usedGroupRatio)
                         ) : (

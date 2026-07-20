@@ -147,7 +147,7 @@ func SubscriptionEpayNotify(c *gin.Context) {
 		return
 	}
 	verifyInfo, err := client.Verify(params)
-	if err != nil || !verifyInfo.VerifyStatus {
+	if err != nil || verifyInfo == nil || !verifyInfo.VerifyStatus {
 		_, _ = c.Writer.Write([]byte("fail"))
 		return
 	}
@@ -160,7 +160,12 @@ func SubscriptionEpayNotify(c *gin.Context) {
 	LockOrder(verifyInfo.ServiceTradeNo)
 	defer UnlockOrder(verifyInfo.ServiceTradeNo)
 
-	if err := model.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), model.PaymentProviderEpay, verifyInfo.Type); err != nil {
+	confirmation := model.PaymentConfirmation{
+		Amount:             verifyInfo.Money,
+		DecimalPlaces:      2,
+		UseGoFloatRounding: true,
+	}
+	if err := model.CompleteSubscriptionOrderWithConfirmation(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), model.PaymentProviderEpay, verifyInfo.Type, confirmation); err != nil {
 		_, _ = c.Writer.Write([]byte("fail"))
 		return
 	}
@@ -202,14 +207,19 @@ func SubscriptionEpayReturn(c *gin.Context) {
 		return
 	}
 	verifyInfo, err := client.Verify(params)
-	if err != nil || !verifyInfo.VerifyStatus {
+	if err != nil || verifyInfo == nil || !verifyInfo.VerifyStatus {
 		c.Redirect(http.StatusFound, paymentReturnPath("/console/topup?pay=fail"))
 		return
 	}
 	if verifyInfo.TradeStatus == epay.StatusTradeSuccess {
 		LockOrder(verifyInfo.ServiceTradeNo)
 		defer UnlockOrder(verifyInfo.ServiceTradeNo)
-		if err := model.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), model.PaymentProviderEpay, verifyInfo.Type); err != nil {
+		confirmation := model.PaymentConfirmation{
+			Amount:             verifyInfo.Money,
+			DecimalPlaces:      2,
+			UseGoFloatRounding: true,
+		}
+		if err := model.CompleteSubscriptionOrderWithConfirmation(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), model.PaymentProviderEpay, verifyInfo.Type, confirmation); err != nil {
 			c.Redirect(http.StatusFound, paymentReturnPath("/console/topup?pay=fail"))
 			return
 		}

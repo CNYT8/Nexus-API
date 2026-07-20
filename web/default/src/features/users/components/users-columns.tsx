@@ -163,8 +163,9 @@ export function useUsersColumns(): ColumnDef<User>[] {
         const user = row.original
         return <UserQuotaCell used={user.used_quota} remaining={user.quota} />
       },
-      size: 300,
-      minSize: 260,
+      size: 180,
+      minSize: 150,
+      maxSize: 190,
       meta: { label: t('Quota') },
     },
     {

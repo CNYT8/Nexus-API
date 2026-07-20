@@ -485,13 +485,13 @@ export const useLogsData = () => {
       }
       if (other?.cache_tokens > 0) {
         expandDataLocal.push({
-          key: t('缓存 Tokens'),
+          key: `${t('缓存命中')} Tokens`,
           value: other.cache_tokens,
         });
       }
       if (other?.cache_creation_tokens > 0) {
         expandDataLocal.push({
-          key: t('缓存创建 Tokens'),
+          key: `${t('缓存写入')} Tokens`,
           value: other.cache_creation_tokens,
         });
       }

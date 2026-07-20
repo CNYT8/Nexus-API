@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -169,6 +170,22 @@ func TestResolveWaffoPancakeTradeNo_FailsWhenWebhookOrderIDIsUnknown(t *testing.
 	})
 	require.Error(t, err)
 	require.Empty(t, tradeNo)
+}
+
+func TestResolveWaffoPancakeTradeNo_PreservesDatabaseFailure(t *testing.T) {
+	db := setupWaffoPancakeTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	tradeNo, err := ResolveWaffoPancakeTradeNo(&WaffoPancakeWebhookEvent{
+		Data: WaffoPancakeWebhookData{
+			OrderMerchantExternalID: "WAFFO_PANCAKE-database-unavailable",
+		},
+	})
+	require.Error(t, err)
+	require.Empty(t, tradeNo)
+	require.False(t, errors.Is(err, model.ErrTopUpNotFound))
 }
 
 // Parity tests for ResolveWaffoPancakeSubscriptionTradeNo — same four cases

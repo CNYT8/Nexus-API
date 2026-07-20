@@ -164,7 +164,7 @@ const renderQuotaUsage = (text, record, t) => {
   return (
     <Popover content={popoverContent} position='top'>
       <Tag color='white' shape='circle' style={{ maxWidth: '100%' }}>
-        <div className='flex min-w-[180px] max-w-[240px] flex-col items-stretch overflow-hidden'>
+        <div className='flex w-[160px] min-w-0 max-w-full flex-col items-stretch overflow-hidden'>
           <span className='block truncate text-right text-xs leading-none'>
             {quotaSummary}
           </span>

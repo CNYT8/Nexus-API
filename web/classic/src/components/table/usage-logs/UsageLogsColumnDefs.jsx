@@ -756,7 +756,7 @@ export const getLogsColumns = ({
           {t('输入')}
           <Tooltip
             content={t(
-              '根据 Anthropic 协定，/v1/messages 的输入 tokens 仅统计非缓存输入，不包含缓存读取与缓存写入 tokens。',
+              '根据 Anthropic 协定，/v1/messages 的输入 tokens 仅统计非缓存输入，不包含缓存命中与缓存写入 tokens。',
             )}
           >
             <IconHelpCircle className='text-gray-400 cursor-help' />
@@ -771,11 +771,11 @@ export const getLogsColumns = ({
         const hasCacheWrite = (cacheSummary?.cacheWriteTokens || 0) > 0;
         let cacheText = '';
         if (hasCacheRead && hasCacheWrite) {
-          cacheText = `${t('缓存读')} ${formatTokenCount(cacheSummary.cacheReadTokens)} · ${t('写')} ${formatTokenCount(cacheSummary.cacheWriteTokens)}`;
+          cacheText = `${t('缓存命中')} ${formatTokenCount(cacheSummary.cacheReadTokens)} · ${t('缓存写入')} ${formatTokenCount(cacheSummary.cacheWriteTokens)}`;
         } else if (hasCacheRead) {
-          cacheText = `${t('缓存读')} ${formatTokenCount(cacheSummary.cacheReadTokens)}`;
+          cacheText = `${t('缓存命中')} ${formatTokenCount(cacheSummary.cacheReadTokens)}`;
         } else if (hasCacheWrite) {
-          cacheText = `${t('缓存写')} ${formatTokenCount(cacheSummary.cacheWriteTokens)}`;
+          cacheText = `${t('缓存写入')} ${formatTokenCount(cacheSummary.cacheWriteTokens)}`;
         }
 
         return record.type === 0 ||

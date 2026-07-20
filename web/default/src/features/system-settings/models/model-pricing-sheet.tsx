@@ -174,14 +174,14 @@ const laneConfigs: Array<{
 }> = [
   {
     key: 'completion',
-    titleKey: 'Completion price',
+    titleKey: 'Output price',
     descriptionKey: 'Output token price for generated tokens.',
     placeholder: '15',
   },
   {
     key: 'cache',
-    titleKey: 'Cache read price',
-    descriptionKey: 'Token price for cache reads.',
+    titleKey: 'Cache hit price',
+    descriptionKey: 'Token price for cache hits.',
     placeholder: '0.3',
   },
   {
@@ -328,7 +328,7 @@ function buildPreviewRows(
     },
     {
       key: 'completion',
-      label: t('Completion price'),
+      label: t('Output price'),
       value:
         laneEnabled.completion && lanePrices.completion
           ? `$${lanePrices.completion}`
@@ -336,7 +336,7 @@ function buildPreviewRows(
     },
     {
       key: 'cache',
-      label: t('Cache read price'),
+      label: t('Cache hit price'),
       value:
         laneEnabled.cache && lanePrices.cache
           ? `$${lanePrices.cache}`

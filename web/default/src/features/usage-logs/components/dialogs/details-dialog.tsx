@@ -215,7 +215,7 @@ function BillingBreakdown(props: {
   if (!isTieredExpr && isClaude && hasAnyCacheTokens(other)) {
     if (other.cache_ratio != null && other.cache_ratio !== 1) {
       rows.push({
-        label: t('Cache Read'),
+        label: t('Cache Hit'),
         value: `${fmtPrice(baseInputUSD * other.cache_ratio)}/M`,
       })
     }
@@ -224,7 +224,7 @@ function BillingBreakdown(props: {
       other.cache_creation_ratio !== 1
     ) {
       rows.push({
-        label: t('Cache Creation'),
+        label: t('Cache Write'),
         value: `${fmtPrice(baseInputUSD * other.cache_creation_ratio)}/M`,
       })
     }
@@ -233,7 +233,7 @@ function BillingBreakdown(props: {
       other.cache_creation_ratio_5m !== 0
     ) {
       rows.push({
-        label: t('Cache Creation (5m)'),
+        label: t('Cache Write (5m)'),
         value: `${fmtPrice(baseInputUSD * other.cache_creation_ratio_5m)}/M`,
       })
     }
@@ -242,7 +242,7 @@ function BillingBreakdown(props: {
       other.cache_creation_ratio_1h !== 0
     ) {
       rows.push({
-        label: t('Cache Creation (1h)'),
+        label: t('Cache Write (1h)'),
         value: `${fmtPrice(baseInputUSD * other.cache_creation_ratio_1h)}/M`,
       })
     }
@@ -351,7 +351,7 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
 
   if (cacheRead > 0) {
     rows.push({
-      label: t('Cache Read'),
+      label: t('Cache Hit'),
       value: cacheRead.toLocaleString(),
     })
   }

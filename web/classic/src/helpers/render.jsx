@@ -23,6 +23,7 @@ import { copy, showSuccess } from './utils';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
 import {
   BILLING_PRICING_VARS,
+  BILLING_VAR_FIELD_TO_SHORT_LABEL,
   BILLING_VAR_KEY_TO_FIELD,
   BILLING_VAR_REGEX,
 } from '../constants';
@@ -1315,6 +1316,81 @@ function formatCompactDisplayPrice(usdAmount, digits = 6) {
   return `${symbol}${amount}`;
 }
 
+const CACHE_HIT_SHORT_LABEL =
+    BILLING_VAR_FIELD_TO_SHORT_LABEL.cacheReadPrice || '缓存命中';
+const CACHE_WRITE_SHORT_LABEL =
+    BILLING_VAR_FIELD_TO_SHORT_LABEL.cacheCreatePrice || '缓存写入';
+
+function formatCompactBillingPrice(label, price, ttl = '') {
+  const localizedLabel = i18next.t(label);
+  return i18next.t('{{label}} {{price}} / 1M tokens', {
+    label: ttl ? `${localizedLabel} (${ttl})` : localizedLabel,
+    price,
+  });
+}
+
+function formatCompactBillingRatio(label, ratio) {
+  return i18next.t('{{label}}: {{ratio}}', {
+    label: i18next.t(label),
+    ratio,
+  });
+}
+
+function localizeCacheLabel(label, period = '') {
+  const localizedLabel = i18next.t(label);
+  return period ? `${period} ${localizedLabel}` : localizedLabel;
+}
+
+function formatBillingCacheTokenLine({
+  label,
+  period = '',
+  tokens,
+  symbol,
+  price,
+}) {
+  return i18next.t(
+      '{{label}} {{tokens}} tokens / 1M tokens * {{symbol}}{{price}}',
+      {
+        label: localizeCacheLabel(label, period),
+        tokens,
+        symbol,
+        price,
+      },
+  );
+}
+
+function formatBillingCacheRatioLine(label, values, period = '') {
+  return i18next.t('{{label}}倍率 {{values}}', {
+    label: localizeCacheLabel(label, period),
+    values,
+  });
+}
+
+function formatBillingCacheBreakdown({
+  label,
+  period = '',
+  tokens,
+  modelRatio,
+  cacheRatio,
+  ratioType,
+  ratio,
+  amount,
+}) {
+  const localizedLabel = localizeCacheLabel(label, period);
+  return i18next.t(
+      '{{label}}：{{tokens}} / 1M * 模型倍率 {{modelRatio}} * {{label}}倍率 {{cacheRatio}} * {{ratioType}} {{ratio}} = {{amount}}',
+      {
+        label: localizedLabel,
+        tokens,
+        modelRatio,
+        cacheRatio,
+        ratioType,
+        ratio,
+        amount,
+      },
+  );
+}
+
 function appendPricePart(parts, condition, key, vars) {
   if (!condition) {
     return;
@@ -1448,40 +1524,46 @@ function renderPriceSimpleCore({
       if (shouldShowCache) {
         segments.push({
           tone: 'secondary',
-          text: i18next.t('缓存读 {{price}} / 1M tokens', {
-            price: formatCompactDisplayPrice(modelRatio * 2.0 * cacheRatio),
-          }),
+          text: formatCompactBillingPrice(
+              CACHE_HIT_SHORT_LABEL,
+              formatCompactDisplayPrice(modelRatio * 2.0 * cacheRatio),
+          ),
         });
       }
 
       if (hasSplitCacheCreation && shouldShowCacheCreation5m) {
         segments.push({
           tone: 'secondary',
-          text: i18next.t('5m缓存创建 {{price}} / 1M tokens', {
-            price: formatCompactDisplayPrice(
+          text: formatCompactBillingPrice(
+              CACHE_WRITE_SHORT_LABEL,
+              formatCompactDisplayPrice(
                 modelRatio * 2.0 * cacheCreationRatio5m,
-            ),
-          }),
+              ),
+              '5m',
+          ),
         });
       }
       if (hasSplitCacheCreation && shouldShowCacheCreation1h) {
         segments.push({
           tone: 'secondary',
-          text: i18next.t('1h缓存创建 {{price}} / 1M tokens', {
-            price: formatCompactDisplayPrice(
+          text: formatCompactBillingPrice(
+              CACHE_WRITE_SHORT_LABEL,
+              formatCompactDisplayPrice(
                 modelRatio * 2.0 * cacheCreationRatio1h,
-            ),
-          }),
+              ),
+              '1h',
+          ),
         });
       }
       if (!hasSplitCacheCreation && shouldShowLegacyCacheCreation) {
         segments.push({
           tone: 'secondary',
-          text: i18next.t('缓存创建 {{price}} / 1M tokens', {
-            price: formatCompactDisplayPrice(
+          text: formatCompactBillingPrice(
+              CACHE_WRITE_SHORT_LABEL,
+              formatCompactDisplayPrice(
                 modelRatio * 2.0 * cacheCreationRatio,
-            ),
-          }),
+              ),
+          ),
         });
       }
 
@@ -1504,9 +1586,7 @@ function renderPriceSimpleCore({
       if (shouldShowCache) {
         segments.push({
           tone: 'secondary',
-          text: i18next.t('缓存: {{cacheRatio}}', {
-            cacheRatio: cacheRatio,
-          }),
+          text: formatCompactBillingRatio(CACHE_HIT_SHORT_LABEL, cacheRatio),
         });
       }
 
@@ -1514,35 +1594,35 @@ function renderPriceSimpleCore({
         if (shouldShowCacheCreation5m && shouldShowCacheCreation1h) {
           segments.push({
             tone: 'secondary',
-            text: i18next.t(
-                '缓存创建: 5m {{cacheCreationRatio5m}} / 1h {{cacheCreationRatio1h}}',
-                {
-                  cacheCreationRatio5m: cacheCreationRatio5m,
-                  cacheCreationRatio1h: cacheCreationRatio1h,
-                },
+            text: formatCompactBillingRatio(
+                CACHE_WRITE_SHORT_LABEL,
+                `5m ${cacheCreationRatio5m} / 1h ${cacheCreationRatio1h}`,
             ),
           });
         } else if (shouldShowCacheCreation5m) {
           segments.push({
             tone: 'secondary',
-            text: i18next.t('缓存创建: 5m {{cacheCreationRatio5m}}', {
-              cacheCreationRatio5m: cacheCreationRatio5m,
-            }),
+            text: formatCompactBillingRatio(
+                CACHE_WRITE_SHORT_LABEL,
+                `5m ${cacheCreationRatio5m}`,
+            ),
           });
         } else if (shouldShowCacheCreation1h) {
           segments.push({
             tone: 'secondary',
-            text: i18next.t('缓存创建: 1h {{cacheCreationRatio1h}}', {
-              cacheCreationRatio1h: cacheCreationRatio1h,
-            }),
+            text: formatCompactBillingRatio(
+                CACHE_WRITE_SHORT_LABEL,
+                `1h ${cacheCreationRatio1h}`,
+            ),
           });
         }
       } else if (shouldShowLegacyCacheCreation) {
         segments.push({
           tone: 'secondary',
-          text: i18next.t('缓存创建: {{cacheCreationRatio}}', {
-            cacheCreationRatio: cacheCreationRatio,
-          }),
+          text: formatCompactBillingRatio(
+              CACHE_WRITE_SHORT_LABEL,
+              cacheCreationRatio,
+          ),
         });
       }
 
@@ -1605,37 +1685,43 @@ function renderPriceSimpleCore({
 
     if (shouldShowCache) {
       parts.push(
-          i18next.t('缓存读 {{price}} / 1M tokens', {
-            price: formatCompactDisplayPrice(modelRatio * 2.0 * cacheRatio),
-          }),
+          formatCompactBillingPrice(
+              CACHE_HIT_SHORT_LABEL,
+              formatCompactDisplayPrice(modelRatio * 2.0 * cacheRatio),
+          ),
       );
     }
 
     if (hasSplitCacheCreation && shouldShowCacheCreation5m) {
       parts.push(
-          i18next.t('5m缓存创建 {{price}} / 1M tokens', {
-            price: formatCompactDisplayPrice(
+          formatCompactBillingPrice(
+              CACHE_WRITE_SHORT_LABEL,
+              formatCompactDisplayPrice(
                 modelRatio * 2.0 * cacheCreationRatio5m,
-            ),
-          }),
+              ),
+              '5m',
+          ),
       );
     }
     if (hasSplitCacheCreation && shouldShowCacheCreation1h) {
       parts.push(
-          i18next.t('1h缓存创建 {{price}} / 1M tokens', {
-            price: formatCompactDisplayPrice(
+          formatCompactBillingPrice(
+              CACHE_WRITE_SHORT_LABEL,
+              formatCompactDisplayPrice(
                 modelRatio * 2.0 * cacheCreationRatio1h,
-            ),
-          }),
+              ),
+              '1h',
+          ),
       );
     }
     if (!hasSplitCacheCreation && shouldShowLegacyCacheCreation) {
       parts.push(
-          i18next.t('缓存创建 {{price}} / 1M tokens', {
-            price: formatCompactDisplayPrice(
+          formatCompactBillingPrice(
+              CACHE_WRITE_SHORT_LABEL,
+              formatCompactDisplayPrice(
                 modelRatio * 2.0 * cacheCreationRatio,
-            ),
-          }),
+              ),
+          ),
       );
     }
 
@@ -1662,23 +1748,39 @@ function renderPriceSimpleCore({
 
   // cache part (label differs when with image)
   if (shouldShowCache) {
-    parts.push(i18next.t('缓存: {{cacheRatio}}'));
+    parts.push(formatCompactBillingRatio(CACHE_HIT_SHORT_LABEL, cacheRatio));
   }
 
   if (hasSplitCacheCreation) {
     if (shouldShowCacheCreation5m && shouldShowCacheCreation1h) {
       parts.push(
-          i18next.t(
-              '缓存创建: 5m {{cacheCreationRatio5m}} / 1h {{cacheCreationRatio1h}}',
+          formatCompactBillingRatio(
+              CACHE_WRITE_SHORT_LABEL,
+              `5m ${cacheCreationRatio5m} / 1h ${cacheCreationRatio1h}`,
           ),
       );
     } else if (shouldShowCacheCreation5m) {
-      parts.push(i18next.t('缓存创建: 5m {{cacheCreationRatio5m}}'));
+      parts.push(
+          formatCompactBillingRatio(
+              CACHE_WRITE_SHORT_LABEL,
+              `5m ${cacheCreationRatio5m}`,
+          ),
+      );
     } else if (shouldShowCacheCreation1h) {
-      parts.push(i18next.t('缓存创建: 1h {{cacheCreationRatio1h}}'));
+      parts.push(
+          formatCompactBillingRatio(
+              CACHE_WRITE_SHORT_LABEL,
+              `1h ${cacheCreationRatio1h}`,
+          ),
+      );
     }
   } else if (shouldShowLegacyCacheCreation) {
-    parts.push(i18next.t('缓存创建: {{cacheCreationRatio}}'));
+    parts.push(
+        formatCompactBillingRatio(
+            CACHE_WRITE_SHORT_LABEL,
+            cacheCreationRatio,
+        ),
+    );
   }
 
   // image part
@@ -2917,7 +3019,8 @@ export function renderClaudeModelPrice(opts) {
 
     if (shouldShowCache) {
       breakdownSegments.push(
-          i18next.t('缓存 {{tokens}} tokens / 1M tokens * {{symbol}}{{price}}', {
+          formatBillingCacheTokenLine({
+            label: '缓存命中',
             tokens: cacheTokens,
             symbol,
             price: cacheUnitPrice.toFixed(6),
@@ -2927,40 +3030,36 @@ export function renderClaudeModelPrice(opts) {
 
     if (shouldShowLegacyCacheCreation) {
       breakdownSegments.push(
-          i18next.t(
-              '缓存创建 {{tokens}} tokens / 1M tokens * {{symbol}}{{price}}',
-              {
-                tokens: cacheCreationTokens,
-                symbol,
-                price: cacheCreationUnitPrice.toFixed(6),
-              },
-          ),
+          formatBillingCacheTokenLine({
+            label: '缓存写入',
+            tokens: cacheCreationTokens,
+            symbol,
+            price: cacheCreationUnitPrice.toFixed(6),
+          }),
       );
     }
 
     if (shouldShowCacheCreation5m) {
       breakdownSegments.push(
-          i18next.t(
-              '5m缓存创建 {{tokens}} tokens / 1M tokens * {{symbol}}{{price}}',
-              {
-                tokens: cacheCreationTokens5m,
-                symbol,
-                price: cacheCreationUnitPrice5m.toFixed(6),
-              },
-          ),
+          formatBillingCacheTokenLine({
+            label: '缓存写入',
+            period: '5m',
+            tokens: cacheCreationTokens5m,
+            symbol,
+            price: cacheCreationUnitPrice5m.toFixed(6),
+          }),
       );
     }
 
     if (shouldShowCacheCreation1h) {
       breakdownSegments.push(
-          i18next.t(
-              '1h缓存创建 {{tokens}} tokens / 1M tokens * {{symbol}}{{price}}',
-              {
-                tokens: cacheCreationTokens1h,
-                symbol,
-                price: cacheCreationUnitPrice1h.toFixed(6),
-              },
-          ),
+          formatBillingCacheTokenLine({
+            label: '缓存写入',
+            period: '1h',
+            tokens: cacheCreationTokens1h,
+            symbol,
+            price: cacheCreationUnitPrice1h.toFixed(6),
+          }),
       );
     }
 
@@ -3100,16 +3199,11 @@ export function renderClaudeModelPrice(opts) {
         },
     ),
     hasSplitCacheCreation
-        ? buildBillingText(
-            '缓存创建倍率 5m {{cacheCreationRatio5m}} / 1h {{cacheCreationRatio1h}}',
-            {
-              cacheCreationRatio5m: cacheCreationRatio5mValue,
-              cacheCreationRatio1h: cacheCreationRatio1hValue,
-            },
+        ? formatBillingCacheRatioLine(
+            '缓存写入',
+            `5m ${cacheCreationRatio5mValue} / 1h ${cacheCreationRatio1hValue}`,
         )
-        : buildBillingText('缓存创建倍率 {{cacheCreationRatio}}', {
-          cacheCreationRatio: cacheCreationRatioValue,
-        }),
+        : formatBillingCacheRatioLine('缓存写入', cacheCreationRatioValue),
     buildBillingText(
         '普通输入：{{tokens}} / 1M * 模型倍率 {{modelRatio}} * {{ratioType}} {{ratio}} = {{amount}}',
         {
@@ -3123,76 +3217,70 @@ export function renderClaudeModelPrice(opts) {
         },
     ),
     shouldShowCache
-        ? buildBillingText(
-            '缓存读取：{{tokens}} / 1M * 模型倍率 {{modelRatio}} * 缓存倍率 {{cacheRatio}} * {{ratioType}} {{ratio}} = {{amount}}',
-            {
-              tokens: cacheTokens,
-              modelRatio: modelRatioValue,
-              cacheRatio: cacheRatioValue,
-              ratioType: ratioLabel,
-              ratio: groupRatio,
-              amount: renderDisplayAmountFromUsd(
-                  (cacheTokens / 1000000) *
-                  inputRatioPrice *
-                  cacheRatioValue *
-                  groupRatio,
-              ),
-            },
-        )
+        ? formatBillingCacheBreakdown({
+            label: '缓存命中',
+            tokens: cacheTokens,
+            modelRatio: modelRatioValue,
+            cacheRatio: cacheRatioValue,
+            ratioType: ratioLabel,
+            ratio: groupRatio,
+            amount: renderDisplayAmountFromUsd(
+                (cacheTokens / 1000000) *
+                inputRatioPrice *
+                cacheRatioValue *
+                groupRatio,
+            ),
+        })
         : null,
     shouldShowLegacyCacheCreation
-        ? buildBillingText(
-            '缓存创建：{{tokens}} / 1M * 模型倍率 {{modelRatio}} * 缓存创建倍率 {{cacheCreationRatio}} * {{ratioType}} {{ratio}} = {{amount}}',
-            {
-              tokens: cacheCreationTokens,
-              modelRatio: modelRatioValue,
-              cacheCreationRatio: cacheCreationRatioValue,
-              ratioType: ratioLabel,
-              ratio: groupRatio,
-              amount: renderDisplayAmountFromUsd(
-                  (cacheCreationTokens / 1000000) *
-                  inputRatioPrice *
-                  cacheCreationRatioValue *
-                  groupRatio,
-              ),
-            },
-        )
+        ? formatBillingCacheBreakdown({
+            label: '缓存写入',
+            tokens: cacheCreationTokens,
+            modelRatio: modelRatioValue,
+            cacheRatio: cacheCreationRatioValue,
+            ratioType: ratioLabel,
+            ratio: groupRatio,
+            amount: renderDisplayAmountFromUsd(
+                (cacheCreationTokens / 1000000) *
+                inputRatioPrice *
+                cacheCreationRatioValue *
+                groupRatio,
+            ),
+        })
         : null,
     shouldShowCacheCreation5m
-        ? buildBillingText(
-            '5m缓存创建：{{tokens}} / 1M * 模型倍率 {{modelRatio}} * 5m缓存创建倍率 {{cacheCreationRatio5m}} * {{ratioType}} {{ratio}} = {{amount}}',
-            {
-              tokens: cacheCreationTokens5m,
-              modelRatio: modelRatioValue,
-              cacheCreationRatio5m: cacheCreationRatio5mValue,
-              ratioType: ratioLabel,
-              ratio: groupRatio,
-              amount: renderDisplayAmountFromUsd(
-                  (cacheCreationTokens5m / 1000000) *
-                  inputRatioPrice *
-                  cacheCreationRatio5mValue *
-                  groupRatio,
-              ),
-            },
-        )
+        ? formatBillingCacheBreakdown({
+            label: '缓存写入',
+            period: '5m',
+            tokens: cacheCreationTokens5m,
+            modelRatio: modelRatioValue,
+            cacheRatio: cacheCreationRatio5mValue,
+            ratioType: ratioLabel,
+            ratio: groupRatio,
+            amount: renderDisplayAmountFromUsd(
+                (cacheCreationTokens5m / 1000000) *
+                inputRatioPrice *
+                cacheCreationRatio5mValue *
+                groupRatio,
+            ),
+        })
         : null,
     shouldShowCacheCreation1h
-        ? buildBillingText(
-            '1h缓存创建：{{tokens}} / 1M * 模型倍率 {{modelRatio}} * 1h缓存创建倍率 {{cacheCreationRatio1h}} * {{ratioType}} {{ratio}} = {{amount}}',
-            {
-              tokens: cacheCreationTokens1h,
-              modelRatio: modelRatioValue,
-              cacheCreationRatio1h: cacheCreationRatio1hValue,
-              ratioType: ratioLabel,
-              ratio: groupRatio,
-              amount: renderDisplayAmountFromUsd(
-                  (cacheCreationTokens1h / 1000000) *
-                  inputRatioPrice *
-                  cacheCreationRatio1hValue *
-                  groupRatio,
-              ),
-            },
-        )
+        ? formatBillingCacheBreakdown({
+            label: '缓存写入',
+            period: '1h',
+            tokens: cacheCreationTokens1h,
+            modelRatio: modelRatioValue,
+            cacheRatio: cacheCreationRatio1hValue,
+            ratioType: ratioLabel,
+            ratio: groupRatio,
+            amount: renderDisplayAmountFromUsd(
+                (cacheCreationTokens1h / 1000000) *
+                inputRatioPrice *
+                cacheCreationRatio1hValue *
+                groupRatio,
+            ),
+        })
         : null,
     buildBillingText(
         '补全 {{completion}} tokens * 输出倍率 {{completionRatio}}',
@@ -3323,40 +3411,36 @@ export function renderClaudeLogContent(opts) {
     let cacheCreationPart = null;
     if (hasSplitCacheCreation) {
       if (shouldShowCacheCreation5m && shouldShowCacheCreation1h) {
-        cacheCreationPart = i18next.t(
-            '缓存创建倍率 5m {{cacheCreationRatio5m}} / 1h {{cacheCreationRatio1h}}',
-            {
-              cacheCreationRatio5m,
-              cacheCreationRatio1h,
-            },
+        cacheCreationPart = formatBillingCacheRatioLine(
+            '缓存写入',
+            `5m ${cacheCreationRatio5m} / 1h ${cacheCreationRatio1h}`,
         );
       } else if (shouldShowCacheCreation5m) {
-        cacheCreationPart = i18next.t(
-            '缓存创建倍率 5m {{cacheCreationRatio5m}}',
-            {
-              cacheCreationRatio5m,
-            },
+        cacheCreationPart = formatBillingCacheRatioLine(
+            '缓存写入',
+            cacheCreationRatio5m,
+            '5m',
         );
       } else if (shouldShowCacheCreation1h) {
-        cacheCreationPart = i18next.t(
-            '缓存创建倍率 1h {{cacheCreationRatio1h}}',
-            {
-              cacheCreationRatio1h,
-            },
+        cacheCreationPart = formatBillingCacheRatioLine(
+            '缓存写入',
+            cacheCreationRatio1h,
+            '1h',
         );
       }
     }
 
     if (!cacheCreationPart) {
-      cacheCreationPart = i18next.t('缓存创建倍率 {{cacheCreationRatio}}', {
-        cacheCreationRatio,
-      });
+      cacheCreationPart = formatBillingCacheRatioLine(
+          '缓存写入',
+          cacheCreationRatio,
+      );
     }
 
     const parts = [
       i18next.t('模型倍率 {{modelRatio}}', { modelRatio }),
       i18next.t('输出倍率 {{completionRatio}}', { completionRatio }),
-      i18next.t('缓存倍率 {{cacheRatio}}', { cacheRatio }),
+      formatBillingCacheRatioLine('缓存命中', cacheRatio),
       cacheCreationPart,
       i18next.t('{{ratioType}} {{ratio}}', {
         ratioType: ratioLabel,
