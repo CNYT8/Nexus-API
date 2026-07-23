@@ -26,6 +26,7 @@ import {
   LayoutDashboard,
   ListTodo,
   MessageSquare,
+  MessageSquareText,
   Radio,
   Settings,
   Ticket,
@@ -139,7 +140,7 @@ export function useSidebarData(): SidebarData {
           {
             title: t('Ticket Management'),
             url: '/tickets/manage',
-            icon: Ticket,
+            icon: MessageSquareText,
           },
           {
             title: t('Users'),

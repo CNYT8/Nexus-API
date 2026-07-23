@@ -24,7 +24,6 @@ import {
   Modal,
   Pagination,
   Select,
-  Spin,
   Tag,
   TextArea,
   Typography,
@@ -118,7 +117,7 @@ const TicketDetailModal = ({
       visible={visible}
       onCancel={onClose}
       footer={null}
-      width={680}
+      width={720}
     >
       {ticket && (
         <div className='flex flex-col gap-4'>
@@ -126,7 +125,7 @@ const TicketDetailModal = ({
             <Text type='tertiary'>{t('工单类型')}</Text>
             <Text>{<TicketType type={ticket.type} t={t} />}</Text>
           </div>
-          <div className='max-h-[45vh] space-y-3 overflow-y-auto rounded-lg border p-3'>
+          <div className='max-h-[45vh] space-y-3 overflow-y-auto rounded-lg border border-semi-color-border p-3'>
             {(ticket.messages || []).map((message) => (
               <div
                 key={message.id}
@@ -291,22 +290,10 @@ const TicketCenter = () => {
     }
   };
 
-  if (!settingsLoaded) {
-    return (
-      <div className='mt-[60px] px-2'>
-        <Card className='mx-auto max-w-4xl' bodyStyle={{ padding: 24 }}>
-          <div className='flex min-h-32 items-center justify-center'>
-            <Spin spinning />
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
   if (settingsLoaded && !ticketEnabled) {
     return (
       <div className='mt-[60px] px-2'>
-        <Card className='mx-auto max-w-4xl' bodyStyle={{ padding: 24 }}>
+        <Card className='w-full !rounded-lg' bodyStyle={{ padding: 24 }}>
           <Title heading={4}>{t('工单中心')}</Title>
           <Text type='tertiary'>{t('工单中心未开启')}</Text>
         </Card>
@@ -316,7 +303,7 @@ const TicketCenter = () => {
 
   return (
     <div className='mt-[60px] px-2'>
-      <Card className='mx-auto max-w-4xl' bodyStyle={{ padding: 24 }}>
+      <Card className='w-full !rounded-lg' bodyStyle={{ padding: 24 }}>
         <div className='mb-5 flex flex-wrap items-center justify-between gap-3'>
           <div>
             <Title heading={4} className='!mb-1'>
@@ -369,48 +356,46 @@ const TicketCenter = () => {
         </Form>
 
         {showMyTickets && (
-          <div className='mt-6 border-t pt-5'>
+          <div className='mt-6 border-t border-semi-color-border pt-5'>
             <div className='mb-3 flex items-center justify-between'>
               <Text strong>{t('我的工单')}</Text>
               <Text type='tertiary' size='small'>
                 {t('共 {{count}} 条', { count: ticketTotal })}
               </Text>
             </div>
-            <Spin spinning={loading}>
-              {tickets.length === 0 ? (
-                <Empty description={t('暂无工单')} />
-              ) : (
-                <div className='space-y-2'>
-                  {tickets.map((ticket) => (
-                    <div
-                      key={ticket.id}
-                      role='button'
-                      tabIndex={0}
-                      onClick={() => openTicket(ticket)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') openTicket(ticket);
-                      }}
-                      className='flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-semi-color-border px-3 py-3 transition-colors hover:bg-semi-color-fill-0'
-                    >
-                      <div className='min-w-0'>
-                        <div className='flex items-center gap-2'>
-                          <Text strong ellipsis={{ showTooltip: true }}>
-                            #{ticket.id}
-                          </Text>
-                          <Text type='tertiary' size='small'>
-                            <TicketType type={ticket.type} t={t} />
-                          </Text>
-                        </div>
+            {loading && tickets.length === 0 ? null : tickets.length === 0 ? (
+              <Empty description={t('暂无工单')} />
+            ) : (
+              <div className='space-y-2'>
+                {tickets.map((ticket) => (
+                  <div
+                    key={ticket.id}
+                    role='button'
+                    tabIndex={0}
+                    onClick={() => openTicket(ticket)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') openTicket(ticket);
+                    }}
+                    className='flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-semi-color-border px-3 py-3 transition-colors hover:bg-semi-color-fill-0'
+                  >
+                    <div className='min-w-0'>
+                      <div className='flex items-center gap-2'>
+                        <Text strong ellipsis={{ showTooltip: true }}>
+                          #{ticket.id}
+                        </Text>
                         <Text type='tertiary' size='small'>
-                          {new Date(ticket.updated_at).toLocaleString()}
+                          <TicketType type={ticket.type} t={t} />
                         </Text>
                       </div>
-                      <TicketStatus status={ticket.status} t={t} />
+                      <Text type='tertiary' size='small'>
+                        {new Date(ticket.updated_at).toLocaleString()}
+                      </Text>
                     </div>
-                  ))}
-                </div>
-              )}
-            </Spin>
+                    <TicketStatus status={ticket.status} t={t} />
+                  </div>
+                ))}
+              </div>
+            )}
             {ticketTotal > PAGE_SIZE && (
               <div className='mt-4 flex justify-center'>
                 <Pagination

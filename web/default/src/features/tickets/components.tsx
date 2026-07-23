@@ -57,10 +57,14 @@ export function getTicketTypeLabel(t: TFunction, type: TicketType) {
   return t(typeTextKey[type])
 }
 
-export function TicketMessages(props: { messages: TicketMessage[]; adminView?: boolean }) {
+export function TicketMessages(props: {
+  messages: TicketMessage[]
+  adminView?: boolean
+  customerName?: string
+}) {
   const { t } = useTranslation()
   return (
-    <div className='max-h-[50vh] space-y-3 overflow-y-auto rounded-lg border p-3'>
+    <div className='border-border max-h-[50vh] space-y-3 overflow-y-auto rounded-lg border p-3'>
       {props.messages.map((message) => {
         const isAdmin = message.author_role === 'admin'
         return (
@@ -78,7 +82,7 @@ export function TicketMessages(props: { messages: TicketMessage[]; adminView?: b
                 {isAdmin
                   ? t('Administrator')
                   : props.adminView
-                    ? t('Customer')
+                    ? props.customerName || t('Customer')
                     : t('Me')}
               </div>
               <div className='whitespace-pre-wrap break-words'>

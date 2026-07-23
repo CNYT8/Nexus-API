@@ -68,6 +68,7 @@ import {
   LayoutDashboard,
   TerminalSquare,
   MessageSquare,
+  MessageSquareText,
   Key,
   BarChart3,
   Activity,
@@ -145,8 +146,9 @@ export function getLucideIcon(key, selected = false) {
     case 'model_monitor':
       return <Activity {...commonProps} color={iconColor} />;
     case 'tickets':
-    case 'ticket_admin':
       return <Ticket {...commonProps} color={iconColor} />;
+    case 'ticket_admin':
+      return <MessageSquareText {...commonProps} color={iconColor} />;
     case 'midjourney':
       return <ImageIcon {...commonProps} color={iconColor} />;
     case 'task':

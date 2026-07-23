@@ -153,19 +153,6 @@ export function TicketCenter() {
   const ticketTotal = ticketsQuery.data?.data?.total ?? 0
   const selectedTicket = detailQuery.data?.data
 
-  if (settingsQuery.isLoading && !settingsQuery.data) {
-    return (
-      <SectionPageLayout>
-        <SectionPageLayout.Title>{t('Ticket Center')}</SectionPageLayout.Title>
-        <SectionPageLayout.Content>
-          <p className='text-muted-foreground py-12 text-center text-sm'>
-            {t('Loading...')}
-          </p>
-        </SectionPageLayout.Content>
-      </SectionPageLayout>
-    )
-  }
-
   if (settingsQuery.data?.success && settingsQuery.data.data?.enabled === false) {
     return (
       <SectionPageLayout>
@@ -193,7 +180,7 @@ export function TicketCenter() {
         </Button>
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
-        <div className='mx-auto flex w-full max-w-4xl flex-col gap-6'>
+        <div className='flex w-full flex-col gap-6'>
           <Card>
             <CardHeader>
               <CardTitle>{t('Submit a ticket')}</CardTitle>
@@ -251,11 +238,7 @@ export function TicketCenter() {
                   {t('{{count}} total', { count: ticketTotal })}
                 </span>
               </div>
-              {ticketsQuery.isLoading ? (
-                <div className='text-muted-foreground py-10 text-center text-sm'>
-                  {t('Loading...')}
-                </div>
-              ) : tickets.length === 0 ? (
+              {ticketsQuery.isPending && tickets.length === 0 ? null : tickets.length === 0 ? (
                 <EmptyState
                   icon={MessageSquareText}
                   title={t('No tickets yet')}
@@ -263,7 +246,7 @@ export function TicketCenter() {
                   className='min-h-44 border'
                 />
               ) : (
-                <div className='divide-y rounded-lg border'>
+                <div className='border-border divide-y rounded-lg border'>
                   {tickets.map((ticket) => (
                     <button
                       key={ticket.id}
@@ -302,7 +285,7 @@ export function TicketCenter() {
         open={selectedId !== null}
         onOpenChange={(open) => !open && setSelectedId(null)}
       >
-        <DialogContent className='flex max-h-[85vh] max-w-2xl flex-col'>
+        <DialogContent className='flex max-h-[85vh] max-w-3xl flex-col'>
           <DialogHeader>
             <DialogTitle className='flex items-center gap-2'>
               {t('Ticket Details')}

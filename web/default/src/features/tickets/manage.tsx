@@ -158,19 +158,6 @@ export function TicketManagement() {
   const ticketTotal = ticketsQuery.data?.data?.total ?? 0
   const selectedTicket = detailQuery.data?.data
 
-  if (settingsQuery.isLoading && !settingsQuery.data) {
-    return (
-      <SectionPageLayout>
-        <SectionPageLayout.Title>{t('Ticket Management')}</SectionPageLayout.Title>
-        <SectionPageLayout.Content>
-          <p className='text-muted-foreground py-12 text-center text-sm'>
-            {t('Loading...')}
-          </p>
-        </SectionPageLayout.Content>
-      </SectionPageLayout>
-    )
-  }
-
   if (settingsQuery.data?.success && settingsQuery.data.data?.enabled === false) {
     return (
       <SectionPageLayout>
@@ -208,15 +195,11 @@ export function TicketManagement() {
         </Select>
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
-        <div className='mx-auto w-full max-w-5xl space-y-3'>
+        <div className='w-full space-y-3'>
           <p className='text-muted-foreground text-sm'>
             {t('Review and respond to all user tickets.')}
           </p>
-          {ticketsQuery.isLoading ? (
-            <div className='text-muted-foreground py-12 text-center text-sm'>
-              {t('Loading...')}
-            </div>
-          ) : tickets.length === 0 ? (
+          {ticketsQuery.isPending && tickets.length === 0 ? null : tickets.length === 0 ? (
             <EmptyState
               icon={MessageSquareText}
               title={t('No tickets yet')}
@@ -224,7 +207,7 @@ export function TicketManagement() {
               className='min-h-52 border'
             />
           ) : (
-            <div className='divide-y rounded-lg border'>
+            <div className='border-border divide-y rounded-lg border'>
               {tickets.map((ticket) => (
                 <button
                   key={ticket.id}
@@ -269,7 +252,7 @@ export function TicketManagement() {
         open={selectedId !== null}
         onOpenChange={(open) => !open && setSelectedId(null)}
       >
-        <DialogContent className='flex max-h-[85vh] max-w-2xl flex-col'>
+        <DialogContent className='flex max-h-[85vh] max-w-3xl flex-col'>
           <DialogHeader>
             <DialogTitle className='flex items-center gap-2'>
               {t('Ticket Details')}
@@ -288,7 +271,11 @@ export function TicketManagement() {
             </div>
           ) : selectedTicket ? (
             <div className='space-y-4 overflow-y-auto'>
-              <TicketMessages messages={selectedTicket.messages} adminView />
+              <TicketMessages
+                messages={selectedTicket.messages}
+                adminView
+                customerName={selectedTicket.username}
+              />
               {selectedTicket.status !== 'closed' && (
                 <div className='flex items-end gap-2'>
                   <Textarea
@@ -310,7 +297,7 @@ export function TicketManagement() {
                 </div>
               )}
               {canClose && (
-                <div className='flex justify-end border-t pt-3'>
+                <div className='border-border flex justify-end border-t pt-3 pb-2'>
                   {selectedTicket.status === 'closed' ? (
                     <Button
                       type='button'

@@ -23,7 +23,6 @@ import {
   Modal,
   Pagination,
   Select,
-  Spin,
   Tag,
   TextArea,
   Typography,
@@ -171,22 +170,10 @@ const TicketManagement = () => {
     }
   };
 
-  if (!settingsLoaded) {
-    return (
-      <div className='mt-[60px] px-2'>
-        <Card className='mx-auto max-w-5xl' bodyStyle={{ padding: 24 }}>
-          <div className='flex min-h-32 items-center justify-center'>
-            <Spin spinning />
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
   if (!ticketEnabled) {
     return (
       <div className='mt-[60px] px-2'>
-        <Card className='mx-auto max-w-5xl' bodyStyle={{ padding: 24 }}>
+        <Card className='w-full !rounded-lg' bodyStyle={{ padding: 24 }}>
           <Title heading={4}>{t('工单管理')}</Title>
           <Text type='tertiary'>{t('工单中心未开启')}</Text>
         </Card>
@@ -196,7 +183,7 @@ const TicketManagement = () => {
 
   return (
     <div className='mt-[60px] px-2'>
-      <Card className='mx-auto max-w-5xl' bodyStyle={{ padding: 24 }}>
+      <Card className='w-full !rounded-lg' bodyStyle={{ padding: 24 }}>
         <div className='mb-5 flex flex-wrap items-center justify-between gap-3'>
           <div>
             <Title heading={4} className='!mb-1'>
@@ -219,47 +206,45 @@ const TicketManagement = () => {
           />
         </div>
 
-        <Spin spinning={loading}>
-          {tickets.length === 0 ? (
-            <Empty description={t('暂无工单')} />
-          ) : (
-            <div className='space-y-2'>
-              {tickets.map((ticket) => (
-                <div
-                  key={ticket.id}
-                  role='button'
-                  tabIndex={0}
-                  onClick={() => openTicket(ticket)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') openTicket(ticket);
-                  }}
-                  className='flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-semi-color-border px-4 py-3 transition-colors hover:bg-semi-color-fill-0'
-                >
-                  <div className='min-w-0'>
-                    <div className='flex flex-wrap items-center gap-2'>
-                      <Text strong>#{ticket.id}</Text>
-                      <Text>{ticket.username || t('未知用户')}</Text>
-                      <Text type='tertiary' size='small'>
-                        <TicketType type={ticket.type} t={t} />
-                      </Text>
-                      {ticket.last_author === 'user' &&
-                        ticket.has_admin_reply &&
-                        ticket.status !== 'closed' && (
-                          <Tag color='blue' shape='circle'>
-                            {t('客户回复')}
-                          </Tag>
-                        )}
-                    </div>
+        {loading && tickets.length === 0 ? null : tickets.length === 0 ? (
+          <Empty description={t('暂无工单')} />
+        ) : (
+          <div className='space-y-2'>
+            {tickets.map((ticket) => (
+              <div
+                key={ticket.id}
+                role='button'
+                tabIndex={0}
+                onClick={() => openTicket(ticket)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') openTicket(ticket);
+                }}
+                className='flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-semi-color-border px-4 py-3 transition-colors hover:bg-semi-color-fill-0'
+              >
+                <div className='min-w-0'>
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <Text strong>#{ticket.id}</Text>
+                    <Text>{ticket.username || t('未知用户')}</Text>
                     <Text type='tertiary' size='small'>
-                      {new Date(ticket.updated_at).toLocaleString()}
+                      <TicketType type={ticket.type} t={t} />
                     </Text>
+                    {ticket.last_author === 'user' &&
+                      ticket.has_admin_reply &&
+                      ticket.status !== 'closed' && (
+                        <Tag color='blue' shape='circle'>
+                          {t('客户回复')}
+                        </Tag>
+                      )}
                   </div>
-                  <TicketStatus status={ticket.status} t={t} />
+                  <Text type='tertiary' size='small'>
+                    {new Date(ticket.updated_at).toLocaleString()}
+                  </Text>
                 </div>
-              ))}
-            </div>
-          )}
-        </Spin>
+                <TicketStatus status={ticket.status} t={t} />
+              </div>
+            ))}
+          </div>
+        )}
         {ticketTotal > PAGE_SIZE && (
           <div className='mt-4 flex justify-center'>
             <Pagination
@@ -286,7 +271,7 @@ const TicketManagement = () => {
         visible={Boolean(selectedTicket)}
         onCancel={() => setSelectedTicket(null)}
         footer={null}
-        width={720}
+        width={760}
       >
         {selectedTicket && (
           <div className='flex flex-col gap-4'>
@@ -298,7 +283,7 @@ const TicketManagement = () => {
                 <TicketType type={selectedTicket.type} t={t} />
               </Text>
             </div>
-            <div className='max-h-[50vh] space-y-3 overflow-y-auto rounded-lg border p-3'>
+            <div className='max-h-[50vh] space-y-3 overflow-y-auto rounded-lg border border-semi-color-border p-3'>
               {(selectedTicket.messages || []).map((message) => (
                 <div key={message.id} className='flex justify-start'>
                   <div
@@ -313,7 +298,7 @@ const TicketManagement = () => {
                     <div className='mb-1 text-xs text-semi-color-text-2'>
                       {message.author_role === 'admin'
                         ? t('管理员')
-                        : t('客户')}
+                        : selectedTicket.username || t('客户')}
                     </div>
                     <div className='whitespace-pre-wrap break-words'>
                       {message.content}
@@ -349,7 +334,7 @@ const TicketManagement = () => {
               </div>
             )}
             {(isRoot() || adminCanClose) && (
-              <div className='flex justify-end gap-2 border-t pt-3'>
+              <div className='flex justify-end gap-2 border-t border-semi-color-border pt-3 pb-2'>
                 {selectedTicket.status !== 'closed' ? (
                   <Button
                     type='tertiary'
