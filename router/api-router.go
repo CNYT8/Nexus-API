@@ -35,6 +35,24 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/model_monitor", middleware.UserAuth(), controller.GetModelMonitor)
 		apiRouter.GET("/membership/self", middleware.UserAuth(), controller.GetMembershipSelf)
 		apiRouter.GET("/membership/admin/tiers", middleware.AdminAuth(), controller.AdminGetMembershipTiers)
+		apiRouter.PUT("/tickets/settings", middleware.RootAuth(), controller.UpdateTicketSettings)
+		ticketRoute := apiRouter.Group("/tickets")
+		ticketRoute.Use(middleware.UserAuth(), middleware.DisableCache())
+		{
+			ticketRoute.GET("/settings", controller.GetTicketSettings)
+			ticketRoute.GET("/self", controller.GetMyTickets)
+			ticketRoute.POST("/", middleware.TicketWriteRateLimit(), controller.CreateMyTicket)
+			ticketRoute.GET("/:id", controller.GetMyTicket)
+			ticketRoute.POST("/:id/replies", middleware.TicketWriteRateLimit(), controller.ReplyMyTicket)
+		}
+		ticketAdminRoute := apiRouter.Group("/tickets/admin")
+		ticketAdminRoute.Use(middleware.AdminAuth(), middleware.DisableCache())
+		{
+			ticketAdminRoute.GET("/", controller.GetAdminTickets)
+			ticketAdminRoute.GET("/:id", controller.GetAdminTicket)
+			ticketAdminRoute.POST("/:id/replies", middleware.TicketWriteRateLimit(), controller.ReplyAdminTicket)
+			ticketAdminRoute.PATCH("/:id/status", controller.UpdateAdminTicketStatus)
+		}
 		perfMetricsRoute := apiRouter.Group("/perf-metrics")
 		perfMetricsRoute.Use(middleware.HeaderNavModulePublicOrUserAuth("pricing"))
 		{

@@ -1,6 +1,8 @@
 package model
 
 import (
+	"errors"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -14,8 +16,12 @@ import (
 	"github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/setting/ticket_setting"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+const ticketEncryptionSecretOptionKey = "TicketEncryptionSecret"
 
 type Option struct {
 	Key   string `json:"key" gorm:"primaryKey"`
@@ -181,6 +187,7 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticDisableStatusCodes"] = operation_setting.AutomaticDisableStatusCodesToString()
 	common.OptionMap["AutomaticRetryStatusCodes"] = operation_setting.AutomaticRetryStatusCodesToString()
 	common.OptionMap["ExposeRatioEnabled"] = strconv.FormatBool(ratio_setting.IsExposeRatioEnabled())
+	_ = ticket_setting.GetSettings()
 
 	// 自动添加所有注册的模型配置
 	modelConfigs := config.GlobalConfig.ExportAllConfigs()
@@ -190,6 +197,68 @@ func InitOptionMap() {
 
 	common.OptionMapRWMutex.Unlock()
 	loadOptionsFromDatabase()
+	if err := initializeTicketEncryptionSecret(); err != nil {
+		common.SysError("failed to initialize ticket encryption secret: " + err.Error())
+	}
+}
+
+func initializeTicketEncryptionSecret() error {
+	if strings.TrimSpace(os.Getenv("TICKET_ENCRYPTION_KEY")) != "" {
+		return nil
+	}
+	var option Option
+	err := DB.First(&option, "key = ?", ticketEncryptionSecretOptionKey).Error
+	if err == nil && strings.TrimSpace(option.Value) != "" {
+		common.SetTicketEncryptionKey(option.Value)
+		return updateOptionMap(option.Key, option.Value)
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	// Fresh deployments use a dedicated random key so a database disclosure
+	// cannot expose the session/crypto secret. Keep the old fallback only when
+	// encrypted ticket rows predate this persisted option.
+	legacyEncryptedRows, err := hasLegacyEncryptedTicketRows()
+	if err != nil {
+		return err
+	}
+	candidate := ""
+	if legacyEncryptedRows {
+		candidate = strings.TrimSpace(common.CryptoSecret)
+	}
+	if candidate == "" {
+		candidate, err = common.GenerateRandomKey(48)
+		if err != nil {
+			return err
+		}
+	}
+	option = Option{Key: ticketEncryptionSecretOptionKey, Value: candidate}
+	if err := DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&option).Error; err != nil {
+		return err
+	}
+	if err := DB.Model(&Option{}).
+		Where("key = ? AND value = ?", ticketEncryptionSecretOptionKey, "").
+		Update("value", candidate).Error; err != nil {
+		return err
+	}
+	if err := DB.First(&option, "key = ?", ticketEncryptionSecretOptionKey).Error; err != nil {
+		return err
+	}
+	if strings.TrimSpace(option.Value) == "" {
+		return errors.New("ticket encryption secret is empty")
+	}
+	common.SetTicketEncryptionKey(option.Value)
+	return updateOptionMap(option.Key, option.Value)
+}
+
+func hasLegacyEncryptedTicketRows() (bool, error) {
+	var message TicketMessage
+	err := DB.Select("id").Where("content LIKE ?", "v1:%").Take(&message).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func loadOptionsFromDatabase() {
@@ -234,6 +303,9 @@ func UpdateOption(key string, value string) error {
 }
 
 func validateOptionBeforeSave(key string, value string) error {
+	if strings.EqualFold(strings.TrimSpace(key), ticketEncryptionSecretOptionKey) {
+		return errors.New("ticket encryption secret cannot be changed through the option API")
+	}
 	if key == "membership_setting.tiers" {
 		_, err := membership_setting.ParseTiersJSONString(value)
 		return err

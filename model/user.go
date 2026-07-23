@@ -177,12 +177,14 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 
 	// 控制台区域 - 所有用户都可以访问
 	defaultConfig["console"] = map[string]interface{}{
-		"enabled":    true,
-		"detail":     true,
-		"token":      true,
-		"log":        true,
-		"midjourney": true,
-		"task":       true,
+		"enabled":       true,
+		"detail":        true,
+		"token":         true,
+		"log":           true,
+		"model_monitor": true,
+		"tickets":       true,
+		"midjourney":    true,
+		"task":          true,
 	}
 
 	// 个人中心区域 - 所有用户都可以访问
@@ -632,7 +634,12 @@ func (user *User) Delete() error {
 	if user.Id == 0 {
 		return errors.New("id 为空！")
 	}
-	if err := DB.Delete(user).Error; err != nil {
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := deleteUserTicketData(tx, user.Id); err != nil {
+			return err
+		}
+		return tx.Delete(user).Error
+	}); err != nil {
 		return err
 	}
 
@@ -652,6 +659,9 @@ func (user *User) HardDelete() error {
 			}
 		}
 		if err := deleteUserAuthenticationData(tx, user.Id); err != nil {
+			return err
+		}
+		if err := deleteUserTicketData(tx, user.Id); err != nil {
 			return err
 		}
 		return tx.Unscoped().Delete(user).Error
@@ -682,6 +692,18 @@ func deleteUserAuthenticationData(tx *gorm.DB, userId int) error {
 		}
 	}
 	return deleteUserOAuthBindingsByUserId(tx, userId)
+}
+
+func deleteUserTicketData(tx *gorm.DB, userId int) error {
+	ticketIds := tx.Unscoped().Model(&Ticket{}).
+		Select("id").
+		Where("user_id = ?", userId)
+	if err := tx.Unscoped().
+		Where("ticket_id IN (?)", ticketIds).
+		Delete(&TicketMessage{}).Error; err != nil {
+		return err
+	}
+	return tx.Unscoped().Where("user_id = ?", userId).Delete(&Ticket{}).Error
 }
 
 // ValidateAndFill check password & user status

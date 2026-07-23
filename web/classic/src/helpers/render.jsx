@@ -83,6 +83,7 @@ import {
   Server,
   CalendarClock,
   Crown,
+  Ticket,
 } from 'lucide-react';
 import {
   SiAtlassian,
@@ -143,6 +144,9 @@ export function getLucideIcon(key, selected = false) {
       return <BarChart3 {...commonProps} color={iconColor} />;
     case 'model_monitor':
       return <Activity {...commonProps} color={iconColor} />;
+    case 'tickets':
+    case 'ticket_admin':
+      return <Ticket {...commonProps} color={iconColor} />;
     case 'midjourney':
       return <ImageIcon {...commonProps} color={iconColor} />;
     case 'task':

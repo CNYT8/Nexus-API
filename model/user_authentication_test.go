@@ -25,6 +25,9 @@ func TestHardDeleteUserPurgesAuthenticationDataWhenRedisFails(t *testing.T) {
 	require.NoError(t, DB.Create(&PasskeyCredential{UserID: user.Id, CredentialID: "credential", PublicKey: "public-key"}).Error)
 	require.NoError(t, DB.Create(&UserOAuthBinding{UserId: user.Id, ProviderId: 1, ProviderUserId: "provider-user"}).Error)
 	require.NoError(t, DB.Create(&UserMembership{UserId: user.Id, TierId: "plus", Source: MembershipSourceManual}).Error)
+	ticket := Ticket{UserId: user.Id, Type: TicketTypeTechnical, Status: TicketStatusPending, LastAuthor: TicketAuthorUser}
+	require.NoError(t, DB.Create(&ticket).Error)
+	require.NoError(t, DB.Create(&TicketMessage{TicketId: ticket.Id, AuthorId: user.Id, AuthorRole: TicketAuthorUser, Content: "encrypted"}).Error)
 	setUserMembershipCache(user.Id, "plus", MembershipSourceManual)
 
 	oldRedisEnabled, oldRDB := common.RedisEnabled, common.RDB
@@ -59,12 +62,33 @@ func TestHardDeleteUserPurgesAuthenticationDataWhenRedisFails(t *testing.T) {
 		&PasskeyCredential{},
 		&UserOAuthBinding{},
 		&UserMembership{},
+		&Ticket{},
 	} {
 		require.NoError(t, DB.Unscoped().Model(record).Where("user_id = ?", user.Id).Count(&count).Error)
 		assert.Zero(t, count)
 	}
+	require.NoError(t, DB.Model(&TicketMessage{}).Where("ticket_id = ?", ticket.Id).Count(&count).Error)
+	assert.Zero(t, count)
 	_, _, cached := getUserMembershipCache(user.Id)
 	assert.False(t, cached)
+}
+
+func TestSoftDeleteUserPurgesTicketData(t *testing.T) {
+	truncateTables(t)
+
+	user := User{Username: "soft-delete-ticket-user", Password: "password"}
+	require.NoError(t, DB.Create(&user).Error)
+	ticket := Ticket{UserId: user.Id, Type: TicketTypeOther, Status: TicketStatusPending, LastAuthor: TicketAuthorUser}
+	require.NoError(t, DB.Create(&ticket).Error)
+	require.NoError(t, DB.Create(&TicketMessage{TicketId: ticket.Id, AuthorId: user.Id, AuthorRole: TicketAuthorUser, Content: "encrypted"}).Error)
+
+	require.NoError(t, DeleteUserById(user.Id))
+
+	var count int64
+	require.NoError(t, DB.Unscoped().Model(&Ticket{}).Where("user_id = ?", user.Id).Count(&count).Error)
+	assert.Zero(t, count)
+	require.NoError(t, DB.Model(&TicketMessage{}).Where("ticket_id = ?", ticket.Id).Count(&count).Error)
+	assert.Zero(t, count)
 }
 
 func TestIncrementFailedAttemptsCountsConcurrentFailures(t *testing.T) {

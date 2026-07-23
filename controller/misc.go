@@ -17,6 +17,7 @@ import (
 	membership_setting "github.com/QuantumNous/new-api/setting/membership_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/setting/ticket_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -95,6 +96,8 @@ func GetStatus(c *gin.Context) {
 		"password_register_enabled":     common.PasswordRegisterEnabled,
 		"default_use_auto_group":        setting.DefaultUseAutoGroup,
 		"membership_enabled":            membership_setting.IsEnabled(),
+		"ticket_enabled":                ticket_setting.IsEnabled(),
+		"ticket_admin_manage_enabled":   ticket_setting.IsAdminManageEnabled(),
 
 		"usd_exchange_rate": operation_setting.USDExchangeRate,
 		"price":             operation_setting.Price,

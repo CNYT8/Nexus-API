@@ -45,6 +45,7 @@ const MODULE_TITLE_KEYS = {
   Users: '用户管理',
   'Redeem codes': '兑换码管理',
   'Subscription Management': '订阅管理',
+  'Ticket Management': '工单管理',
 };
 
 const AdminPermissionSetting = () => {

@@ -30,6 +30,7 @@ func TestValidateAdminPermissionConfigRequiresEnabledPermission(t *testing.T) {
 		AdminPermissionUser:         false,
 		AdminPermissionRedemption:   false,
 		AdminPermissionSubscription: false,
+		AdminPermissionTicket:       false,
 	}
 
 	if err := ValidateAdminPermissionConfig(config); err != ErrAdminPermissionEmpty {
@@ -45,6 +46,7 @@ func TestApplyAdminPermissionsToSidebarModules(t *testing.T) {
 		AdminPermissionUser:         true,
 		AdminPermissionRedemption:   true,
 		AdminPermissionSubscription: true,
+		AdminPermissionTicket:       true,
 	}
 
 	applied := ApplyAdminPermissionsToSidebarModules(sidebar, config)
@@ -74,6 +76,7 @@ func TestAdminPermissionSidebarConfig(t *testing.T) {
 		AdminPermissionUser:         false,
 		AdminPermissionRedemption:   true,
 		AdminPermissionSubscription: false,
+		AdminPermissionTicket:       false,
 	})
 
 	if !config["enabled"] {

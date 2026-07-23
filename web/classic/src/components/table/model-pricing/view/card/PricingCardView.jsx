@@ -46,6 +46,7 @@ import PricingCardSkeleton from './PricingCardSkeleton';
 import { useMinimumLoadingTime } from '../../../../../hooks/common/useMinimumLoadingTime';
 import { renderLimitedItems } from '../../../../common/ui/RenderUtils';
 import { useIsMobile } from '../../../../../hooks/common/useIsMobile';
+import { prefetchModelPerformanceSummary } from '../../../../../helpers/modelPerformanceMetrics';
 
 const CARD_STYLES = {
   container:
@@ -87,6 +88,30 @@ const PricingCardView = ({
   );
   const getModelKey = (model) => model.key ?? model.model_name ?? model.id;
   const isMobile = useIsMobile();
+  const [performanceByModel, setPerformanceByModel] = React.useState(
+    () => new Map(),
+  );
+
+  React.useEffect(() => {
+    let isCurrent = true;
+
+    prefetchModelPerformanceSummary()
+      .then((models) => {
+        if (!isCurrent) return;
+        setPerformanceByModel(
+          new Map(
+            models
+              .filter((model) => model?.model_name)
+              .map((model) => [model.model_name, model]),
+          ),
+        );
+      })
+      .catch(() => {});
+
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
 
   const handleCheckboxChange = (model, checked) => {
     if (!setSelectedRowKeys) return;
@@ -176,6 +201,38 @@ const PricingCardView = ({
       );
     }
 
+    const performance = performanceByModel.get(record.model_name);
+    const weightedSuccessRate = Number(performance?.weighted_success_rate);
+    const successRate = Number.isFinite(weightedSuccessRate)
+      ? weightedSuccessRate
+      : Number(performance?.success_rate);
+    let performanceStatus = null;
+    if (Number.isFinite(successRate)) {
+      let statusColor = 'bg-emerald-500';
+      if (successRate < 99) {
+        statusColor = 'bg-red-500';
+      } else if (successRate < 99.9) {
+        statusColor = 'bg-amber-500';
+      }
+
+      performanceStatus = (
+        <Tooltip
+          content={`${t('近24小时模型性能概览')} · ${t('成功率')}: ${successRate.toFixed(1)}%`}
+        key='performance'
+        position='top'
+        showArrow
+        zIndex={1000}
+        getPopupContainer={() => document.body}
+      >
+        <span className='inline-flex items-end gap-0.5' aria-hidden='true'>
+          <span className='bg-gray-200 h-2 w-1 rounded-full' />
+          <span className='bg-gray-300 h-2.5 w-1 rounded-full' />
+          <span className={`h-3 w-1 rounded-full ${statusColor}`} />
+        </span>
+      </Tooltip>
+      );
+    }
+
     // 自定义标签（右边）
     const customTags = [];
     if (record.tags) {
@@ -196,7 +253,10 @@ const PricingCardView = ({
 
     return (
       <div className='flex items-center justify-between'>
-        <div className='flex items-center gap-2'>{billingTag}</div>
+        <div className='flex items-center gap-2'>
+          {billingTag}
+          {performanceStatus}
+        </div>
         <div className='flex items-center gap-1'>
           {customTags.length > 0 &&
             renderLimitedItems({

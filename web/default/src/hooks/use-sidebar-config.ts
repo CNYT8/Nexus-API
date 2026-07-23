@@ -49,6 +49,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     token: true,
     log: true,
     model_monitor: true,
+    tickets: true,
     midjourney: true,
     task: true,
   },
@@ -97,6 +98,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/usage-logs': { section: 'console', module: 'log' },
   '/usage-logs/common': { section: 'console', module: 'log' },
   '/model-monitor': { section: 'console', module: 'model_monitor' },
+  '/tickets': { section: 'console', module: 'tickets' },
   '/usage-logs/drawing': { section: 'console', module: 'midjourney' },
   '/usage-logs/task': { section: 'console', module: 'task' },
   '/wallet': { section: 'personal', module: 'topup' },
@@ -105,6 +107,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/models': { section: 'admin', module: 'models' },
   '/models/metadata': { section: 'admin', module: 'models' },
   '/models/deployments': { section: 'admin', module: 'models' },
+  '/tickets/manage': { section: 'admin', module: 'ticket_admin' },
   '/users': { section: 'admin', module: 'user' },
   '/redemption-codes': { section: 'admin', module: 'redemption' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
@@ -164,8 +167,18 @@ function isModuleEnabled(
   url: string,
   adminConfig: SidebarModulesAdminConfig,
   userConfig: SidebarModulesUserConfig,
-  userRole: UserRole
+  userRole: UserRole,
+  ticketEnabled = true,
+  ticketAdminManageEnabled = true
 ): boolean {
+  if (url === '/tickets' && !ticketEnabled) return false
+  if (
+    url === '/tickets/manage' &&
+    (!ticketEnabled ||
+      (userRole === ROLE.ADMIN && !ticketAdminManageEnabled))
+  ) {
+    return false
+  }
   const mapping = URL_TO_CONFIG_MAP[url]
   if (!mapping) {
     // No mapping config, default to visible (e.g. system settings and new features)
@@ -209,7 +222,9 @@ function isNavItemVisible(
   item: NavItem,
   adminConfig: SidebarModulesAdminConfig,
   userConfig: SidebarModulesUserConfig,
-  userRole: UserRole
+  userRole: UserRole,
+  ticketEnabled: boolean,
+  ticketAdminManageEnabled: boolean
 ): boolean {
   // Handle dynamic chat presets type — also runs the admin × user AND gate
   if ('type' in item && item.type === 'chat-presets') {
@@ -227,7 +242,14 @@ function isNavItemVisible(
   if ('url' in item && item.url) {
     const configUrls = item.configUrls ?? [item.url]
     return configUrls.some((url) =>
-      isModuleEnabled(url as string, adminConfig, userConfig, userRole)
+      isModuleEnabled(
+        url as string,
+        adminConfig,
+        userConfig,
+        userRole,
+        ticketEnabled,
+        ticketAdminManageEnabled
+      )
     )
   }
 
@@ -235,7 +257,14 @@ function isNavItemVisible(
   if ('items' in item && item.items) {
     // If has sub-items, show this collapsible item if at least one sub-item is visible
     return item.items.some((subItem) =>
-      isModuleEnabled(subItem.url as string, adminConfig, userConfig, userRole)
+      isModuleEnabled(
+        subItem.url as string,
+        adminConfig,
+        userConfig,
+        userRole,
+        ticketEnabled,
+        ticketAdminManageEnabled
+      )
     )
   }
 
@@ -249,7 +278,9 @@ function filterNavItems(
   items: NavItem[],
   adminConfig: SidebarModulesAdminConfig,
   userConfig: SidebarModulesUserConfig,
-  userRole: UserRole
+  userRole: UserRole,
+  ticketEnabled: boolean,
+  ticketAdminManageEnabled: boolean
 ): NavItem[] {
   return items
     .map((item) => {
@@ -260,7 +291,9 @@ function filterNavItems(
             subItem.url as string,
             adminConfig,
             userConfig,
-            userRole
+            userRole,
+            ticketEnabled,
+            ticketAdminManageEnabled
           )
         )
 
@@ -272,7 +305,14 @@ function filterNavItems(
       return item
     })
     .filter((item) =>
-      isNavItemVisible(item, adminConfig, userConfig, userRole)
+      isNavItemVisible(
+        item,
+        adminConfig,
+        userConfig,
+        userRole,
+        ticketEnabled,
+        ticketAdminManageEnabled
+      )
     )
 }
 
@@ -325,11 +365,20 @@ export function useSidebarConfig(navGroups: NavGroup[]): NavGroup[] {
             group.items,
             adminConfig,
             userConfig,
-            auth?.user?.role
+            auth?.user?.role,
+            status?.ticket_enabled !== false,
+            status?.ticket_admin_manage_enabled !== false
           ),
         }))
         .filter((group) => group.items.length > 0), // Only show navigation groups with visible items
-    [navGroups, adminConfig, userConfig, auth?.user?.role]
+    [
+      navGroups,
+      adminConfig,
+      userConfig,
+      auth?.user?.role,
+      status?.ticket_enabled,
+      status?.ticket_admin_manage_enabled,
+    ]
   )
 
   return filteredNavGroups
@@ -352,5 +401,12 @@ export function useIsSidebarModuleVisible(url: string): boolean {
       ? null
       : parseUserSidebarConfig(auth?.user?.sidebar_modules)
 
-  return isModuleEnabled(url, adminConfig, userConfig, auth?.user?.role)
+  return isModuleEnabled(
+    url,
+    adminConfig,
+    userConfig,
+    auth?.user?.role,
+    status?.ticket_enabled !== false,
+    status?.ticket_admin_manage_enabled !== false
+  )
 }

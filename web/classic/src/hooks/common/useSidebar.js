@@ -21,6 +21,7 @@ import { useState, useEffect, useMemo, useContext, useRef } from 'react';
 import { StatusContext } from '../../context/Status';
 import {
   applyMembershipSidebarGate,
+  applyTicketSidebarGate,
   mergeGlobalSidebarAdminConfig,
 } from '../../constants/sidebarModules';
 import {
@@ -46,6 +47,7 @@ const ROOT_ADMIN_CONFIG = {
   redemption: true,
   user: true,
   subscription: true,
+  ticket_admin: true,
   setting: true,
 };
 
@@ -92,6 +94,9 @@ export const useSidebar = () => {
   }
 
   const membershipEnabled = statusState?.status?.membership_enabled === true;
+  const ticketEnabled = statusState?.status?.ticket_enabled !== false;
+  const ticketAdminManageEnabled =
+    statusState?.status?.ticket_admin_manage_enabled !== false;
 
   // 获取管理员配置
   const adminConfig = useMemo(() => {
@@ -106,8 +111,15 @@ export const useSidebar = () => {
     } else {
       nextConfig = mergeAdminConfig(null);
     }
-    return applyMembershipSidebarGate(nextConfig, membershipEnabled);
-  }, [membershipEnabled, statusState?.status?.SidebarModulesAdmin]);
+    return applyTicketSidebarGate(
+      applyMembershipSidebarGate(nextConfig, membershipEnabled),
+      ticketEnabled,
+    );
+  }, [
+    membershipEnabled,
+    ticketEnabled,
+    statusState?.status?.SidebarModulesAdmin,
+  ]);
 
   // 加载用户配置的通用方法
   const loadUserConfig = async ({ withLoading } = {}) => {
@@ -254,7 +266,10 @@ export const useSidebar = () => {
     });
 
     if (isRoot()) {
-      result.admin = { ...ROOT_ADMIN_CONFIG };
+      result.admin = {
+        ...ROOT_ADMIN_CONFIG,
+        ticket_admin: ticketEnabled,
+      };
     } else if (isAdmin()) {
       const adminSection = userConfig.admin;
       if (adminSection?.enabled) {
@@ -266,6 +281,10 @@ export const useSidebar = () => {
           redemption: adminSection.redemption === true,
           user: adminSection.user === true,
           subscription: adminSection.subscription === true,
+          ticket_admin:
+            adminSection.ticket_admin === true &&
+            ticketEnabled &&
+            ticketAdminManageEnabled,
           setting: false,
         };
       } else {
@@ -274,7 +293,12 @@ export const useSidebar = () => {
     }
 
     return result;
-  }, [adminConfig, userConfig]);
+  }, [
+    adminConfig,
+    userConfig,
+    ticketEnabled,
+    ticketAdminManageEnabled,
+  ]);
 
   // 检查特定功能是否应该显示
   const isModuleVisible = (sectionKey, moduleKey = null) => {

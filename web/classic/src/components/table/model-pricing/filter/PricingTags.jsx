@@ -39,7 +39,9 @@ const PricingTags = ({
 }) => {
   // 提取系统所有标签
   const getAllTags = React.useMemo(() => {
-    const tagSet = new Set();
+    // Use a normalized key only for deduplication. Keep the administrator's
+    // original spelling for display in the model square.
+    const tagsByKey = new Map();
 
     (allModels.length > 0 ? allModels : models).forEach((model) => {
       if (model.tags) {
@@ -47,11 +49,18 @@ const PricingTags = ({
           .split(/[,;|]+/) // 逗号、分号或竖线（保留空格，允许多词标签如 "open weights"）
           .map((tag) => tag.trim())
           .filter(Boolean)
-          .forEach((tag) => tagSet.add(tag.toLowerCase()));
+          .forEach((tag) => {
+            const key = tag.toLowerCase();
+            if (!tagsByKey.has(key)) {
+              tagsByKey.set(key, tag);
+            }
+          });
       }
     });
 
-    return Array.from(tagSet).sort((a, b) => a.localeCompare(b));
+    return Array.from(tagsByKey.values()).sort((a, b) =>
+      a.localeCompare(b),
+    );
   }, [allModels, models]);
 
   // 计算标签对应的模型数量

@@ -20,6 +20,7 @@ func TestAdminPermissionModuleForPath(t *testing.T) {
 		{name: "users", path: "/api/user/search", want: model.AdminPermissionUser},
 		{name: "redemption", path: "/api/redemption/search", want: model.AdminPermissionRedemption},
 		{name: "subscription", path: "/api/subscription/admin/plans", want: model.AdminPermissionSubscription},
+		{name: "tickets", path: "/api/tickets/admin/1", want: model.AdminPermissionTicket},
 		{name: "root only option", path: "/api/option/", want: ""},
 		{name: "user token", path: "/api/token/", want: ""},
 	}

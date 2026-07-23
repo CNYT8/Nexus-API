@@ -335,3 +335,21 @@ const (
 	MsgCustomOAuthBindingNotFound   = "custom_oauth.binding_not_found"
 	MsgCustomOAuthProviderIdInvalid = "custom_oauth.provider_id_field_invalid"
 )
+
+// Ticket related messages
+const (
+	MsgTicketDisabled             = "ticket.disabled"
+	MsgTicketAdminManageDisabled  = "ticket.admin_manage_disabled"
+	MsgTicketAdminCloseDisabled   = "ticket.admin_close_disabled"
+	MsgTicketNotFound             = "ticket.not_found"
+	MsgTicketInvalidPayload       = "ticket.invalid_payload"
+	MsgTicketInvalidType          = "ticket.invalid_type"
+	MsgTicketInvalidStatus        = "ticket.invalid_status"
+	MsgTicketContentRequired      = "ticket.content_required"
+	MsgTicketContentTooLong       = "ticket.content_too_long"
+	MsgTicketClosed               = "ticket.closed"
+	MsgTicketOpenLimit            = "ticket.open_limit"
+	MsgTicketMessageLimit         = "ticket.message_limit"
+	MsgTicketInvalidSettings      = "ticket.invalid_settings"
+	MsgTicketContentLengthInvalid = "ticket.content_length_invalid"
+)

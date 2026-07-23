@@ -23,6 +23,8 @@ const PERFORMANCE_WINDOW_HOURS = 24;
 const PERFORMANCE_CACHE_MS = 60 * 1000;
 const performanceCache = new Map();
 const performanceRequests = new Map();
+let performanceSummaryCache = null;
+let performanceSummaryRequest = null;
 
 export function getCachedModelPerformanceMetrics(modelName) {
   const cached = performanceCache.get(modelName);
@@ -66,5 +68,44 @@ export function prefetchModelPerformanceMetrics(modelName) {
     });
 
   performanceRequests.set(modelName, request);
+  return request;
+}
+
+export function getCachedModelPerformanceSummary() {
+  if (!performanceSummaryCache) return null;
+  if (performanceSummaryCache.expiresAt <= Date.now()) {
+    performanceSummaryCache = null;
+    return null;
+  }
+  return performanceSummaryCache.models;
+}
+
+export function prefetchModelPerformanceSummary() {
+  const cachedModels = getCachedModelPerformanceSummary();
+  if (cachedModels) return Promise.resolve(cachedModels);
+  if (performanceSummaryRequest) return performanceSummaryRequest;
+
+  const request = API.get('/api/perf-metrics/summary', {
+    params: { hours: PERFORMANCE_WINDOW_HOURS },
+    skipErrorHandler: true,
+  })
+    .then((res) => {
+      if (!res.data?.success) {
+        throw new Error(res.data?.message || 'failed to load perf metrics');
+      }
+      const models = Array.isArray(res.data?.data?.models)
+        ? res.data.data.models
+        : [];
+      performanceSummaryCache = {
+        models,
+        expiresAt: Date.now() + PERFORMANCE_CACHE_MS,
+      };
+      return models;
+    })
+    .finally(() => {
+      performanceSummaryRequest = null;
+    });
+
+  performanceSummaryRequest = request;
   return request;
 }

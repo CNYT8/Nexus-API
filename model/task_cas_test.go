@@ -36,6 +36,7 @@ func TestMain(m *testing.M) {
 
 	if err := db.AutoMigrate(
 		&Task{},
+		&Option{},
 		&User{},
 		&Token{},
 		&PasskeyCredential{},
@@ -53,6 +54,8 @@ func TestMain(m *testing.M) {
 		&UserOAuthBinding{},
 		&PerfMetric{},
 		&UserMembership{},
+		&Ticket{},
+		&TicketMessage{},
 		&Redemption{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
@@ -65,12 +68,15 @@ func truncateTables(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
 		DB.Exec("DELETE FROM tasks")
+		DB.Exec("DELETE FROM options")
 		DB.Exec("DELETE FROM passkey_credentials")
 		DB.Exec("DELETE FROM two_fa_backup_codes")
 		DB.Exec("DELETE FROM two_fas")
 		DB.Exec("DELETE FROM tokens")
 		DB.Exec("DELETE FROM user_oauth_bindings")
 		DB.Exec("DELETE FROM user_memberships")
+		DB.Exec("DELETE FROM nexus_ticket_messages")
+		DB.Exec("DELETE FROM nexus_tickets")
 		DB.Exec("DELETE FROM users")
 		DB.Exec("DELETE FROM logs")
 		DB.Exec("DELETE FROM channels")

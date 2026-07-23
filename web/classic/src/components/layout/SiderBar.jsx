@@ -40,6 +40,8 @@ const routerMap = {
   subscription: '/console/subscription',
   log: '/console/log',
   model_monitor: '/console/model-monitor',
+  tickets: '/console/tickets',
+  ticket_admin: '/console/ticket-admin',
   midjourney: '/console/midjourney',
   setting: '/console/setting',
   about: '/about',
@@ -95,6 +97,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('模型监控'),
         itemKey: 'model_monitor',
         to: '/model-monitor',
+      },
+      {
+        text: t('工单中心'),
+        itemKey: 'tickets',
+        to: '/tickets',
       },
       {
         text: t('绘图日志'),
@@ -175,6 +182,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('模型管理'),
         itemKey: 'models',
         to: '/console/models',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('工单管理'),
+        itemKey: 'ticket_admin',
+        to: '/ticket-admin',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

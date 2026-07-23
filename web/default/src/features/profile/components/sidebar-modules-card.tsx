@@ -21,6 +21,7 @@ import { LayoutDashboard } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
+import { useStatus } from '@/hooks/use-status'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import {
@@ -52,6 +53,8 @@ export function SidebarModulesCard() {
   const [config, setConfig] = useState<SidebarModulesConfig>({})
   const currentUser = useAuthStore((s) => s.auth.user)
   const setUser = useAuthStore((s) => s.auth.setUser)
+  const { status } = useStatus()
+  const ticketEnabled = status?.ticket_enabled !== false
 
   const sectionDefs: SectionDef[] = [
     {
@@ -95,6 +98,11 @@ export function SidebarModulesCard() {
           key: 'model_monitor',
           title: t('Model Monitor'),
           description: t('Global model experience scores.'),
+        },
+        {
+          key: 'tickets',
+          title: t('Ticket Center'),
+          description: t('Submit issues and track their progress.'),
         },
         {
           key: 'midjourney',
@@ -258,11 +266,22 @@ export function SidebarModulesCard() {
                       </p>
                     </div>
                     <Switch
-                      checked={config[section.key]?.[mod.key] !== false}
+                      checked={
+                        section.key === 'console' &&
+                        mod.key === 'tickets' &&
+                        !ticketEnabled
+                          ? false
+                          : config[section.key]?.[mod.key] !== false
+                      }
                       onCheckedChange={(v) =>
                         toggleModule(section.key, mod.key, v)
                       }
-                      disabled={!sectionEnabled}
+                      disabled={
+                        !sectionEnabled ||
+                        (section.key === 'console' &&
+                          mod.key === 'tickets' &&
+                          !ticketEnabled)
+                      }
                     />
                   </div>
                 ))}

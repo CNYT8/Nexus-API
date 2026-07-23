@@ -22,6 +22,7 @@ import { PricingSection } from '../general/pricing-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
 import { PaymentSettingsSection } from '../integrations/payment-settings-section'
 import { RatioSettingsCard } from '../models/ratio-settings-card'
+import { TicketSettingsSection } from './ticket-settings-section'
 import type { BillingSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 
@@ -186,6 +187,11 @@ const BILLING_SECTIONS = [
         }}
       />
     ),
+  },
+  {
+    id: 'tickets',
+    titleKey: 'Ticket Settings',
+    build: () => <TicketSettingsSection />,
   },
   {
     id: 'checkin',

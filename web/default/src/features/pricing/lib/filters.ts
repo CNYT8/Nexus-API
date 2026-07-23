@@ -172,18 +172,23 @@ export function parseTags(tagsString?: string): string[] {
  * Extract all unique tags from models
  */
 export function extractAllTags(models: PricingModel[]): string[] {
-  const tagSet = new Set<string>()
+  // Tag matching is case-insensitive, but the model square should show the
+  // original spelling configured by the administrator.
+  const tagsByKey = new Map<string, string>()
 
   models.forEach((model) => {
     if (model.tags) {
       const tags = parseTags(model.tags)
       tags.forEach((tag) => {
-        tagSet.add(tag.toLowerCase())
+        const key = tag.toLowerCase()
+        if (!tagsByKey.has(key)) {
+          tagsByKey.set(key, tag)
+        }
       })
     }
   })
 
-  return Array.from(tagSet).sort((a, b) => a.localeCompare(b))
+  return Array.from(tagsByKey.values()).sort((a, b) => a.localeCompare(b))
 }
 
 /**

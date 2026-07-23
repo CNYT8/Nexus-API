@@ -127,6 +127,10 @@ func UpdateOption(c *gin.Context) {
 		})
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(option.Key), "TicketEncryptionSecret") {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
 	switch option.Value.(type) {
 	case bool:
 		option.Value = common.Interface2String(option.Value.(bool))

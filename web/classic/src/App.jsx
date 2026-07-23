@@ -38,6 +38,8 @@ import TopUp from './pages/TopUp';
 import Membership from './pages/Membership';
 import Log from './pages/Log';
 import ModelMonitor from './pages/ModelMonitor';
+import TicketCenter from './pages/Ticket';
+import TicketManagement from './pages/TicketManagement';
 import Chat from './pages/Chat';
 import Chat2Link from './pages/Chat2Link';
 import Midjourney from './pages/Midjourney';
@@ -303,6 +305,22 @@ function App() {
             <PrivateRoute>
               <ModelMonitor />
             </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/tickets'
+          element={
+            <PrivateRoute>
+              <TicketCenter />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/ticket-admin'
+          element={
+            <AdminRoute>
+              <TicketManagement />
+            </AdminRoute>
           }
         />
         <Route

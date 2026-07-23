@@ -33,7 +33,10 @@ import { StatusContext } from '../../../context/Status';
 import { UserContext } from '../../../context/User';
 import { useUserPermissions } from '../../../hooks/common/useUserPermissions';
 import { mergeAdminConfig, useSidebar } from '../../../hooks/common/useSidebar';
-import { applyMembershipSidebarGate } from '../../../constants/sidebarModules';
+import {
+  applyMembershipSidebarGate,
+  applyTicketSidebarGate,
+} from '../../../constants/sidebarModules';
 import { Settings } from 'lucide-react';
 
 const { Text } = Typography;
@@ -43,6 +46,7 @@ export default function SettingsSidebarModulesUser() {
   const [loading, setLoading] = useState(false);
   const [statusState] = useContext(StatusContext);
   const membershipEnabled = statusState?.status?.membership_enabled === true;
+  const ticketEnabled = statusState?.status?.ticket_enabled !== false;
 
   // 使用后端权限验证替代前端角色判断
   const {
@@ -87,6 +91,7 @@ export default function SettingsSidebarModulesUser() {
         token: isSidebarModuleAllowed('console', 'token'),
         log: isSidebarModuleAllowed('console', 'log'),
         model_monitor: isSidebarModuleAllowed('console', 'model_monitor'),
+        tickets: isSidebarModuleAllowed('console', 'tickets'),
         midjourney: isSidebarModuleAllowed('console', 'midjourney'),
         task: isSidebarModuleAllowed('console', 'task'),
       };
@@ -108,6 +113,7 @@ export default function SettingsSidebarModulesUser() {
         enabled: true,
         channel: isSidebarModuleAllowed('admin', 'channel'),
         models: isSidebarModuleAllowed('admin', 'models'),
+        ticket_admin: isSidebarModuleAllowed('admin', 'ticket_admin'),
         deployment: isSidebarModuleAllowed('admin', 'deployment'),
         redemption: isSidebarModuleAllowed('admin', 'redemption'),
         user: isSidebarModuleAllowed('admin', 'user'),
@@ -206,16 +212,22 @@ export default function SettingsSidebarModulesUser() {
             const adminConf = JSON.parse(
               statusState.status.SidebarModulesAdmin,
             );
-            const mergedAdminConf = applyMembershipSidebarGate(
-              mergeAdminConfig(adminConf),
-              membershipEnabled,
+            const mergedAdminConf = applyTicketSidebarGate(
+              applyMembershipSidebarGate(
+                mergeAdminConfig(adminConf),
+                membershipEnabled,
+              ),
+              ticketEnabled,
             );
             setAdminConfig(mergedAdminConf);
             console.log('加载管理员边栏配置:', mergedAdminConf);
           } catch (error) {
-            const mergedAdminConf = applyMembershipSidebarGate(
-              mergeAdminConfig(null),
-              membershipEnabled,
+            const mergedAdminConf = applyTicketSidebarGate(
+              applyMembershipSidebarGate(
+                mergeAdminConfig(null),
+                membershipEnabled,
+              ),
+              ticketEnabled,
             );
             setAdminConfig(mergedAdminConf);
             console.log(
@@ -224,9 +236,12 @@ export default function SettingsSidebarModulesUser() {
             );
           }
         } else {
-          const mergedAdminConf = applyMembershipSidebarGate(
-            mergeAdminConfig(null),
-            membershipEnabled,
+          const mergedAdminConf = applyTicketSidebarGate(
+            applyMembershipSidebarGate(
+              mergeAdminConfig(null),
+              membershipEnabled,
+            ),
+            ticketEnabled,
           );
           setAdminConfig(mergedAdminConf);
           console.log('管理员边栏配置缺失，使用默认配置:', mergedAdminConf);
@@ -282,6 +297,7 @@ export default function SettingsSidebarModulesUser() {
     }
   }, [
     membershipEnabled,
+    ticketEnabled,
     statusState?.status?.SidebarModulesAdmin,
     permissionsLoading,
     hasSidebarSettingsPermission,
@@ -331,6 +347,11 @@ export default function SettingsSidebarModulesUser() {
           description: t('全局模型体验评分'),
         },
         {
+          key: 'tickets',
+          title: t('工单中心'),
+          description: t('提交问题并查看处理进度'),
+        },
+        {
           key: 'midjourney',
           title: t('绘图日志'),
           description: t('绘图任务记录'),
@@ -363,6 +384,11 @@ export default function SettingsSidebarModulesUser() {
       modules: [
         { key: 'channel', title: t('渠道管理'), description: t('API渠道配置') },
         { key: 'models', title: t('模型管理'), description: t('AI模型配置') },
+        {
+          key: 'ticket_admin',
+          title: t('工单管理'),
+          description: t('处理所有用户提交的工单'),
+        },
         {
           key: 'deployment',
           title: t('模型部署'),

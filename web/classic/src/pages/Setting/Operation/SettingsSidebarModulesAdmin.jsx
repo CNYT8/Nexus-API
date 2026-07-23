@@ -44,6 +44,7 @@ export default function SettingsSidebarModulesAdmin(props) {
   const [loading, setLoading] = useState(false);
   const [statusState, statusDispatch] = useContext(StatusContext);
   const membershipEnabled = statusState?.status?.membership_enabled === true;
+  const ticketEnabled = statusState?.status?.ticket_enabled !== false;
 
   const [sidebarModulesAdmin, setSidebarModulesAdmin] = useState(() =>
     cloneGlobalSidebarAdminConfig(),
@@ -146,7 +147,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         membershipEnabled,
       ),
     );
-  }, [membershipEnabled, props.options]);
+  }, [membershipEnabled, ticketEnabled, props.options]);
 
   return (
     <Card>
@@ -255,6 +256,19 @@ export default function SettingsSidebarModulesAdmin(props) {
                                 {t('只能通过会员设置开关')}
                               </span>
                             )}
+                          {section.key === 'console' &&
+                            module.key === 'tickets' &&
+                            !ticketEnabled && (
+                              <span
+                                style={{
+                                  marginLeft: 8,
+                                  color: 'var(--semi-color-text-2)',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {t('只能通过工单设置开关')}
+                              </span>
+                            )}
                         </Text>
                       </div>
                       <div style={{ marginLeft: '16px' }}>
@@ -263,6 +277,10 @@ export default function SettingsSidebarModulesAdmin(props) {
                             section.key === 'personal' &&
                             module.key === 'membership'
                               ? membershipEnabled
+                              : section.key === 'console' &&
+                                  module.key === 'tickets' &&
+                                  !ticketEnabled
+                                ? false
                               : sidebarModulesAdmin[section.key]?.[module.key]
                           }
                           onChange={handleModuleChange(section.key, module.key)}
@@ -270,6 +288,9 @@ export default function SettingsSidebarModulesAdmin(props) {
                           disabled={
                             (section.key === 'personal' &&
                               module.key === 'membership') ||
+                            (section.key === 'console' &&
+                              module.key === 'tickets' &&
+                              !ticketEnabled) ||
                             !sidebarModulesAdmin[section.key]?.enabled
                           }
                         />

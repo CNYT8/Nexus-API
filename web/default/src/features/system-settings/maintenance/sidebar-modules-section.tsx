@@ -37,6 +37,7 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { useStatus } from '@/hooks/use-status'
 import {
   SIDEBAR_MODULES_DEFAULT,
   type SidebarModulesAdminConfig,
@@ -58,7 +59,9 @@ export function SidebarModulesSection({
   initialSerialized,
 }: SidebarModulesSectionProps) {
   const { t } = useTranslation()
+  const { status } = useStatus()
   const updateOption = useUpdateOption()
+  const ticketEnabled = status?.ticket_enabled !== false
 
   const sectionMeta: Record<string, { title: string; description: string }> = {
     chat: {
@@ -105,6 +108,10 @@ export function SidebarModulesSection({
       model_monitor: {
         title: t('Model Monitor'),
         description: t('Global model experience scores.'),
+      },
+      tickets: {
+        title: t('Ticket Center'),
+        description: t('Submit issues and track their progress.'),
       },
       midjourney: {
         title: t('Drawing logs'),
@@ -216,15 +223,31 @@ export function SidebarModulesSection({
                               <FormLabel>{moduleInfo.title}</FormLabel>
                               <FormDescription>
                                 {moduleInfo.description}
+                                {sectionKey === 'console' &&
+                                  moduleKey === 'tickets' &&
+                                  !ticketEnabled && (
+                                    <span className='ml-1'>
+                                      {t('Only configurable in Ticket Settings')}
+                                    </span>
+                                  )}
                               </FormDescription>
                             </SettingsSwitchContent>
-                            <FormControl>
-                              <Switch
-                                checked={Boolean(field.value)}
+                          <FormControl>
+                            <Switch
+                                checked={
+                                  sectionKey === 'console' &&
+                                  moduleKey === 'tickets' &&
+                                  !ticketEnabled
+                                    ? false
+                                    : Boolean(field.value)
+                                }
                                 onCheckedChange={field.onChange}
                                 disabled={
                                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                  !form.watch(`${sectionKey}.enabled` as any)
+                                  !form.watch(`${sectionKey}.enabled` as any) ||
+                                  (sectionKey === 'console' &&
+                                    moduleKey === 'tickets' &&
+                                    !ticketEnabled)
                                 }
                               />
                             </FormControl>

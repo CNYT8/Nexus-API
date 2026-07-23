@@ -15,6 +15,7 @@ const (
 	AdminPermissionUser         = "user"
 	AdminPermissionRedemption   = "redemption"
 	AdminPermissionSubscription = "subscription"
+	AdminPermissionTicket       = "ticket"
 )
 
 type AdminPermissionModule struct {
@@ -58,6 +59,12 @@ var adminPermissionModules = []AdminPermissionModule{
 		Enabled:     true,
 		TitleKey:    "Subscription Management",
 		Description: "Manage subscription plans and user subscriptions.",
+	},
+	{
+		Key:         AdminPermissionTicket,
+		Enabled:     true,
+		TitleKey:    "Ticket Management",
+		Description: "Review and respond to user support tickets.",
 	},
 }
 
@@ -204,6 +211,7 @@ func AdminPermissionSidebarConfig(config AdminPermissionConfig) map[string]bool 
 		adminConfig[module.Key] = normalized[module.Key]
 	}
 	adminConfig["deployment"] = normalized[AdminPermissionModels]
+	adminConfig["ticket_admin"] = normalized[AdminPermissionTicket]
 	return adminConfig
 }
 

@@ -93,6 +93,11 @@ export function useSidebarData(): SidebarData {
             icon: Activity,
           },
           {
+            title: t('Ticket Center'),
+            url: '/tickets',
+            icon: Ticket,
+          },
+          {
             title: t('Task Logs'),
             url: '/usage-logs/task',
             activeUrls: ['/usage-logs/drawing'],
@@ -130,6 +135,11 @@ export function useSidebarData(): SidebarData {
             title: t('Models'),
             url: '/models/metadata',
             icon: Box,
+          },
+          {
+            title: t('Ticket Management'),
+            url: '/tickets/manage',
+            icon: Ticket,
           },
           {
             title: t('Users'),

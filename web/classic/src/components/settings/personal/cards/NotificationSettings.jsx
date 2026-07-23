@@ -48,7 +48,10 @@ import {
   mergeAdminConfig,
   useSidebar,
 } from '../../../../hooks/common/useSidebar';
-import { applyMembershipSidebarGate } from '../../../../constants/sidebarModules';
+import {
+  applyMembershipSidebarGate,
+  applyTicketSidebarGate,
+} from '../../../../constants/sidebarModules';
 
 const NotificationSettings = ({
   t,
@@ -60,6 +63,7 @@ const NotificationSettings = ({
   const formApiRef = useRef(null);
   const [statusState] = useContext(StatusContext);
   const membershipEnabled = statusState?.status?.membership_enabled === true;
+  const ticketEnabled = statusState?.status?.ticket_enabled !== false;
   const [userState] = useContext(UserContext);
   const isAdminOrRoot = (userState?.user?.role || 0) >= 10;
 
@@ -77,6 +81,8 @@ const NotificationSettings = ({
       detail: true,
       token: true,
       log: true,
+      model_monitor: true,
+      tickets: true,
       midjourney: true,
       task: true,
     },
@@ -89,6 +95,7 @@ const NotificationSettings = ({
       enabled: true,
       channel: true,
       models: true,
+      ticket_admin: true,
       deployment: true,
       subscription: true,
       redemption: true,
@@ -166,6 +173,7 @@ const NotificationSettings = ({
         token: true,
         log: true,
         model_monitor: true,
+        tickets: true,
         midjourney: true,
         task: true,
       },
@@ -174,6 +182,7 @@ const NotificationSettings = ({
         enabled: true,
         channel: true,
         models: true,
+        ticket_admin: true,
         deployment: true,
         subscription: true,
         redemption: true,
@@ -195,24 +204,33 @@ const NotificationSettings = ({
               statusState.status.SidebarModulesAdmin,
             );
             setAdminConfig(
-              applyMembershipSidebarGate(
-                mergeAdminConfig(adminConf),
-                membershipEnabled,
+              applyTicketSidebarGate(
+                applyMembershipSidebarGate(
+                  mergeAdminConfig(adminConf),
+                  membershipEnabled,
+                ),
+                ticketEnabled,
               ),
             );
           } catch (error) {
             setAdminConfig(
-              applyMembershipSidebarGate(
-                mergeAdminConfig(null),
-                membershipEnabled,
+              applyTicketSidebarGate(
+                applyMembershipSidebarGate(
+                  mergeAdminConfig(null),
+                  membershipEnabled,
+                ),
+                ticketEnabled,
               ),
             );
           }
         } else {
           setAdminConfig(
-            applyMembershipSidebarGate(
-              mergeAdminConfig(null),
-              membershipEnabled,
+            applyTicketSidebarGate(
+              applyMembershipSidebarGate(
+                mergeAdminConfig(null),
+                membershipEnabled,
+              ),
+              ticketEnabled,
             ),
           );
         }
@@ -234,7 +252,7 @@ const NotificationSettings = ({
     };
 
     loadSidebarConfigs();
-  }, [membershipEnabled, statusState]);
+  }, [membershipEnabled, statusState, ticketEnabled]);
 
   // 初始化表单值
   useEffect(() => {
@@ -290,6 +308,11 @@ const NotificationSettings = ({
           description: t('全局模型体验评分'),
         },
         {
+          key: 'tickets',
+          title: t('工单中心'),
+          description: t('提交问题并查看处理进度'),
+        },
+        {
           key: 'midjourney',
           title: t('绘图日志'),
           description: t('绘图任务记录'),
@@ -323,6 +346,11 @@ const NotificationSettings = ({
       modules: [
         { key: 'channel', title: t('渠道管理'), description: t('API渠道配置') },
         { key: 'models', title: t('模型管理'), description: t('AI模型配置') },
+        {
+          key: 'ticket_admin',
+          title: t('工单管理'),
+          description: t('处理所有用户提交的工单'),
+        },
         {
           key: 'deployment',
           title: t('模型部署'),

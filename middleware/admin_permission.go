@@ -60,6 +60,8 @@ func adminPermissionModuleForPath(path string) string {
 		return model.AdminPermissionRedemption
 	case strings.HasPrefix(path, "/api/subscription/admin"):
 		return model.AdminPermissionSubscription
+	case strings.HasPrefix(path, "/api/tickets/admin"):
+		return model.AdminPermissionTicket
 	default:
 		return ""
 	}

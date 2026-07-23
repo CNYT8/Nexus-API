@@ -29,6 +29,7 @@ export const GLOBAL_SIDEBAR_DEFAULT_CONFIG = {
     token: true,
     log: true,
     model_monitor: true,
+    tickets: true,
     midjourney: true,
     task: true,
   },
@@ -84,6 +85,11 @@ export const GLOBAL_SIDEBAR_SECTION_CONFIGS = [
         description: '全局模型体验评分',
       },
       {
+        key: 'tickets',
+        title: '工单中心',
+        description: '提交问题并查看处理进度',
+      },
+      {
         key: 'midjourney',
         title: '绘图日志',
         description: '绘图任务记录',
@@ -135,6 +141,25 @@ export const applyMembershipSidebarGate = (config, membershipEnabled) => {
   };
   if (membershipEnabled === true) {
     nextConfig.personal.enabled = true;
+  }
+  return nextConfig;
+};
+
+export const applyTicketSidebarGate = (config, ticketEnabled) => {
+  const nextConfig = deepClone(config || cloneGlobalSidebarAdminConfig());
+  nextConfig.console = {
+    enabled: true,
+    detail: true,
+    token: true,
+    log: true,
+    model_monitor: true,
+    tickets: ticketEnabled !== false,
+    midjourney: true,
+    task: true,
+    ...(nextConfig.console || {}),
+  };
+  if (ticketEnabled === false) {
+    nextConfig.console.tickets = false;
   }
   return nextConfig;
 };

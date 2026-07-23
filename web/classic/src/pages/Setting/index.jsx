@@ -37,6 +37,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Crown,
+  Ticket,
 } from 'lucide-react';
 
 import SystemSetting from '../../components/settings/SystemSetting';
@@ -51,6 +52,7 @@ import ChatsSetting from '../../components/settings/ChatsSetting';
 import DrawingSetting from '../../components/settings/DrawingSetting';
 import PaymentSetting from '../../components/settings/PaymentSetting';
 import MembershipSetting from '../../components/settings/MembershipSetting';
+import TicketSetting from '../../components/settings/TicketSetting';
 import ModelDeploymentSetting from '../../components/settings/ModelDeploymentSetting';
 import PerformanceSetting from '../../components/settings/PerformanceSetting';
 import ErrorMaskSetting from '../../components/settings/ErrorMaskSetting';
@@ -123,6 +125,16 @@ const Setting = () => {
       ),
       content: <PaymentSetting />,
       itemKey: 'payment',
+    });
+    panes.push({
+      tab: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <Ticket size={18} />
+          {t('工单设置')}
+        </span>
+      ),
+      content: <TicketSetting />,
+      itemKey: 'tickets',
     });
     panes.push({
       tab: (
