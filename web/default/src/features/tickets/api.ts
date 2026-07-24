@@ -20,6 +20,7 @@ import type {
   ApiResponse,
   TicketDetail,
   TicketList,
+  TicketPriority,
   TicketSettings,
   TicketStatus,
   TicketType,
@@ -67,10 +68,12 @@ export async function getMyTicket(id: number): Promise<ApiResponse<TicketDetail>
 
 export async function createMyTicket(
   type: TicketType,
+  priority: TicketPriority,
   content: string
 ): Promise<ApiResponse<TicketDetail>> {
   const res = await api.post<ApiResponse<TicketDetail>>('/api/tickets/', {
     type,
+    priority,
     content,
   }, { skipBusinessError: true })
   return res.data

@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	membership_setting "github.com/QuantumNous/new-api/setting/membership_setting"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -27,6 +28,18 @@ type UserMembership struct {
 	Source    string `json:"source" gorm:"type:varchar(32);default:'auto'"`
 	CreatedAt int64  `json:"created_at" gorm:"bigint"`
 	UpdatedAt int64  `json:"updated_at" gorm:"bigint"`
+}
+
+// MembershipQuotaGrant records quota added by an administrator as a
+// membership cumulative amount. It is intentionally separate from TopUp so
+// administrative grants do not appear as completed payment orders.
+type MembershipQuotaGrant struct {
+	Id         int     `json:"id"`
+	UserId     int     `json:"user_id" gorm:"not null;index"`
+	OperatorId int     `json:"operator_id" gorm:"not null;index"`
+	Quota      int     `json:"quota" gorm:"not null"`
+	Amount     float64 `json:"amount" gorm:"type:decimal(24,12);not null"`
+	CreatedAt  int64   `json:"created_at" gorm:"bigint;index"`
 }
 
 type MembershipSummary struct {
@@ -67,6 +80,13 @@ func (membership *UserMembership) BeforeUpdate(tx *gorm.DB) error {
 	membership.UpdatedAt = common.GetTimestamp()
 	if membership.Source == "" {
 		membership.Source = MembershipSourceAuto
+	}
+	return nil
+}
+
+func (grant *MembershipQuotaGrant) BeforeCreate(tx *gorm.DB) error {
+	if grant.CreatedAt == 0 {
+		grant.CreatedAt = common.GetTimestamp()
 	}
 	return nil
 }
@@ -204,7 +224,7 @@ func GetUserCumulativeTopUpAmount(userId int) (float64, error) {
 	if quotaPerUnit <= 0 {
 		quotaPerUnit = 1
 	}
-	var total float64
+	var topUpTotal float64
 	err := DB.Model(&TopUp{}).
 		Where("user_id = ? AND status = ?", userId, common.TopUpStatusSuccess).
 		Select(
@@ -213,11 +233,58 @@ func GetUserCumulativeTopUpAmount(userId int) (float64, error) {
 			quotaPerUnit,
 			PaymentProviderStripe,
 		).
-		Scan(&total).Error
+		Scan(&topUpTotal).Error
 	if err != nil {
 		return 0, err
 	}
-	return total, nil
+
+	var adminGrantTotal float64
+	err = DB.Model(&MembershipQuotaGrant{}).
+		Where("user_id = ?", userId).
+		Select("COALESCE(SUM(amount), 0)").
+		Scan(&adminGrantTotal).Error
+	if err != nil {
+		return 0, err
+	}
+	return topUpTotal + adminGrantTotal, nil
+}
+
+func IncreaseUserQuotaWithMembershipGrant(userId int, quota int, operatorId int) error {
+	if userId <= 0 || operatorId <= 0 || quota <= 0 {
+		return errors.New("invalid membership quota grant")
+	}
+	if common.QuotaPerUnit <= 0 || math.IsNaN(common.QuotaPerUnit) || math.IsInf(common.QuotaPerUnit, 0) {
+		return errors.New("invalid quota per unit")
+	}
+
+	amount, _ := decimal.NewFromInt(int64(quota)).
+		Div(decimal.NewFromFloat(common.QuotaPerUnit)).
+		Round(12).
+		Float64()
+	if amount <= 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
+		return errors.New("invalid membership quota grant amount")
+	}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := addUserQuotaTx(tx, userId, quota); err != nil {
+			return err
+		}
+		return tx.Create(&MembershipQuotaGrant{
+			UserId:     userId,
+			OperatorId: operatorId,
+			Quota:      quota,
+			Amount:     amount,
+		}).Error
+	})
+	if err != nil {
+		return err
+	}
+
+	if err := cacheIncrUserQuota(userId, int64(quota)); err != nil {
+		common.SysLog(fmt.Sprintf("failed to update user quota cache after membership grant for user %d: %s", userId, err.Error()))
+	}
+	AutoUpgradeUserMembershipAfterTopUp(userId)
+	return nil
 }
 
 func AutoUpgradeUserMembership(userId int) error {

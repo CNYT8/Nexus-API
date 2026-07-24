@@ -57,13 +57,15 @@ import {
   getTicketTypeLabel,
   TicketMessages,
   TicketPagination,
+  TicketPriorityBadge,
   TicketStatusBadge,
 } from './components'
-import type { TicketType } from './types'
+import type { TicketPriority, TicketType } from './types'
 
 const PAGE_SIZE = 10
 
-const ticketTypes: TicketType[] = ['finance', 'technical', 'other']
+const ticketTypes: TicketType[] = ['finance', 'technical', 'account', 'other']
+const ticketPriorities: TicketPriority[] = ['low', 'medium', 'high']
 
 export function TicketCenter() {
   const { t } = useTranslation()
@@ -71,6 +73,7 @@ export function TicketCenter() {
   const userId = useAuthStore((state) => state.auth.user?.id ?? 0)
   const previousUserId = useRef(userId)
   const [type, setType] = useState<TicketType | ''>('')
+  const [priority, setPriority] = useState<TicketPriority>('medium')
   const [content, setContent] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const [page, setPage] = useState(1)
@@ -107,13 +110,15 @@ export function TicketCenter() {
   }
 
   const createMutation = useMutation({
-    mutationFn: () => createMyTicket(type as TicketType, content.trim()),
+    mutationFn: () =>
+      createMyTicket(type as TicketType, priority, content.trim()),
     onSuccess: async (result) => {
       if (!result.success) {
         toast.error(result.message || t('Failed to send ticket'))
         return
       }
       setType('')
+      setPriority('medium')
       setContent('')
       setShowHistory(true)
       setPage(1)
@@ -189,23 +194,53 @@ export function TicketCenter() {
               </CardDescription>
             </CardHeader>
             <CardContent className='space-y-4'>
-              <div className='space-y-2'>
-                <label className='text-sm font-medium'>{t('Ticket Type')}</label>
-                <Select
-                  value={type || null}
-                  onValueChange={(value) => setType((value ?? '') as TicketType | '')}
-                >
-                  <SelectTrigger className='w-full'>
-                    <SelectValue placeholder={t('Select a ticket type')} />
-                  </SelectTrigger>
-                  <SelectContent alignItemWithTrigger={false}>
-                    {ticketTypes.map((ticketType) => (
-                      <SelectItem key={ticketType} value={ticketType}>
-                        {getTicketTypeLabel(t, ticketType)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className='grid gap-4 sm:grid-cols-2'>
+                <div className='space-y-2'>
+                  <label className='text-sm font-medium'>{t('Ticket Type')}</label>
+                  <Select
+                    value={type || null}
+                    onValueChange={(value) =>
+                      setType((value ?? '') as TicketType | '')
+                    }
+                  >
+                    <SelectTrigger className='w-full'>
+                      <SelectValue placeholder={t('Select a ticket type')} />
+                    </SelectTrigger>
+                    <SelectContent alignItemWithTrigger={false}>
+                      {ticketTypes.map((ticketType) => (
+                        <SelectItem key={ticketType} value={ticketType}>
+                          {getTicketTypeLabel(t, ticketType)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className='space-y-2'>
+                  <label className='text-sm font-medium'>{t('Priority')}</label>
+                  <Select
+                    value={priority}
+                    onValueChange={(value) =>
+                      setPriority((value ?? 'medium') as TicketPriority)
+                    }
+                  >
+                    <SelectTrigger className='w-full'>
+                      <SelectValue placeholder={t('Select ticket priority')} />
+                    </SelectTrigger>
+                    <SelectContent alignItemWithTrigger={false}>
+                      {ticketPriorities.map((ticketPriority) => (
+                        <SelectItem key={ticketPriority} value={ticketPriority}>
+                          {t(
+                            ticketPriority === 'low'
+                              ? 'Low Priority'
+                              : ticketPriority === 'high'
+                                ? 'High Priority'
+                                : 'Medium Priority'
+                          )}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <div className='space-y-2'>
                 <label className='text-sm font-medium'>{t('Issue Description')}</label>
@@ -260,6 +295,7 @@ export function TicketCenter() {
                           <span className='text-muted-foreground text-xs'>
                             {getTicketTypeLabel(t, ticket.type)}
                           </span>
+                          <TicketPriorityBadge priority={ticket.priority} />
                         </span>
                         <span className='text-muted-foreground block text-xs'>
                           {new Date(ticket.updated_at).toLocaleString()}
@@ -293,7 +329,10 @@ export function TicketCenter() {
             </DialogTitle>
             {selectedTicket && (
               <DialogDescription>
-                {getTicketTypeLabel(t, selectedTicket.type)}
+                <span className='inline-flex flex-wrap items-center gap-2'>
+                  {getTicketTypeLabel(t, selectedTicket.type)}
+                  <TicketPriorityBadge priority={selectedTicket.priority} />
+                </span>
               </DialogDescription>
             )}
           </DialogHeader>

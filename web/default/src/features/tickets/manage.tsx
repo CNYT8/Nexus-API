@@ -51,6 +51,7 @@ import {
   getTicketTypeLabel,
   TicketMessages,
   TicketPagination,
+  TicketPriorityBadge,
   TicketStatusBadge,
 } from './components'
 import type { TicketStatus } from './types'
@@ -222,6 +223,7 @@ export function TicketManagement() {
                       <span className='text-muted-foreground text-xs'>
                         {getTicketTypeLabel(t, ticket.type)}
                       </span>
+                      <TicketPriorityBadge priority={ticket.priority} />
                       {ticket.last_author === 'user' &&
                         ticket.has_admin_reply &&
                         ticket.status !== 'closed' && (
@@ -261,7 +263,8 @@ export function TicketManagement() {
             {selectedTicket && (
               <DialogDescription>
                 {t('User')}: {selectedTicket.username || t('Unknown User')} ·{' '}
-                {getTicketTypeLabel(t, selectedTicket.type)}
+                {getTicketTypeLabel(t, selectedTicket.type)} ·{' '}
+                <TicketPriorityBadge priority={selectedTicket.priority} />
               </DialogDescription>
             )}
           </DialogHeader>

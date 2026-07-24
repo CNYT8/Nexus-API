@@ -55,12 +55,13 @@ func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *relaycommon.Rela
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
 	isCompact := info != nil && info.RelayMode == relayconstant.RelayModeResponsesCompact
 
-	if info != nil && info.ChannelSetting.SystemPrompt != "" {
+	if info != nil && info.ChannelSetting.SystemPrompt != "" && !info.HasChannelSystemPromptApplied() {
 		systemPrompt := info.ChannelSetting.SystemPrompt
 
 		if len(request.Instructions) == 0 {
 			if b, err := common.Marshal(systemPrompt); err == nil {
 				request.Instructions = b
+				info.MarkChannelSystemPromptApplied(systemPrompt)
 			} else {
 				return nil, err
 			}
@@ -88,6 +89,7 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 					return nil, err
 				}
 			}
+			info.MarkChannelSystemPromptApplied(systemPrompt)
 		}
 	}
 	// Codex backend requires the `instructions` field to be present.

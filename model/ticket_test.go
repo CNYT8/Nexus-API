@@ -20,6 +20,7 @@ package model
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -178,6 +179,36 @@ func TestTicketReplyOwnershipAndStateTransitions(t *testing.T) {
 	}
 }
 
+func TestTicketAccountTypeAndPriority(t *testing.T) {
+	t.Setenv("TICKET_ENCRYPTION_KEY", "model-ticket-test-key")
+	truncateTables(t)
+
+	user := User{Id: 902, Username: "ticket-priority-owner", Status: common.UserStatusEnabled, Group: "default"}
+	if err := DB.Create(&user).Error; err != nil {
+		t.Fatalf("create user error = %v", err)
+	}
+
+	ticket, err := CreateTicketWithPriority(user.Id, TicketTypeAccount, TicketPriorityHigh, "I cannot access my account")
+	if err != nil {
+		t.Fatalf("CreateTicketWithPriority() error = %v", err)
+	}
+	if ticket.Type != TicketTypeAccount || ticket.Priority != TicketPriorityHigh {
+		t.Fatalf("unexpected ticket metadata: %#v", ticket)
+	}
+
+	legacyTicket, err := CreateTicketWithPriority(user.Id, TicketTypeOther, "", "Default priority")
+	if err != nil {
+		t.Fatalf("CreateTicket() error = %v", err)
+	}
+	if legacyTicket.Priority != TicketPriorityMedium {
+		t.Fatalf("default priority = %q, want %q", legacyTicket.Priority, TicketPriorityMedium)
+	}
+
+	if _, err := CreateTicketWithPriority(user.Id, TicketTypeOther, "urgent", "Invalid priority"); !errors.Is(err, ErrTicketInvalidPriority) {
+		t.Fatalf("expected invalid priority error, got %v", err)
+	}
+}
+
 func TestTicketListsReturnOnlyMetadata(t *testing.T) {
 	t.Setenv("TICKET_ENCRYPTION_KEY", "model-ticket-test-key")
 	truncateTables(t)
@@ -185,7 +216,7 @@ func TestTicketListsReturnOnlyMetadata(t *testing.T) {
 	if err := DB.Create(&User{Id: 903, Username: "ticket-owner", Status: common.UserStatusEnabled, Group: "default"}).Error; err != nil {
 		t.Fatalf("create user error = %v", err)
 	}
-	if _, err := CreateTicket(903, TicketTypeFinance, "I need billing help"); err != nil {
+	if _, err := CreateTicketWithPriority(903, TicketTypeFinance, TicketPriorityLow, "I need billing help"); err != nil {
 		t.Fatalf("CreateTicket() error = %v", err)
 	}
 	pageInfo := &common.PageInfo{Page: 1, PageSize: 20}
@@ -193,7 +224,7 @@ func TestTicketListsReturnOnlyMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTicketsByUser() error = %v", err)
 	}
-	if total != 1 || len(items) != 1 || items[0].Messages != nil {
+	if total != 1 || len(items) != 1 || items[0].Priority != TicketPriorityLow || items[0].Messages != nil {
 		t.Fatalf("unexpected user ticket list: total=%d items=%#v", total, items)
 	}
 
@@ -201,8 +232,40 @@ func TestTicketListsReturnOnlyMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTicketsForAdmin() error = %v", err)
 	}
-	if total != 1 || len(adminItems) != 1 || adminItems[0].Username != "ticket-owner" || adminItems[0].Messages != nil {
+	if total != 1 || len(adminItems) != 1 || adminItems[0].Username != "ticket-owner" || adminItems[0].Priority != TicketPriorityLow || adminItems[0].Messages != nil {
 		t.Fatalf("unexpected admin ticket list: total=%d items=%#v", total, adminItems)
+	}
+}
+
+func TestAdminTicketListOrdersByTicketIdDescending(t *testing.T) {
+	truncateTables(t)
+
+	user := User{Username: "ticket-order-owner", Status: common.UserStatusEnabled, Group: "default"}
+	if err := DB.Create(&user).Error; err != nil {
+		t.Fatalf("create user error = %v", err)
+	}
+	tickets := []Ticket{
+		{UserId: user.Id, Type: TicketTypeOther, Priority: TicketPriorityHigh, Status: TicketStatusPending, LastAuthor: TicketAuthorUser, UpdatedAt: time.Unix(300, 0)},
+		{UserId: user.Id, Type: TicketTypeOther, Priority: TicketPriorityMedium, Status: TicketStatusPending, LastAuthor: TicketAuthorUser, UpdatedAt: time.Unix(200, 0)},
+		{UserId: user.Id, Type: TicketTypeOther, Priority: TicketPriorityLow, Status: TicketStatusPending, LastAuthor: TicketAuthorUser, UpdatedAt: time.Unix(100, 0)},
+	}
+	for i := range tickets {
+		if err := DB.Create(&tickets[i]).Error; err != nil {
+			t.Fatalf("create ticket %d error = %v", i, err)
+		}
+	}
+
+	items, total, err := ListTicketsForAdmin("", &common.PageInfo{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("ListTicketsForAdmin() error = %v", err)
+	}
+	if total != 3 || len(items) != 3 {
+		t.Fatalf("unexpected admin ticket count: total=%d items=%d", total, len(items))
+	}
+	for i, expected := range []int{tickets[2].Id, tickets[1].Id, tickets[0].Id} {
+		if items[i].Id != expected {
+			t.Fatalf("ticket order at %d = %d, want %d", i, items[i].Id, expected)
+		}
 	}
 }
 

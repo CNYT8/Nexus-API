@@ -88,6 +88,73 @@ func TestGetUserCumulativeTopUpAmount(t *testing.T) {
 	assert.InDelta(t, 33, total, 0.0001)
 }
 
+func TestAdminQuotaGrantCountsTowardCumulativeTopUpAmount(t *testing.T) {
+	truncateTables(t)
+	resetMembershipForTest(t)
+	common.QuotaPerUnit = 100
+
+	user := &User{
+		Username: "membership_admin_grant",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+	}
+	require.NoError(t, DB.Create(user).Error)
+	insertMembershipTopUpForTest(t, user.Id, PaymentProviderEpay, 10, 10)
+
+	require.NoError(t, IncreaseUserQuotaWithMembershipGrant(user.Id, 250, 1))
+
+	total, err := GetUserCumulativeTopUpAmount(user.Id)
+	require.NoError(t, err)
+	assert.InDelta(t, 12.5, total, 0.0001)
+
+	var refreshed User
+	require.NoError(t, DB.Select("quota").First(&refreshed, user.Id).Error)
+	assert.Equal(t, 250, refreshed.Quota)
+
+	var grant MembershipQuotaGrant
+	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&grant).Error)
+	assert.Equal(t, 1, grant.OperatorId)
+	assert.Equal(t, 250, grant.Quota)
+	assert.InDelta(t, 2.5, grant.Amount, 0.0001)
+}
+
+func TestAdminQuotaGrantTriggersMembershipAutoUpgrade(t *testing.T) {
+	truncateTables(t)
+	resetMembershipForTest(t)
+	common.QuotaPerUnit = 100
+	setting := membership_setting.GetMembershipSetting()
+	setting.Enabled = true
+	require.NoError(t, membership_setting.UpdateTiersByJSONString(`[
+		{"id":"plus","name":"Plus","threshold_amount":2,"auto_upgrade_enabled":true,"enabled":true,"sort_order":1,"discount_all_groups":false,"all_group_discount":1,"group_discounts":[]}
+	]`))
+
+	user := &User{
+		Username: "membership_admin_upgrade",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+	}
+	require.NoError(t, DB.Create(user).Error)
+
+	require.NoError(t, IncreaseUserQuotaWithMembershipGrant(user.Id, 250, 1))
+
+	tierId, source := GetUserMembershipTier(user.Id)
+	assert.Equal(t, "plus", tierId)
+	assert.Equal(t, MembershipSourceAuto, source)
+}
+
+func TestAdminQuotaGrantRollsBackForMissingUser(t *testing.T) {
+	truncateTables(t)
+	resetMembershipForTest(t)
+	common.QuotaPerUnit = 100
+
+	err := IncreaseUserQuotaWithMembershipGrant(99999, 250, 1)
+	require.Error(t, err)
+
+	var count int64
+	require.NoError(t, DB.Model(&MembershipQuotaGrant{}).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
 func TestValidateMembershipTierId(t *testing.T) {
 	resetMembershipForTest(t)
 	require.NoError(t, membership_setting.UpdateTiersByJSONString(`[

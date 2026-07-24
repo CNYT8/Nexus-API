@@ -15,7 +15,8 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
-export type TicketType = 'finance' | 'technical' | 'other'
+export type TicketType = 'finance' | 'technical' | 'account' | 'other'
+export type TicketPriority = 'low' | 'medium' | 'high'
 export type TicketStatus = 'pending' | 'replied' | 'closed'
 export type TicketAuthorRole = 'user' | 'admin'
 
@@ -38,6 +39,7 @@ export type TicketSummary = {
   user_id: number
   username?: string
   type: TicketType
+  priority: TicketPriority
   status: TicketStatus
   last_author: TicketAuthorRole
   has_admin_reply: boolean

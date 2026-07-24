@@ -30,7 +30,12 @@ import (
 const (
 	TicketTypeFinance   = "finance"
 	TicketTypeTechnical = "technical"
+	TicketTypeAccount   = "account"
 	TicketTypeOther     = "other"
+
+	TicketPriorityLow    = "low"
+	TicketPriorityMedium = "medium"
+	TicketPriorityHigh   = "high"
 
 	TicketStatusPending = "pending"
 	TicketStatusReplied = "replied"
@@ -46,7 +51,14 @@ const (
 var validTicketTypes = map[string]struct{}{
 	TicketTypeFinance:   {},
 	TicketTypeTechnical: {},
+	TicketTypeAccount:   {},
 	TicketTypeOther:     {},
+}
+
+var validTicketPriorities = map[string]struct{}{
+	TicketPriorityLow:    {},
+	TicketPriorityMedium: {},
+	TicketPriorityHigh:   {},
 }
 
 var validTicketStatuses = map[string]struct{}{
@@ -59,6 +71,7 @@ var (
 	ErrTicketContentRequired = errors.New("ticket content is required")
 	ErrTicketContentTooLong  = errors.New("ticket content is too long")
 	ErrTicketInvalidType     = errors.New("invalid ticket type")
+	ErrTicketInvalidPriority = errors.New("invalid ticket priority")
 	ErrTicketInvalidStatus   = errors.New("invalid ticket status")
 	ErrTicketInvalidAuthor   = errors.New("invalid ticket author role")
 	ErrTicketClosed          = errors.New("closed ticket cannot receive replies")
@@ -70,6 +83,7 @@ type Ticket struct {
 	Id            int            `json:"id" gorm:"primaryKey"`
 	UserId        int            `json:"user_id" gorm:"not null;index:idx_nexus_ticket_user_status,priority:1;index:idx_nexus_ticket_user_updated,priority:1"`
 	Type          string         `json:"type" gorm:"type:varchar(32);not null;index"`
+	Priority      string         `json:"priority" gorm:"type:varchar(16);not null;default:'medium'"`
 	Status        string         `json:"status" gorm:"type:varchar(16);not null;default:'pending';index:idx_nexus_ticket_user_status,priority:2;index:idx_nexus_ticket_status_updated,priority:1"`
 	LastAuthor    string         `json:"last_author" gorm:"type:varchar(16);not null;default:'user'"`
 	HasAdminReply bool           `json:"has_admin_reply" gorm:"not null;default:false"`
@@ -108,6 +122,7 @@ type TicketView struct {
 	UserId        int                 `json:"user_id"`
 	Username      string              `json:"username,omitempty"`
 	Type          string              `json:"type"`
+	Priority      string              `json:"priority"`
 	Status        string              `json:"status"`
 	LastAuthor    string              `json:"last_author"`
 	HasAdminReply bool                `json:"has_admin_reply"`
@@ -120,6 +135,15 @@ type TicketView struct {
 func NormalizeTicketType(value string) (string, bool) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	_, ok := validTicketTypes[value]
+	return value, ok
+}
+
+func NormalizeTicketPriority(value string) (string, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return TicketPriorityMedium, true
+	}
+	_, ok := validTicketPriorities[value]
 	return value, ok
 }
 
@@ -147,6 +171,7 @@ func ticketView(ticket *Ticket, username string, messages []TicketMessage) (*Tic
 		UserId:        ticket.UserId,
 		Username:      username,
 		Type:          ticket.Type,
+		Priority:      ticket.Priority,
 		Status:        ticket.Status,
 		LastAuthor:    ticket.LastAuthor,
 		HasAdminReply: ticket.HasAdminReply,
@@ -171,9 +196,17 @@ func ticketView(ticket *Ticket, username string, messages []TicketMessage) (*Tic
 }
 
 func CreateTicket(userId int, ticketType string, content string) (*TicketView, error) {
+	return CreateTicketWithPriority(userId, ticketType, TicketPriorityMedium, content)
+}
+
+func CreateTicketWithPriority(userId int, ticketType string, priority string, content string) (*TicketView, error) {
 	ticketType, ok := NormalizeTicketType(ticketType)
 	if !ok {
 		return nil, ErrTicketInvalidType
+	}
+	priority, ok = NormalizeTicketPriority(priority)
+	if !ok {
+		return nil, ErrTicketInvalidPriority
 	}
 	if err := validateTicketContent(content); err != nil {
 		return nil, err
@@ -196,6 +229,7 @@ func CreateTicket(userId int, ticketType string, content string) (*TicketView, e
 		ticket = Ticket{
 			UserId:     userId,
 			Type:       ticketType,
+			Priority:   priority,
 			Status:     TicketStatusPending,
 			LastAuthor: TicketAuthorUser,
 		}
@@ -260,7 +294,7 @@ func GetTicketView(ticketId int, userId int, admin bool) (*TicketView, error) {
 	return ticketView(&ticket, username, messages)
 }
 
-func listTicketSummaries(query *gorm.DB, pageInfo *common.PageInfo, includeUsername bool) ([]TicketView, int64, error) {
+func listTicketSummaries(query *gorm.DB, pageInfo *common.PageInfo, includeUsername bool, orderByTicketId bool) ([]TicketView, int64, error) {
 	if pageInfo == nil {
 		pageInfo = &common.PageInfo{Page: 1, PageSize: common.ItemsPerPage}
 	}
@@ -268,14 +302,18 @@ func listTicketSummaries(query *gorm.DB, pageInfo *common.PageInfo, includeUsern
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	fields := "nexus_tickets.id, nexus_tickets.user_id, nexus_tickets.type, nexus_tickets.status, nexus_tickets.last_author, nexus_tickets.has_admin_reply, nexus_tickets.created_at, nexus_tickets.updated_at, nexus_tickets.closed_at"
+	fields := "nexus_tickets.id, nexus_tickets.user_id, nexus_tickets.type, nexus_tickets.priority, nexus_tickets.status, nexus_tickets.last_author, nexus_tickets.has_admin_reply, nexus_tickets.created_at, nexus_tickets.updated_at, nexus_tickets.closed_at"
 	if includeUsername {
 		fields += ", users.username"
 		query = query.Joins("LEFT JOIN users ON users.id = nexus_tickets.user_id")
 	}
+	order := "nexus_tickets.updated_at DESC, nexus_tickets.id DESC"
+	if orderByTicketId {
+		order = "nexus_tickets.id DESC"
+	}
 	views := make([]TicketView, 0, pageInfo.GetPageSize())
 	err := query.Select(fields).
-		Order("nexus_tickets.updated_at DESC, nexus_tickets.id DESC").
+		Order(order).
 		Limit(pageInfo.GetPageSize()).
 		Offset(pageInfo.GetStartIdx()).
 		Scan(&views).Error
@@ -287,7 +325,7 @@ func listTicketSummaries(query *gorm.DB, pageInfo *common.PageInfo, includeUsern
 
 func ListTicketsByUser(userId int, pageInfo *common.PageInfo) ([]TicketView, int64, error) {
 	query := DB.Model(&Ticket{}).Where("nexus_tickets.user_id = ?", userId)
-	return listTicketSummaries(query, pageInfo, false)
+	return listTicketSummaries(query, pageInfo, false, false)
 }
 
 func ListTicketsForAdmin(status string, pageInfo *common.PageInfo) ([]TicketView, int64, error) {
@@ -302,7 +340,7 @@ func ListTicketsForAdmin(status string, pageInfo *common.PageInfo) ([]TicketView
 	if status != "" {
 		query = query.Where("nexus_tickets.status = ?", status)
 	}
-	return listTicketSummaries(query, pageInfo, true)
+	return listTicketSummaries(query, pageInfo, true, true)
 }
 
 func AddTicketReply(ticketId int, authorId int, authorRole string, content string) (*TicketView, error) {

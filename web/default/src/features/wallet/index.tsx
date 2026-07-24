@@ -43,6 +43,7 @@ import {
 import {
   getDefaultPaymentType,
   getMinTopupAmount,
+  isConfigurableTopupEnabled,
   isWaffoPancakePayment,
 } from './lib'
 import type {
@@ -132,7 +133,11 @@ export function Wallet(props: WalletProps) {
 
   // Initialize topup amount when topup info is loaded
   useEffect(() => {
-    if (topupInfo && topupAmount === 0) {
+    if (
+      topupInfo &&
+      topupAmount === 0 &&
+      isConfigurableTopupEnabled(topupInfo)
+    ) {
       const minTopup = getMinTopupAmount(topupInfo)
       setTopupAmount(minTopup)
 

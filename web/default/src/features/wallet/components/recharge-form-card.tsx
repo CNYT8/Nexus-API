@@ -39,6 +39,7 @@ import {
   getDiscountLabel,
   getPaymentIcon,
   getMinTopupAmount,
+  isConfigurableTopupEnabled,
   calculatePresetPricing,
 } from '../lib'
 import type {
@@ -124,11 +125,7 @@ export function RechargeFormCard({
     }
   }
 
-  const hasConfigurableTopup =
-    topupInfo?.enable_online_topup ||
-    topupInfo?.enable_stripe_topup ||
-    enableWaffoTopup ||
-    enableWaffoPancakeTopup
+  const hasConfigurableTopup = isConfigurableTopupEnabled(topupInfo)
   const hasAnyTopup = hasConfigurableTopup || enableCreemTopup
   const hasStandardPaymentMethods =
     Array.isArray(topupInfo?.pay_methods) && topupInfo.pay_methods.length > 0

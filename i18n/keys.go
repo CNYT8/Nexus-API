@@ -344,6 +344,7 @@ const (
 	MsgTicketNotFound             = "ticket.not_found"
 	MsgTicketInvalidPayload       = "ticket.invalid_payload"
 	MsgTicketInvalidType          = "ticket.invalid_type"
+	MsgTicketInvalidPriority      = "ticket.invalid_priority"
 	MsgTicketInvalidStatus        = "ticket.invalid_status"
 	MsgTicketContentRequired      = "ticket.content_required"
 	MsgTicketContentTooLong       = "ticket.content_too_long"

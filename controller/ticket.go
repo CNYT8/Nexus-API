@@ -33,8 +33,9 @@ import (
 )
 
 type ticketCreateRequest struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
+	Type     string `json:"type"`
+	Priority string `json:"priority"`
+	Content  string `json:"content"`
 }
 
 type ticketReplyRequest struct {
@@ -101,6 +102,8 @@ func ticketError(c *gin.Context, err error) {
 		common.ApiErrorI18n(c, i18n.MsgTicketContentTooLong)
 	case errors.Is(err, model.ErrTicketInvalidType):
 		common.ApiErrorI18n(c, i18n.MsgTicketInvalidType)
+	case errors.Is(err, model.ErrTicketInvalidPriority):
+		common.ApiErrorI18n(c, i18n.MsgTicketInvalidPriority)
 	case errors.Is(err, model.ErrTicketInvalidStatus):
 		common.ApiErrorI18n(c, i18n.MsgTicketInvalidStatus)
 	case errors.Is(err, model.ErrTicketInvalidAuthor):
@@ -156,7 +159,7 @@ func CreateMyTicket(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgTicketInvalidPayload)
 		return
 	}
-	ticket, err := model.CreateTicket(c.GetInt("id"), request.Type, request.Content)
+	ticket, err := model.CreateTicketWithPriority(c.GetInt("id"), request.Type, request.Priority, request.Content)
 	if err != nil {
 		ticketError(c, err)
 		return

@@ -207,12 +207,14 @@ func TestModelMonitorEffectiveErrorWeightDiscountsRetryFanOut(t *testing.T) {
 func resetModelMonitorTables(t *testing.T) {
 	t.Helper()
 	require.NoError(t, LOG_DB.Exec("DELETE FROM logs").Error)
+	require.NoError(t, LOG_DB.Exec("DELETE FROM model_monitor_samples").Error)
 	require.NoError(t, DB.Exec("DELETE FROM channels").Error)
 	require.NoError(t, DB.Exec("DELETE FROM abilities").Error)
 	require.NoError(t, DB.Exec("DELETE FROM models").Error)
 	require.NoError(t, DB.Exec("DELETE FROM vendors").Error)
 	t.Cleanup(func() {
 		_ = LOG_DB.Exec("DELETE FROM logs").Error
+		_ = LOG_DB.Exec("DELETE FROM model_monitor_samples").Error
 		_ = DB.Exec("DELETE FROM channels").Error
 		_ = DB.Exec("DELETE FROM abilities").Error
 		_ = DB.Exec("DELETE FROM models").Error
@@ -295,6 +297,99 @@ func TestGetModelMonitorSummaryAggregatesRecentLogs(t *testing.T) {
 	require.GreaterOrEqual(t, normalModel.Score, 1)
 	require.LessOrEqual(t, normalModel.Score, 100)
 	require.Less(t, emptyModel.Score, normalModel.Score)
+}
+
+func TestGetModelMonitorSummaryAggregatesChannelTestSamples(t *testing.T) {
+	InvalidateModelMonitorCache()
+	t.Cleanup(InvalidateModelMonitorCache)
+	InvalidatePricingCache()
+	t.Cleanup(InvalidatePricingCache)
+	resetModelMonitorTables(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&Channel{
+		Id:     991,
+		Type:   1,
+		Status: common.ChannelStatusEnabled,
+	}).Error)
+	for _, modelName := range []string{"gpt-channel-test-sample", "gpt-channel-test-error", "gpt-legacy-test-log"} {
+		require.NoError(t, DB.Create(&Ability{
+			Group:     "vip",
+			Model:     modelName,
+			ChannelId: 991,
+			Enabled:   true,
+		}).Error)
+	}
+	require.NoError(t, LOG_DB.Create(&Log{
+		CreatedAt:        now - 60,
+		Type:             LogTypeConsume,
+		Content:          "模型测试",
+		TokenName:        "模型测试",
+		TokenId:          0,
+		ModelName:        "gpt-legacy-test-log",
+		Group:            "vip",
+		PromptTokens:     800,
+		CompletionTokens: 800,
+		UseTime:          1,
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&ModelMonitorSample{
+		CreatedAt:        now - 30,
+		Source:           ModelMonitorSampleSourceChannelTest,
+		ChannelId:        991,
+		ModelName:        "gpt-channel-test-sample",
+		Group:            "vip",
+		Status:           ModelMonitorSampleStatusSuccess,
+		PromptTokens:     12,
+		CompletionTokens: 8,
+		UseTime:          0.25,
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&ModelMonitorSample{
+		CreatedAt: now - 30,
+		Source:    ModelMonitorSampleSourceChannelTest,
+		ChannelId: 991,
+		ModelName: "gpt-channel-test-error",
+		Group:     "vip",
+		Status:    ModelMonitorSampleStatusError,
+		UseTime:   2,
+	}).Error)
+
+	summary, err := GetModelMonitorSummary()
+	require.NoError(t, err)
+	require.Equal(t, 3, summary.ModelCount)
+	require.Len(t, summary.Vendors, 1)
+
+	models := make(map[string]ModelMonitorModel)
+	for _, item := range summary.Vendors[0].Models {
+		models[item.ModelName+"/"+item.Group] = item
+	}
+	successModel := models["gpt-channel-test-sample/vip"]
+	errorModel := models["gpt-channel-test-error/vip"]
+	legacyModel := models["gpt-legacy-test-log/vip"]
+	require.True(t, successModel.HasData)
+	require.True(t, errorModel.HasData)
+	require.False(t, legacyModel.HasData)
+	require.Greater(t, successModel.Score, errorModel.Score)
+}
+
+func TestRecordModelMonitorSamplesUsesChannelGroups(t *testing.T) {
+	resetModelMonitorTables(t)
+
+	require.NoError(t, RecordModelMonitorSamples(RecordModelMonitorSampleParams{
+		Source:           ModelMonitorSampleSourceChannelTest,
+		ChannelId:        992,
+		ModelName:        "gpt-channel-groups-sample",
+		Group:            "default",
+		Success:          true,
+		PromptTokens:     12,
+		CompletionTokens: 8,
+		UseTimeSeconds:   0.2,
+	}, []string{"vip", "svip", "vip"}))
+
+	var samples []ModelMonitorSample
+	require.NoError(t, LOG_DB.Where("model_name = ?", "gpt-channel-groups-sample").Order("id asc").Find(&samples).Error)
+	require.Len(t, samples, 2)
+	require.Equal(t, "vip", samples[0].Group)
+	require.Equal(t, "svip", samples[1].Group)
 }
 
 func TestGetModelMonitorSummarySeparatesSameModelByGroup(t *testing.T) {

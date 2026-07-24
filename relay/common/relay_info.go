@@ -164,6 +164,12 @@ type RelayInfo struct {
 
 	PriceData types.PriceData
 
+	// ChannelSystemPrompt records only the channel-level prompt that was
+	// actually injected into the upstream request. It is used to exclude
+	// that prompt from Nexus-side user input settlement and logs.
+	ChannelSystemPrompt        string
+	ChannelSystemPromptApplied bool
+
 	// TieredBillingSnapshot is a frozen snapshot of tiered billing rules
 	// captured at pre-consume time. Non-nil only when billing mode is "tiered_expr".
 	TieredBillingSnapshot *billingexpr.BillingSnapshot
@@ -189,7 +195,36 @@ type RelayInfo struct {
 	*TaskRelayInfo
 }
 
+func (info *RelayInfo) MarkChannelSystemPromptApplied(prompt string) {
+	if info == nil {
+		return
+	}
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return
+	}
+	info.ChannelSystemPrompt = prompt
+	info.ChannelSystemPromptApplied = true
+}
+
+func (info *RelayInfo) HasChannelSystemPromptApplied() bool {
+	return info != nil && info.ChannelSystemPromptApplied && info.ChannelSystemPrompt != ""
+}
+
+func (info *RelayInfo) resetChannelSystemPromptApplied() {
+	if info == nil {
+		return
+	}
+	info.ChannelSystemPrompt = ""
+	info.ChannelSystemPromptApplied = false
+}
+
 func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
+	// RelayInfo is reused across channel retries. Prompt settlement state must
+	// belong only to the current attempt, otherwise a failed channel can affect
+	// the next channel's request and accounting.
+	info.resetChannelSystemPromptApplied()
+
 	channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
 	paramOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelParamOverride)
 	headerOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelHeaderOverride)

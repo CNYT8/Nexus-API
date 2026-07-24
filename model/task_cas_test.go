@@ -53,7 +53,9 @@ func TestMain(m *testing.M) {
 		&UserSubscription{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
+		&ModelMonitorSample{},
 		&UserMembership{},
+		&MembershipQuotaGrant{},
 		&Ticket{},
 		&TicketMessage{},
 		&Redemption{},
@@ -75,6 +77,8 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM tokens")
 		DB.Exec("DELETE FROM user_oauth_bindings")
 		DB.Exec("DELETE FROM user_memberships")
+		DB.Exec("DELETE FROM membership_quota_grants")
+		DB.Exec("DELETE FROM model_monitor_samples")
 		DB.Exec("DELETE FROM nexus_ticket_messages")
 		DB.Exec("DELETE FROM nexus_tickets")
 		DB.Exec("DELETE FROM users")

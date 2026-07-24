@@ -38,3 +38,14 @@ func TestRelayInfoGetFinalRequestRelayFormatNilReceiver(t *testing.T) {
 	var info *RelayInfo
 	require.Equal(t, types.RelayFormat(""), info.GetFinalRequestRelayFormat())
 }
+
+func TestRelayInfoResetChannelSystemPromptApplied(t *testing.T) {
+	info := &RelayInfo{}
+	info.MarkChannelSystemPromptApplied("channel prompt")
+	require.True(t, info.HasChannelSystemPromptApplied())
+
+	info.resetChannelSystemPromptApplied()
+
+	require.False(t, info.HasChannelSystemPromptApplied())
+	require.Empty(t, info.ChannelSystemPrompt)
+}

@@ -21,7 +21,12 @@ import { useTranslation } from 'react-i18next'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import type { TicketMessage, TicketStatus, TicketType } from './types'
+import type {
+  TicketMessage,
+  TicketPriority,
+  TicketStatus,
+  TicketType,
+} from './types'
 
 const statusClassName: Record<TicketStatus, string> = {
   pending: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
@@ -38,7 +43,21 @@ const statusTextKey: Record<TicketStatus, string> = {
 const typeTextKey: Record<TicketType, string> = {
   finance: 'Financial Issue',
   technical: 'Technical Issue',
+  account: 'Account Issue',
   other: 'Other Issue',
+}
+
+const priorityClassName: Record<TicketPriority, string> = {
+  low: 'border-slate-400/30 bg-slate-400/10 text-slate-600 dark:text-slate-300',
+  medium:
+    'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+  high: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300',
+}
+
+const priorityTextKey: Record<TicketPriority, string> = {
+  low: 'Low Priority',
+  medium: 'Medium Priority',
+  high: 'High Priority',
 }
 
 export function TicketStatusBadge(props: { status: TicketStatus }) {
@@ -55,6 +74,26 @@ export function TicketStatusBadge(props: { status: TicketStatus }) {
 
 export function getTicketTypeLabel(t: TFunction, type: TicketType) {
   return t(typeTextKey[type])
+}
+
+export function getTicketPriorityLabel(
+  t: TFunction,
+  priority: TicketPriority = 'medium'
+) {
+  return t(priorityTextKey[priority])
+}
+
+export function TicketPriorityBadge(props: { priority?: TicketPriority }) {
+  const { t } = useTranslation()
+  const priority = props.priority || 'medium'
+  return (
+    <Badge
+      variant='outline'
+      className={cn('shrink-0', priorityClassName[priority])}
+    >
+      {getTicketPriorityLabel(t, priority)}
+    </Badge>
+  )
 }
 
 export function TicketMessages(props: {

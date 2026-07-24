@@ -30,10 +30,12 @@ import {
 import { Check, MessageSquare, Send } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { API, isRoot, showError, showSuccess } from '../../helpers';
+import TicketListSkeleton from '../../components/tickets/TicketListSkeleton';
 
 const { Text, Title } = Typography;
 
 const STATUS_COLORS = { pending: 'orange', replied: 'green', closed: 'grey' };
+const PRIORITY_COLORS = { low: 'grey', medium: 'orange', high: 'red' };
 const PAGE_SIZE = 20;
 
 const TicketStatus = ({ status, t }) => (
@@ -50,9 +52,28 @@ const TicketType = ({ type, t }) =>
     {
       finance: '财务问题',
       technical: '技术问题',
+      account: '账号问题',
       other: '其他问题',
     }[type] || '其他问题',
   );
+
+const TicketPriority = ({ priority, t }) => {
+  const normalizedPriority = priority || 'medium';
+  return (
+    <Tag
+      color={PRIORITY_COLORS[normalizedPriority] || 'orange'}
+      shape='circle'
+    >
+      {t(
+        {
+          low: '低优先级',
+          medium: '中优先级',
+          high: '高优先级',
+        }[normalizedPriority] || '中优先级',
+      )}
+    </Tag>
+  );
+};
 
 const TicketManagement = () => {
   const { t } = useTranslation();
@@ -61,6 +82,7 @@ const TicketManagement = () => {
   const [ticketTotal, setTicketTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [hasLoadedTickets, setHasLoadedTickets] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
@@ -95,14 +117,12 @@ const TicketManagement = () => {
         page_size: String(PAGE_SIZE),
       });
       if (nextStatus) query.set('status', nextStatus);
-      const res = await API.get(
-        `/api/tickets/admin/?${query.toString()}`,
-      );
+      const res = await API.get(`/api/tickets/admin/?${query.toString()}`);
       if (res.data.success) {
         setTickets(res.data.data?.items || []);
         setTicketTotal(res.data.data?.total || 0);
-      }
-      else showError(res.data.message || t('加载失败，请重试'));
+        setHasLoadedTickets(true);
+      } else showError(res.data.message || t('加载失败，请重试'));
     } catch (error) {
       showError(error.message || t('加载失败，请重试'));
     } finally {
@@ -206,7 +226,9 @@ const TicketManagement = () => {
           />
         </div>
 
-        {loading && tickets.length === 0 ? null : tickets.length === 0 ? (
+        {loading && !hasLoadedTickets ? (
+          <TicketListSkeleton rows={5} />
+        ) : tickets.length === 0 ? (
           <Empty description={t('暂无工单')} />
         ) : (
           <div className='space-y-2'>
@@ -228,6 +250,7 @@ const TicketManagement = () => {
                     <Text type='tertiary' size='small'>
                       <TicketType type={ticket.type} t={t} />
                     </Text>
+                    <TicketPriority priority={ticket.priority} t={t} />
                     {ticket.last_author === 'user' &&
                       ticket.has_admin_reply &&
                       ticket.status !== 'closed' && (
@@ -282,6 +305,8 @@ const TicketManagement = () => {
               <Text>
                 <TicketType type={selectedTicket.type} t={t} />
               </Text>
+              <Text type='tertiary'>{t('优先级')}</Text>
+              <TicketPriority priority={selectedTicket.priority} t={t} />
             </div>
             <div className='max-h-[50vh] space-y-3 overflow-y-auto rounded-lg border border-semi-color-border p-3'>
               {(selectedTicket.messages || []).map((message) => (

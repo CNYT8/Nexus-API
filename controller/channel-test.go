@@ -74,8 +74,35 @@ func resolveChannelTestUserID(c *gin.Context) (int, error) {
 	return rootUser.Id, nil
 }
 
-func testChannel(channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) testResult {
+func testChannel(channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) (result testResult) {
 	tik := time.Now()
+	var info *relaycommon.RelayInfo
+	monitorSampleReady := false
+	monitorSample := model.RecordModelMonitorSampleParams{
+		Source:    model.ModelMonitorSampleSourceChannelTest,
+		ChannelId: channel.Id,
+	}
+	defer func() {
+		if !monitorSampleReady {
+			return
+		}
+		if monitorSample.ModelName == "" && info != nil {
+			monitorSample.ModelName = info.OriginModelName
+		}
+		if monitorSample.Group == "" && info != nil {
+			monitorSample.Group = info.UsingGroup
+		}
+		if monitorSample.UseTimeSeconds <= 0 {
+			monitorSample.UseTimeSeconds = time.Since(tik).Seconds()
+		}
+		if result.localErr != nil {
+			monitorSample.Success = false
+			monitorSample.ErrorMessage = result.localErr.Error()
+		}
+		if err := model.RecordModelMonitorSamples(monitorSample, channel.GetGroups()); err != nil {
+			common.SysLog(fmt.Sprintf("failed to record channel test model monitor sample: channel_id=%d model=%s err=%v", channel.Id, monitorSample.ModelName, err))
+		}
+	}()
 	var unsupportedTestChannelTypes = []int{
 		constant.ChannelTypeMidjourney,
 		constant.ChannelTypeMidjourneyPlus,
@@ -176,6 +203,9 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 	c.Set("base_url", channel.GetBaseURL())
 	group, _ := model.GetUserGroup(testUserID, false)
 	c.Set("group", group)
+	monitorSample.ModelName = testModel
+	monitorSample.Group = group
+	monitorSampleReady = true
 
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, testModel)
 	if newAPIError != nil {
@@ -238,7 +268,7 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 
 	request := buildTestRequest(testModel, endpointType, channel, isStream)
 
-	info, err := relaycommon.GenRelayInfo(c, relayFormat, request, nil)
+	info, err = relaycommon.GenRelayInfo(c, relayFormat, request, nil)
 
 	if err != nil {
 		return testResult{
@@ -250,6 +280,12 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 
 	info.IsChannelTest = true
 	info.InitChannelMeta(c)
+	if info.OriginModelName != "" {
+		monitorSample.ModelName = info.OriginModelName
+	}
+	if info.UsingGroup != "" {
+		monitorSample.Group = info.UsingGroup
+	}
 
 	err = attachTestBillingRequestInput(info, request)
 	if err != nil {
@@ -270,6 +306,9 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 	}
 
 	testModel = info.UpstreamModelName
+	if info.OriginModelName != "" {
+		monitorSample.ModelName = info.OriginModelName
+	}
 	// 更新请求中的模型名称
 	request.SetModelName(testModel)
 
@@ -478,8 +517,8 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 			newAPIError: types.NewOpenAIError(usageErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError),
 		}
 	}
-	result := w.Result()
-	respBody, err := readTestResponseBody(result.Body, isStream)
+	httpResult := w.Result()
+	respBody, err := readTestResponseBody(httpResult.Body, isStream)
 	if err != nil {
 		return testResult{
 			context:     c,
@@ -500,6 +539,10 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 	tok := time.Now()
 	milliseconds := tok.Sub(tik).Milliseconds()
 	consumedTime := float64(milliseconds) / 1000.0
+	monitorSample.Success = true
+	monitorSample.PromptTokens = usage.PromptTokens
+	monitorSample.CompletionTokens = usage.CompletionTokens
+	monitorSample.UseTimeSeconds = consumedTime
 	other := buildTestLogOther(c, info, priceData, usage, tieredResult)
 	model.RecordConsumeLog(c, testUserID, model.RecordConsumeLogParams{
 		ChannelId:        channel.Id,

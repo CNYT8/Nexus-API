@@ -206,18 +206,22 @@ const PricingCardView = ({
     const successRate = Number.isFinite(weightedSuccessRate)
       ? weightedSuccessRate
       : Number(performance?.success_rate);
-    let performanceStatus = null;
-    if (Number.isFinite(successRate)) {
-      let statusColor = 'bg-emerald-500';
+    const hasPerformanceData = Number.isFinite(successRate);
+    let statusColor = 'bg-gray-400';
+    if (hasPerformanceData) {
+      statusColor = 'bg-emerald-500';
       if (successRate < 99) {
         statusColor = 'bg-red-500';
       } else if (successRate < 99.9) {
         statusColor = 'bg-amber-500';
       }
-
-      performanceStatus = (
-        <Tooltip
-          content={`${t('近24小时模型性能概览')} · ${t('成功率')}: ${successRate.toFixed(1)}%`}
+    }
+    const performanceTooltip = hasPerformanceData
+      ? `${t('近24小时模型性能概览')} · ${t('成功率')}: ${successRate.toFixed(1)}%`
+      : `${t('近24小时模型性能概览')} · ${t('暂无数据')}`;
+    const performanceStatus = (
+      <Tooltip
+        content={performanceTooltip}
         key='performance'
         position='top'
         showArrow
@@ -230,8 +234,7 @@ const PricingCardView = ({
           <span className={`h-3 w-1 rounded-full ${statusColor}`} />
         </span>
       </Tooltip>
-      );
-    }
+    );
 
     // 自定义标签（右边）
     const customTags = [];

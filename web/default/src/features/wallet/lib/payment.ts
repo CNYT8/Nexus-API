@@ -115,6 +115,20 @@ export function getDefaultPaymentType(topupInfo: TopupInfo | null): string {
 }
 
 /**
+ * Check whether the wallet has an amount-based top-up method enabled.
+ */
+export function isConfigurableTopupEnabled(
+  topupInfo: TopupInfo | null
+): boolean {
+  return Boolean(
+    topupInfo?.enable_online_topup ||
+      topupInfo?.enable_stripe_topup ||
+      topupInfo?.enable_waffo_topup ||
+      topupInfo?.enable_waffo_pancake_topup
+  )
+}
+
+/**
  * Get minimum topup amount from topup info
  */
 export function getMinTopupAmount(topupInfo: TopupInfo | null): number {

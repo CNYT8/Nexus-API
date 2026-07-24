@@ -31,13 +31,21 @@ import {
 import { List, MessageSquare, Send } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../helpers';
+import TicketListSkeleton from '../../components/tickets/TicketListSkeleton';
 
 const { Text, Title } = Typography;
 
 const TICKET_TYPES = [
   { value: 'finance', label: '财务问题' },
   { value: 'technical', label: '技术问题' },
+  { value: 'account', label: '账号问题' },
   { value: 'other', label: '其他问题' },
+];
+
+const TICKET_PRIORITIES = [
+  { value: 'low', label: '低优先级' },
+  { value: 'medium', label: '中优先级' },
+  { value: 'high', label: '高优先级' },
 ];
 
 const STATUS_COLORS = {
@@ -45,6 +53,8 @@ const STATUS_COLORS = {
   replied: 'green',
   closed: 'grey',
 };
+
+const PRIORITY_COLORS = { low: 'grey', medium: 'orange', high: 'red' };
 
 const PAGE_SIZE = 10;
 
@@ -65,9 +75,28 @@ const TicketType = ({ type, t }) =>
     {
       finance: '财务问题',
       technical: '技术问题',
+      account: '账号问题',
       other: '其他问题',
     }[type] || '其他问题',
   );
+
+const TicketPriority = ({ priority, t }) => {
+  const normalizedPriority = priority || 'medium';
+  return (
+    <Tag
+      color={PRIORITY_COLORS[normalizedPriority] || 'orange'}
+      shape='circle'
+    >
+      {t(
+        {
+          low: '低优先级',
+          medium: '中优先级',
+          high: '高优先级',
+        }[normalizedPriority] || '中优先级',
+      )}
+    </Tag>
+  );
+};
 
 const TicketDetailModal = ({
   ticket,
@@ -124,6 +153,8 @@ const TicketDetailModal = ({
           <div className='flex items-center gap-2 text-sm'>
             <Text type='tertiary'>{t('工单类型')}</Text>
             <Text>{<TicketType type={ticket.type} t={t} />}</Text>
+            <Text type='tertiary'>{t('优先级')}</Text>
+            <TicketPriority priority={ticket.priority} t={t} />
           </div>
           <div className='max-h-[45vh] space-y-3 overflow-y-auto rounded-lg border border-semi-color-border p-3'>
             {(ticket.messages || []).map((message) => (
@@ -189,11 +220,13 @@ const TicketDetailModal = ({
 const TicketCenter = () => {
   const { t } = useTranslation();
   const [type, setType] = useState('');
+  const [priority, setPriority] = useState('medium');
   const [content, setContent] = useState('');
   const [tickets, setTickets] = useState([]);
   const [ticketTotal, setTicketTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [hasLoadedTickets, setHasLoadedTickets] = useState(false);
   const [sending, setSending] = useState(false);
   const [showMyTickets, setShowMyTickets] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState(null);
@@ -224,6 +257,10 @@ const TicketCenter = () => {
     () => TICKET_TYPES.map((item) => ({ ...item, label: t(item.label) })),
     [t],
   );
+  const priorityOptions = useMemo(
+    () => TICKET_PRIORITIES.map((item) => ({ ...item, label: t(item.label) })),
+    [t],
+  );
 
   const loadTickets = async (nextPage = page) => {
     setLoading(true);
@@ -234,8 +271,8 @@ const TicketCenter = () => {
       if (res.data.success) {
         setTickets(res.data.data?.items || []);
         setTicketTotal(res.data.data?.total || 0);
-      }
-      else showError(res.data.message || t('加载失败，请重试'));
+        setHasLoadedTickets(true);
+      } else showError(res.data.message || t('加载失败，请重试'));
     } catch (error) {
       showError(error.message || t('加载失败，请重试'));
     } finally {
@@ -253,6 +290,7 @@ const TicketCenter = () => {
     try {
       const res = await API.post('/api/tickets/', {
         type,
+        priority,
         content: content.trim(),
       });
       if (!res.data.success) {
@@ -261,6 +299,7 @@ const TicketCenter = () => {
       }
       setContent('');
       setType('');
+      setPriority('medium');
       showSuccess(t('工单已提交'));
       setShowMyTickets(true);
       setPage(1);
@@ -322,15 +361,25 @@ const TicketCenter = () => {
         </div>
 
         <Form layout='vertical'>
-          <Form.Select
-            field='ticket_type'
-            label={t('工单类型')}
-            value={type || undefined}
-            optionList={typeOptions}
-            placeholder={t('请选择工单类型')}
-            onChange={setType}
-            showClear
-          />
+          <div className='grid gap-4 md:grid-cols-2'>
+            <Form.Select
+              field='ticket_type'
+              label={t('工单类型')}
+              value={type || undefined}
+              optionList={typeOptions}
+              placeholder={t('请选择工单类型')}
+              onChange={setType}
+              showClear
+            />
+            <Form.Select
+              field='ticket_priority'
+              label={t('优先级')}
+              value={priority}
+              optionList={priorityOptions}
+              placeholder={t('请选择工单优先级')}
+              onChange={(value) => setPriority(value || 'medium')}
+            />
+          </div>
           <Form.TextArea
             field='ticket_content'
             label={t('问题描述')}
@@ -363,7 +412,9 @@ const TicketCenter = () => {
                 {t('共 {{count}} 条', { count: ticketTotal })}
               </Text>
             </div>
-            {loading && tickets.length === 0 ? null : tickets.length === 0 ? (
+            {loading && !hasLoadedTickets ? (
+              <TicketListSkeleton rows={3} compact />
+            ) : tickets.length === 0 ? (
               <Empty description={t('暂无工单')} />
             ) : (
               <div className='space-y-2'>
@@ -386,6 +437,7 @@ const TicketCenter = () => {
                         <Text type='tertiary' size='small'>
                           <TicketType type={ticket.type} t={t} />
                         </Text>
+                        <TicketPriority priority={ticket.priority} t={t} />
                       </div>
                       <Text type='tertiary' size='small'>
                         {new Date(ticket.updated_at).toLocaleString()}

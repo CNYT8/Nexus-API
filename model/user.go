@@ -686,6 +686,7 @@ func deleteUserAuthenticationData(tx *gorm.DB, userId int) error {
 		&PasskeyCredential{},
 		&Token{},
 		&UserMembership{},
+		&MembershipQuotaGrant{},
 	} {
 		if err := tx.Unscoped().Where("user_id = ?", userId).Delete(authenticationData).Error; err != nil {
 			return err

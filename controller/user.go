@@ -1012,7 +1012,7 @@ func ManageUser(c *gin.Context) {
 				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
 				return
 			}
-			if err := model.IncreaseUserQuota(user.Id, req.Value, true); err != nil {
+			if err := model.IncreaseUserQuotaWithMembershipGrant(user.Id, req.Value, c.GetInt("id")); err != nil {
 				common.ApiError(c, err)
 				return
 			}

@@ -91,6 +91,21 @@ type modelMonitorModelEntry struct {
 	vendor    PricingVendor
 }
 
+type modelMonitorBucketRow struct {
+	ModelName                string
+	GroupName                string
+	RawErrorLogCount         int64
+	SuccessSampleCount       int64
+	ErrorSampleCount         int64
+	WeightedSuccess          float64
+	WeightedErrors           float64
+	WeightedPromptTokens     float64
+	WeightedCompletionTokens float64
+	WeightedUseTime          float64
+	WeightedEmptyOutputs     float64
+	WeightedSlowRequests     float64
+}
+
 func normalizeModelMonitorGroup(group string) string {
 	group = strings.TrimSpace(group)
 	if group == "" {
@@ -219,6 +234,55 @@ func modelMonitorEffectiveErrorWeight(bucket modelMonitorBucket) float64 {
 
 func modelMonitorEffectiveRequestWeight(bucket modelMonitorBucket) float64 {
 	return bucket.weightedSuccess + modelMonitorEffectiveErrorWeight(bucket)
+}
+
+func mergeModelMonitorBucket(dst modelMonitorBucket, src modelMonitorBucket) modelMonitorBucket {
+	dst.rawErrorLogCount += src.rawErrorLogCount
+	dst.sampleCount += src.sampleCount
+	dst.errorSampleCount += src.errorSampleCount
+	dst.weightedSuccess += src.weightedSuccess
+	dst.weightedErrors += src.weightedErrors
+	dst.weightedPromptTokens += src.weightedPromptTokens
+	dst.weightedCompletionTokens += src.weightedCompletionTokens
+	dst.weightedUseTime += src.weightedUseTime
+	dst.weightedEmptyOutputs += src.weightedEmptyOutputs
+	dst.weightedSlowRequests += src.weightedSlowRequests
+	return dst
+}
+
+func modelMonitorBucketFromRow(item modelMonitorBucketRow) modelMonitorBucket {
+	return modelMonitorBucket{
+		rawErrorLogCount:         item.RawErrorLogCount,
+		sampleCount:              item.SuccessSampleCount + item.ErrorSampleCount,
+		errorSampleCount:         item.ErrorSampleCount,
+		weightedSuccess:          item.WeightedSuccess,
+		weightedErrors:           item.WeightedErrors,
+		weightedPromptTokens:     item.WeightedPromptTokens,
+		weightedCompletionTokens: item.WeightedCompletionTokens,
+		weightedUseTime:          item.WeightedUseTime,
+		weightedEmptyOutputs:     item.WeightedEmptyOutputs,
+		weightedSlowRequests:     item.WeightedSlowRequests,
+	}
+}
+
+func mergeModelMonitorBucketRows(buckets map[modelMonitorModelKey]modelMonitorBucket, rows []modelMonitorBucketRow, activeModelSet map[string]struct{}, activeEntrySet map[modelMonitorModelKey]struct{}) {
+	for _, item := range rows {
+		modelName := strings.TrimSpace(item.ModelName)
+		if modelName == "" {
+			continue
+		}
+		if _, ok := activeModelSet[modelName]; !ok {
+			continue
+		}
+		key := modelMonitorModelKey{
+			modelName: modelName,
+			group:     normalizeModelMonitorGroup(item.GroupName),
+		}
+		if _, ok := activeEntrySet[key]; !ok {
+			continue
+		}
+		buckets[key] = mergeModelMonitorBucket(buckets[key], modelMonitorBucketFromRow(item))
+	}
 }
 
 func modelMonitorLatencyScore(avgUseTime float64, slowRate float64) float64 {
@@ -623,26 +687,12 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 	selectArgs = append(selectArgs, LogTypeConsume, modelMonitorSlowSeconds, modelMonitorOutputTimeTPS)
 	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
 
-	type row struct {
-		ModelName                string
-		GroupName                string
-		RawErrorLogCount         int64
-		SuccessSampleCount       int64
-		ErrorSampleCount         int64
-		WeightedSuccess          float64
-		WeightedErrors           float64
-		WeightedPromptTokens     float64
-		WeightedCompletionTokens float64
-		WeightedUseTime          float64
-		WeightedEmptyOutputs     float64
-		WeightedSlowRequests     float64
-	}
-
-	var rows []row
+	var rows []modelMonitorBucketRow
 	if len(activeModels) > 0 {
 		if err := LOG_DB.Model(&Log{}).
 			Select(selectSQL, selectArgs...).
 			Where("created_at >= ? AND model_name IN ? AND type IN ?", since, activeModels, []int{LogTypeConsume, LogTypeError}).
+			Where("NOT (COALESCE(token_name, '') = ? AND COALESCE(content, '') = ? AND token_id = ?)", "模型测试", "模型测试", 0).
 			Group("model_name, " + groupSQL).
 			Find(&rows).Error; err != nil {
 			return nil, err
@@ -650,34 +700,49 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 	}
 
 	buckets := make(map[modelMonitorModelKey]modelMonitorBucket)
-	for _, item := range rows {
-		modelName := strings.TrimSpace(item.ModelName)
-		if modelName == "" {
-			continue
-		}
-		if _, ok := activeModelSet[modelName]; !ok {
-			continue
-		}
-		key := modelMonitorModelKey{
-			modelName: modelName,
-			group:     normalizeModelMonitorGroup(item.GroupName),
-		}
-		if _, ok := activeEntrySet[key]; !ok {
-			continue
-		}
-		buckets[key] = modelMonitorBucket{
-			rawErrorLogCount:         item.RawErrorLogCount,
-			sampleCount:              item.SuccessSampleCount + item.ErrorSampleCount,
-			errorSampleCount:         item.ErrorSampleCount,
-			weightedSuccess:          item.WeightedSuccess,
-			weightedErrors:           item.WeightedErrors,
-			weightedPromptTokens:     item.WeightedPromptTokens,
-			weightedCompletionTokens: item.WeightedCompletionTokens,
-			weightedUseTime:          item.WeightedUseTime,
-			weightedEmptyOutputs:     item.WeightedEmptyOutputs,
-			weightedSlowRequests:     item.WeightedSlowRequests,
+	mergeModelMonitorBucketRows(buckets, rows, activeModelSet, activeEntrySet)
+
+	sampleGroupSQL := "COALESCE(NULLIF(TRIM(" + logGroupCol + "), ''), 'default')"
+	sampleSelectSQL := "model_name, " + sampleGroupSQL + " AS group_name, " +
+		"SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS raw_error_log_count, " +
+		"SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS success_sample_count, " +
+		"SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS error_sample_count, " +
+		"SUM(CASE WHEN status = ? THEN " + weightSQL + " ELSE 0 END) AS weighted_success, " +
+		"SUM(CASE WHEN status = ? THEN " + weightSQL + " ELSE 0 END) AS weighted_errors, " +
+		"SUM(CASE WHEN status = ? THEN prompt_tokens * (" + weightSQL + ") ELSE 0 END) AS weighted_prompt_tokens, " +
+		"SUM(CASE WHEN status = ? THEN completion_tokens * (" + weightSQL + ") ELSE 0 END) AS weighted_completion_tokens, " +
+		"SUM(CASE WHEN status = ? THEN use_time * (" + weightSQL + ") ELSE 0 END) AS weighted_use_time, " +
+		"SUM(CASE WHEN status = ? AND prompt_tokens > 0 AND completion_tokens <= 0 THEN " + weightSQL + " ELSE 0 END) AS weighted_empty_outputs, " +
+		"SUM(CASE WHEN status = ? AND use_time >= (? + completion_tokens / ?) THEN " + weightSQL + " ELSE 0 END) AS weighted_slow_requests"
+
+	sampleSelectArgs := make([]any, 0, 128)
+	sampleSelectArgs = append(sampleSelectArgs, ModelMonitorSampleStatusError, ModelMonitorSampleStatusSuccess, ModelMonitorSampleStatusError)
+	sampleSelectArgs = append(sampleSelectArgs, ModelMonitorSampleStatusSuccess)
+	sampleSelectArgs = appendModelMonitorWeightSQLArgs(sampleSelectArgs, now)
+	sampleSelectArgs = append(sampleSelectArgs, ModelMonitorSampleStatusError)
+	sampleSelectArgs = appendModelMonitorWeightSQLArgs(sampleSelectArgs, now)
+	sampleSelectArgs = append(sampleSelectArgs, ModelMonitorSampleStatusSuccess)
+	sampleSelectArgs = appendModelMonitorWeightSQLArgs(sampleSelectArgs, now)
+	sampleSelectArgs = append(sampleSelectArgs, ModelMonitorSampleStatusSuccess)
+	sampleSelectArgs = appendModelMonitorWeightSQLArgs(sampleSelectArgs, now)
+	sampleSelectArgs = append(sampleSelectArgs, ModelMonitorSampleStatusSuccess)
+	sampleSelectArgs = appendModelMonitorWeightSQLArgs(sampleSelectArgs, now)
+	sampleSelectArgs = append(sampleSelectArgs, ModelMonitorSampleStatusSuccess)
+	sampleSelectArgs = appendModelMonitorWeightSQLArgs(sampleSelectArgs, now)
+	sampleSelectArgs = append(sampleSelectArgs, ModelMonitorSampleStatusSuccess, modelMonitorSlowSeconds, modelMonitorOutputTimeTPS)
+	sampleSelectArgs = appendModelMonitorWeightSQLArgs(sampleSelectArgs, now)
+
+	var sampleRows []modelMonitorBucketRow
+	if len(activeModels) > 0 {
+		if err := LOG_DB.Model(&ModelMonitorSample{}).
+			Select(sampleSelectSQL, sampleSelectArgs...).
+			Where("created_at >= ? AND model_name IN ? AND status IN ?", since, activeModels, []int{ModelMonitorSampleStatusSuccess, ModelMonitorSampleStatusError}).
+			Group("model_name, " + sampleGroupSQL).
+			Find(&sampleRows).Error; err != nil {
+			return nil, err
 		}
 	}
+	mergeModelMonitorBucketRows(buckets, sampleRows, activeModelSet, activeEntrySet)
 
 	vendorMap := make(map[string]*ModelMonitorVendor)
 

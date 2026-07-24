@@ -702,8 +702,16 @@ const TopUp = () => {
             setPresetAmounts(generatePresetAmounts(minTopUpValue));
           }
 
-          // 初始化显示实付金额
-          getAmount(minTopUpValue);
+          // 仅在存在可用支付网关时初始化实付金额。
+          if (enableOnlineTopUp) {
+            getAmount(minTopUpValue);
+          } else if (enableStripeTopUp) {
+            getStripeAmount(minTopUpValue);
+          } else if (enableWaffoTopUp) {
+            getWaffoAmount(minTopUpValue);
+          } else if (enableWaffoPancakeTopUp) {
+            getWaffoPancakeAmount(minTopUpValue);
+          }
         } catch (e) {
           setPayMethods([]);
         }

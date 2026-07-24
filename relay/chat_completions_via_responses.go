@@ -25,6 +25,9 @@ func applySystemPromptIfNeeded(c *gin.Context, info *relaycommon.RelayInfo, requ
 	if info.ChannelSetting.SystemPrompt == "" {
 		return
 	}
+	if info.HasChannelSystemPromptApplied() {
+		return
+	}
 
 	systemRole := request.GetSystemRoleName()
 
@@ -36,6 +39,7 @@ func applySystemPromptIfNeeded(c *gin.Context, info *relaycommon.RelayInfo, requ
 		}
 	}
 	if !containSystemPrompt {
+		info.MarkChannelSystemPromptApplied(info.ChannelSetting.SystemPrompt)
 		systemMessage := dto.Message{
 			Role:    systemRole,
 			Content: info.ChannelSetting.SystemPrompt,
@@ -48,6 +52,7 @@ func applySystemPromptIfNeeded(c *gin.Context, info *relaycommon.RelayInfo, requ
 		return
 	}
 
+	info.MarkChannelSystemPromptApplied(info.ChannelSetting.SystemPrompt)
 	common.SetContextKey(c, constant.ContextKeySystemPromptOverride, true)
 	for i, message := range request.Messages {
 		if message.Role != systemRole {

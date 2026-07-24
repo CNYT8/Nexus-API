@@ -281,7 +281,9 @@ func migrateDB() error {
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
+		&ModelMonitorSample{},
 		&UserMembership{},
+		&MembershipQuotaGrant{},
 		&Ticket{},
 		&TicketMessage{},
 	)
@@ -333,7 +335,9 @@ func migrateDBFast() error {
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
 		{&PerfMetric{}, "PerfMetric"},
+		{&ModelMonitorSample{}, "ModelMonitorSample"},
 		{&UserMembership{}, "UserMembership"},
+		{&MembershipQuotaGrant{}, "MembershipQuotaGrant"},
 		{&Ticket{}, "Ticket"},
 		{&TicketMessage{}, "TicketMessage"},
 	}
@@ -375,7 +379,7 @@ func migrateDBFast() error {
 
 func migrateLOGDB() error {
 	var err error
-	if err = LOG_DB.AutoMigrate(&Log{}); err != nil {
+	if err = LOG_DB.AutoMigrate(&Log{}, &ModelMonitorSample{}); err != nil {
 		return err
 	}
 	return nil
