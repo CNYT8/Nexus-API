@@ -186,6 +186,9 @@ func authHelper(c *gin.Context, minRole int) {
 	c.Set("group", session.Get("group"))
 	c.Set("user_group", session.Get("group"))
 	c.Set("use_access_token", useAccessToken)
+	if !useAccessToken && !enforceWebRisk(c, id.(int)) {
+		return
+	}
 
 	if !enforceAdminPermission(c, minRole, role.(int), id.(int)) {
 		return

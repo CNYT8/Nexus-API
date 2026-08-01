@@ -53,6 +53,7 @@ import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
 import SetupCheck from './components/layout/SetupCheck';
+import WebRiskVerificationModal from './components/layout/WebRiskVerificationModal';
 
 const Home = lazy(() => import('./pages/Home'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -93,6 +94,7 @@ function App() {
 
   return (
     <SetupCheck>
+      <WebRiskVerificationModal />
       <Routes>
         <Route
           path='/'

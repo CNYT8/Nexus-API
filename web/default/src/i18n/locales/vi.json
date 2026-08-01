@@ -1,5 +1,9 @@
 {
   "translation": {
+    "请验证您的真实性": "Vui lòng xác minh bạn là người dùng thật",
+    "检测到账号短时间内使用多个网络地址，请完成验证后继续": "Tài khoản này đã sử dụng nhiều địa chỉ mạng trong thời gian ngắn. Hãy hoàn tất xác minh để tiếp tục.",
+    "验证失败，请重试": "Xác minh thất bại. Vui lòng thử lại.",
+    "正在验证": "Đang xác minh",
     "Ticket Pending": "Chờ xử lý",
     "Ticket Replied": "Đã trả lời",
     "Ticket Closed": "Đã đóng",

@@ -28,6 +28,14 @@ const (
 	MsgBatchTooMany      = "common.batch_too_many"
 )
 
+// Web risk control messages
+const (
+	MsgWebRiskVerificationRequired = "web_risk.verification_required"
+	MsgWebRiskVerificationFailed   = "web_risk.verification_failed"
+	MsgWebRiskVerificationSuccess  = "web_risk.verification_success"
+	MsgWebRiskNotConfigured        = "web_risk.not_configured"
+)
+
 // Auth middleware messages
 const (
 	MsgAuthNotLoggedIn           = "auth.not_logged_in"

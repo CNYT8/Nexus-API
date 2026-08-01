@@ -1,5 +1,9 @@
 {
   "translation": {
+    "请验证您的真实性": "Veuillez confirmer que vous êtes une personne",
+    "检测到账号短时间内使用多个网络地址，请完成验证后继续": "Plusieurs adresses réseau ont été détectées pour ce compte en peu de temps. Terminez la vérification pour continuer.",
+    "验证失败，请重试": "La vérification a échoué. Veuillez réessayer.",
+    "正在验证": "Vérification en cours",
     "Ticket Pending": "En attente",
     "Ticket Replied": "Répondu",
     "Ticket Closed": "Fermé",

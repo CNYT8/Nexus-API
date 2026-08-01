@@ -298,3 +298,9 @@ ticket.open_limit: "未关闭工单数量已达上限，请等待管理员处理
 ticket.message_limit: "该工单消息数量已达上限，请创建新工单"
 ticket.invalid_settings: "无效的工单设置"
 ticket.content_length_invalid: "工单内容长度必须在 100 到 20000 个字符之间"
+
+# Web risk control messages
+web_risk.verification_required: "请验证您的真实性"
+web_risk.verification_failed: "验证失败，请重试"
+web_risk.verification_success: "验证成功"
+web_risk.not_configured: "Turnstile 未配置"

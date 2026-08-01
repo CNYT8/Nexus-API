@@ -118,6 +118,26 @@ func TestAdminQuotaGrantCountsTowardCumulativeTopUpAmount(t *testing.T) {
 	assert.InDelta(t, 2.5, grant.Amount, 0.0001)
 }
 
+func TestAdminQuotaGrantTreatsLegacyNullQuotaAsZero(t *testing.T) {
+	truncateTables(t)
+	resetMembershipForTest(t)
+	common.QuotaPerUnit = 100
+
+	user := &User{
+		Username: "membership_legacy_null_quota",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+	}
+	require.NoError(t, DB.Create(user).Error)
+	require.NoError(t, DB.Exec("UPDATE users SET quota = NULL WHERE id = ?", user.Id).Error)
+
+	require.NoError(t, IncreaseUserQuotaWithMembershipGrant(user.Id, 250, 1))
+
+	var quota int
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Select("quota").Scan(&quota).Error)
+	assert.Equal(t, 250, quota)
+}
+
 func TestAdminQuotaGrantTriggersMembershipAutoUpgrade(t *testing.T) {
 	truncateTables(t)
 	resetMembershipForTest(t)
@@ -254,6 +274,33 @@ func TestMembershipGroupDiscountCanStackGroupRatio(t *testing.T) {
 	assert.True(t, info.Applied)
 	assert.True(t, info.StackGroupRatio)
 	assert.InDelta(t, 0.56, ratio, 0.0001)
+}
+
+func TestMembershipMultiplierAboveOneAppliesToGroupRatio(t *testing.T) {
+	truncateTables(t)
+	resetMembershipForTest(t)
+	setting := membership_setting.GetMembershipSetting()
+	setting.Enabled = true
+	require.NoError(t, membership_setting.UpdateTiersByJSONString(`[
+		{"id":"pro","name":"Pro","threshold_amount":0,"auto_upgrade_enabled":true,"enabled":true,"sort_order":1,"discount_all_groups":true,"all_group_discount":1.5,"all_group_stack_ratio":true,"group_discounts":[]}
+	]`))
+
+	userId := 505
+	require.NoError(t, DB.Create(&User{
+		Id:       userId,
+		Username: "membership_multiplier_user",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+		AffCode:  "membership_multiplier_user",
+	}).Error)
+	require.NoError(t, SetUserMembershipTier(userId, "pro", MembershipSourceManual))
+
+	ratio, info := ApplyMembershipDiscount(userId, "default", 0.8)
+
+	assert.True(t, info.Applied)
+	assert.True(t, info.StackGroupRatio)
+	assert.Equal(t, 1.5, info.Discount)
+	assert.InDelta(t, 1.2, ratio, 0.0001)
 }
 
 func TestSearchUsersByMembershipTier(t *testing.T) {

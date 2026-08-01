@@ -114,8 +114,8 @@ func addUserQuotaTx(tx *gorm.DB, userID int, quota int) error {
 	}
 	maxExistingQuota := maxStoredUserQuota - int64(quota)
 	result := tx.Model(&User{}).
-		Where("id = ? AND quota <= ?", userID, maxExistingQuota).
-		Update("quota", gorm.Expr("quota + ?", quota))
+		Where("id = ? AND COALESCE(quota, 0) <= ?", userID, maxExistingQuota).
+		Update("quota", gorm.Expr("COALESCE(quota, 0) + ?", quota))
 	if result.Error != nil {
 		return result.Error
 	}

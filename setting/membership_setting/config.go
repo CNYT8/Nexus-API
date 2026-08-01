@@ -3,11 +3,14 @@ package membership_setting
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/setting/config"
 )
+
+const MaxMembershipMultiplier = 1000
 
 type GroupDiscount struct {
 	Group           string  `json:"group"`
@@ -57,7 +60,8 @@ func IsEnabled() bool {
 }
 
 func normalizeDiscount(discount float64) float64 {
-	if discount <= 0 || discount > 1 {
+	if math.IsNaN(discount) || math.IsInf(discount, 0) ||
+		discount <= 0 || discount > MaxMembershipMultiplier {
 		return 1
 	}
 	return discount

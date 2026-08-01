@@ -130,6 +130,9 @@ func TestTicketEncryptionSecretRejectsOptionKeyVariants(t *testing.T) {
 		"TicketEncryptionSecret",
 		"ticketencryptionsecret",
 		" TicketEncryptionSecret ",
+		"WebRiskFingerprintSecret",
+		"webriskfingerprintsecret",
+		" WebRiskFingerprintSecret ",
 	} {
 		if err := validateOptionBeforeSave(key, "replacement"); err == nil {
 			t.Fatalf("validateOptionBeforeSave(%q) accepted a protected key", key)

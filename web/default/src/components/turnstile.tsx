@@ -61,7 +61,11 @@ export function Turnstile({
       return
     }
     const scriptId = 'cf-turnstile'
-    if (document.getElementById(scriptId)) return
+    const existingScript = document.getElementById(scriptId)
+    if (existingScript) {
+      existingScript.addEventListener('load', render, { once: true })
+      return () => existingScript.removeEventListener('load', render)
+    }
     const s = document.createElement('script')
     s.id = scriptId
     s.src =
@@ -70,6 +74,10 @@ export function Turnstile({
     s.defer = true
     s.onload = () => render()
     document.head.appendChild(s)
+
+    return () => {
+      s.onload = null
+    }
   }, [siteKey, onVerify, onExpire])
 
   return <div ref={ref} className={className} />

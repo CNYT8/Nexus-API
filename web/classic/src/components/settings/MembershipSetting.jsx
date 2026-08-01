@@ -48,6 +48,7 @@ import { StatusContext } from '../../context/Status';
 const { Text } = Typography;
 const amountPrecision = 6;
 const amountStep = 0.000001;
+const maxMembershipMultiplier = 1000;
 
 const createTierId = () => `tier_${Date.now().toString(36)}_${Math.random()
   .toString(36)
@@ -68,7 +69,13 @@ const createDefaultTier = (index) => ({
 
 const normalizeDiscount = (value) => {
   const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0 || numeric > 1) return 1;
+  if (
+    !Number.isFinite(numeric) ||
+    numeric <= 0 ||
+    numeric > maxMembershipMultiplier
+  ) {
+    return 1;
+  }
   return Number(numeric.toFixed(4));
 };
 
@@ -425,7 +432,7 @@ const MembershipSetting = () => {
                       <InputNumber
                         value={tier.all_group_discount}
                         min={0.01}
-                        max={1}
+                        max={maxMembershipMultiplier}
                         precision={4}
                         step={0.01}
                         style={{ width: 110 }}
@@ -489,7 +496,7 @@ const MembershipSetting = () => {
                         <InputNumber
                           value={item.discount}
                           min={0.01}
-                          max={1}
+                          max={maxMembershipMultiplier}
                           precision={4}
                           step={0.01}
                           style={{ width: '100%' }}

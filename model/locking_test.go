@@ -59,3 +59,16 @@ func TestPaymentRowLockSQLAcrossSupportedDialects(t *testing.T) {
 	assert.Contains(t, postgresSQL, `"trade_no" = $1`)
 	assert.Contains(t, postgresSQL, "FOR UPDATE")
 }
+
+func TestTicketEncryptionSecretQueryQuotesMySQLReservedKey(t *testing.T) {
+	mysqlDB, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "user:password@tcp(127.0.0.1:3306)/nexus",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+	require.NoError(t, err)
+
+	sql := ticketEncryptionSecretQuery(mysqlDB).
+		First(&Option{}).Statement.SQL.String()
+	assert.Contains(t, sql, "`key` = ?")
+	assert.NotContains(t, sql, "WHERE key = ?")
+}

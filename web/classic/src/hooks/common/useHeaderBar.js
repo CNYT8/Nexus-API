@@ -237,6 +237,7 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     isDemoSiteMode,
     isConsoleRoute,
     theme,
+    actualTheme,
     drawerOpen,
     headerNavModules,
     pricingRequireAuth,

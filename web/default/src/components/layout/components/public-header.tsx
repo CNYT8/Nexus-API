@@ -25,6 +25,7 @@ import { useNotifications } from '@/hooks/use-notifications'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { useLogoAccent } from '@/hooks/use-logo-accent'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
+import { useTheme } from '@/context/theme-provider'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -42,6 +43,7 @@ import { ThemeSwitch } from '@/components/theme-switch'
 import { defaultTopNavLinks } from '../config/top-nav.config'
 import type { TopNavLink } from '../types'
 import { HeaderLogo } from './header-logo'
+import { LiquidGlassHeader } from './liquid-glass-header'
 
 const AUTH_PROMPT_SECONDS = 5
 
@@ -96,6 +98,7 @@ export function PublicHeader(props: PublicHeaderProps) {
   } = useSystemConfig()
   const dynamicLinks = useTopNavLinks()
   const notifications = useNotifications()
+  const { resolvedTheme } = useTheme()
   const routerState = useRouterState()
   const pathname = routerState.location.pathname
 
@@ -193,7 +196,7 @@ export function PublicHeader(props: PublicHeaderProps) {
             className={cn(
               'relative isolate overflow-hidden flex items-center justify-between transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
               scrolled
-                ? 'bg-background/90 supports-[backdrop-filter]:bg-background/[0.34] ring-white/40 h-12 rounded-2xl pr-1.5 pl-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.56),inset_0_-1px_0_rgba(255,255,255,0.18),0_0_0_0.5px_rgba(255,255,255,0.2)] ring-[0.5px] backdrop-blur-[16px] backdrop-brightness-[1.03] backdrop-contrast-[1.08] backdrop-saturate-[1.65] before:pointer-events-none before:absolute before:inset-x-3 before:top-0 before:h-px before:bg-white/60 after:pointer-events-none after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-white/30 after:to-transparent dark:bg-background/90 dark:supports-[backdrop-filter]:bg-background/[0.4] dark:ring-white/15 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(255,255,255,0.06),0_0_0_0.5px_rgba(255,255,255,0.08)] dark:before:bg-white/15 dark:after:via-white/15'
+                ? 'bg-transparent ring-white/40 h-12 rounded-2xl pr-1.5 pl-4 shadow-none ring-[0.5px] dark:ring-white/15'
                 : 'h-16 px-2'
             )}
             style={
@@ -203,13 +206,9 @@ export function PublicHeader(props: PublicHeaderProps) {
             }
           >
             {scrolled && (
-              <div
-                aria-hidden='true'
-                className='pointer-events-none absolute inset-0 z-0 opacity-[0.82]'
-                style={{
-                  background:
-                    'linear-gradient(115deg, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.08) 28%, rgba(255,255,255,0.02) 52%, rgba(255,255,255,0.13) 100%), radial-gradient(26rem 9rem at 12% -5rem, rgba(255,255,255,0.26), transparent 72%), radial-gradient(16rem 6rem at 88% -3rem, rgba(255,255,255,0.12), transparent 70%)',
-                }}
+              <LiquidGlassHeader
+                overLight={resolvedTheme !== 'dark'}
+                cornerRadius={16}
               />
             )}
             {logoAccent.active && (

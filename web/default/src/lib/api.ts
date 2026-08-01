@@ -20,6 +20,10 @@ import axios, { type AxiosRequestConfig } from 'axios'
 import { t } from 'i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
+import {
+  dispatchWebRiskVerificationRequired,
+  isWebRiskVerificationRequired,
+} from '@/lib/web-risk'
 
 declare module 'axios' {
   export interface AxiosRequestConfig {
@@ -97,6 +101,12 @@ api.interceptors.response.use(
     return response
   },
   (error) => {
+    if (isWebRiskVerificationRequired(error)) {
+      dispatchWebRiskVerificationRequired(
+        error?.response?.data?.data?.turnstile_site_key || ''
+      )
+      return Promise.reject(error)
+    }
     const skip = error?.config?.skipErrorHandler
     const status = error?.response?.status
 

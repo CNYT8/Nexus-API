@@ -22,6 +22,7 @@ import (
 )
 
 const ticketEncryptionSecretOptionKey = "TicketEncryptionSecret"
+const webRiskFingerprintSecretOptionKey = "WebRiskFingerprintSecret"
 
 type Option struct {
 	Key   string `json:"key" gorm:"primaryKey"`
@@ -200,6 +201,43 @@ func InitOptionMap() {
 	if err := initializeTicketEncryptionSecret(); err != nil {
 		common.SysError("failed to initialize ticket encryption secret: " + err.Error())
 	}
+	if err := initializeWebRiskFingerprintSecret(); err != nil {
+		common.SysError("failed to initialize web risk fingerprint secret: " + err.Error())
+	}
+}
+
+func initializeWebRiskFingerprintSecret() error {
+	var option Option
+	err := DB.Where(map[string]interface{}{"key": webRiskFingerprintSecretOptionKey}).First(&option).Error
+	if err == nil && strings.TrimSpace(option.Value) != "" {
+		common.SetWebRiskFingerprintSecret(option.Value)
+		return updateOptionMap(option.Key, option.Value)
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	candidate, err := common.GenerateRandomKey(48)
+	if err != nil {
+		return err
+	}
+	option = Option{Key: webRiskFingerprintSecretOptionKey, Value: candidate}
+	if err := DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&option).Error; err != nil {
+		return err
+	}
+	if err := DB.Where(map[string]interface{}{"key": webRiskFingerprintSecretOptionKey}).Model(&Option{}).
+		Where(map[string]interface{}{"value": ""}).
+		Update("value", candidate).Error; err != nil {
+		return err
+	}
+	if err := DB.Where(map[string]interface{}{"key": webRiskFingerprintSecretOptionKey}).First(&option).Error; err != nil {
+		return err
+	}
+	if strings.TrimSpace(option.Value) == "" {
+		return errors.New("web risk fingerprint secret is empty")
+	}
+	common.SetWebRiskFingerprintSecret(option.Value)
+	return updateOptionMap(option.Key, option.Value)
 }
 
 func initializeTicketEncryptionSecret() error {
@@ -207,7 +245,7 @@ func initializeTicketEncryptionSecret() error {
 		return nil
 	}
 	var option Option
-	err := DB.First(&option, "key = ?", ticketEncryptionSecretOptionKey).Error
+	err := ticketEncryptionSecretQuery(DB).First(&option).Error
 	if err == nil && strings.TrimSpace(option.Value) != "" {
 		common.SetTicketEncryptionKey(option.Value)
 		return updateOptionMap(option.Key, option.Value)
@@ -237,12 +275,12 @@ func initializeTicketEncryptionSecret() error {
 	if err := DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&option).Error; err != nil {
 		return err
 	}
-	if err := DB.Model(&Option{}).
-		Where("key = ? AND value = ?", ticketEncryptionSecretOptionKey, "").
+	if err := ticketEncryptionSecretQuery(DB).Model(&Option{}).
+		Where(map[string]interface{}{"value": ""}).
 		Update("value", candidate).Error; err != nil {
 		return err
 	}
-	if err := DB.First(&option, "key = ?", ticketEncryptionSecretOptionKey).Error; err != nil {
+	if err := ticketEncryptionSecretQuery(DB).First(&option).Error; err != nil {
 		return err
 	}
 	if strings.TrimSpace(option.Value) == "" {
@@ -250,6 +288,10 @@ func initializeTicketEncryptionSecret() error {
 	}
 	common.SetTicketEncryptionKey(option.Value)
 	return updateOptionMap(option.Key, option.Value)
+}
+
+func ticketEncryptionSecretQuery(db *gorm.DB) *gorm.DB {
+	return db.Where(map[string]interface{}{"key": ticketEncryptionSecretOptionKey})
 }
 
 func hasLegacyEncryptedTicketRows() (bool, error) {
@@ -305,6 +347,9 @@ func UpdateOption(key string, value string) error {
 func validateOptionBeforeSave(key string, value string) error {
 	if strings.EqualFold(strings.TrimSpace(key), ticketEncryptionSecretOptionKey) {
 		return errors.New("ticket encryption secret cannot be changed through the option API")
+	}
+	if strings.EqualFold(strings.TrimSpace(key), webRiskFingerprintSecretOptionKey) {
+		return errors.New("web risk fingerprint secret cannot be changed through the option API")
 	}
 	if key == "membership_setting.tiers" {
 		_, err := membership_setting.ParseTiersJSONString(value)
@@ -368,6 +413,9 @@ func UpdateOptionsBulk(values map[string]string) error {
 func updateOptionMap(key string, value string) (err error) {
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
 
 	if handled, err := handleStrictConfigUpdate(key, value); handled {
 		if err != nil {

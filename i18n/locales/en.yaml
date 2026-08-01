@@ -297,3 +297,9 @@ ticket.open_limit: "You have too many open tickets. Please wait for an administr
 ticket.message_limit: "This ticket has reached its message limit. Please create a new ticket"
 ticket.invalid_settings: "Invalid ticket settings"
 ticket.content_length_invalid: "Ticket content length must be between 100 and 20000 characters"
+
+# Web risk control messages
+web_risk.verification_required: "Please verify that you are human"
+web_risk.verification_failed: "Verification failed. Please try again"
+web_risk.verification_success: "Verification successful"
+web_risk.not_configured: "Turnstile is not configured"

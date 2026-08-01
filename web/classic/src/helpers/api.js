@@ -26,6 +26,10 @@ import {
 import axios from 'axios';
 import { MESSAGE_ROLES } from '../constants/playground.constants';
 import { installAPIAcceleration } from './apiAcceleration';
+import {
+  dispatchWebRiskVerificationRequired,
+  isWebRiskVerificationRequired,
+} from './webRisk';
 
 function getAPIBaseURL() {
   return import.meta.env.VITE_REACT_APP_SERVER_URL
@@ -58,6 +62,12 @@ function installAPIErrorHandler(instance) {
   instance.interceptors.response.use(
     (response) => response,
     (error) => {
+      if (isWebRiskVerificationRequired(error)) {
+        dispatchWebRiskVerificationRequired(
+          error?.response?.data?.data?.turnstile_site_key || '',
+        );
+        return Promise.reject(error);
+      }
       // 如果请求配置中显式要求跳过全局错误处理，则不弹出默认错误提示
       if (error.config && error.config.skipErrorHandler) {
         return Promise.reject(error);

@@ -1,5 +1,9 @@
 {
   "translation": {
+    "请验证您的真实性": "Please verify that you are human",
+    "检测到账号短时间内使用多个网络地址，请完成验证后继续": "Multiple network addresses were detected for this account in a short period. Complete verification to continue.",
+    "验证失败，请重试": "Verification failed. Please try again.",
+    "正在验证": "Verifying",
     "Ticket Pending": "Pending",
     "Ticket Replied": "Replied",
     "Ticket Closed": "Closed",

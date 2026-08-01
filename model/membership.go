@@ -342,7 +342,7 @@ func ApplyMembershipDiscount(userId int, group string, groupRatio float64) (floa
 		return groupRatio, info
 	}
 	tierDiscount, ok := membership_setting.GetTierDiscount(tierId, group)
-	if !ok || tierDiscount.Multiplier <= 0 || tierDiscount.Multiplier >= 1 {
+	if !ok || tierDiscount.Multiplier <= 0 || tierDiscount.Multiplier == 1 {
 		return groupRatio, info
 	}
 	finalRatio := tierDiscount.Multiplier

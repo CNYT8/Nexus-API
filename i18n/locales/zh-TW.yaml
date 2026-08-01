@@ -298,3 +298,9 @@ ticket.open_limit: "未關閉工單數量已達上限，請等待管理員處理
 ticket.message_limit: "該工單訊息數量已達上限，請建立新工單"
 ticket.invalid_settings: "無效的工單設定"
 ticket.content_length_invalid: "工單內容長度必須在 100 到 20000 個字元之間"
+
+# Web risk control messages
+web_risk.verification_required: "請驗證您的真實性"
+web_risk.verification_failed: "驗證失敗，請重試"
+web_risk.verification_success: "驗證成功"
+web_risk.not_configured: "Turnstile 未設定"

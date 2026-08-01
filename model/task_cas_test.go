@@ -58,6 +58,7 @@ func TestMain(m *testing.M) {
 		&MembershipQuotaGrant{},
 		&Ticket{},
 		&TicketMessage{},
+		&WebRiskState{},
 		&Redemption{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
@@ -81,6 +82,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM model_monitor_samples")
 		DB.Exec("DELETE FROM nexus_ticket_messages")
 		DB.Exec("DELETE FROM nexus_tickets")
+		DB.Exec("DELETE FROM nexus_web_risk_states")
 		DB.Exec("DELETE FROM users")
 		DB.Exec("DELETE FROM logs")
 		DB.Exec("DELETE FROM channels")

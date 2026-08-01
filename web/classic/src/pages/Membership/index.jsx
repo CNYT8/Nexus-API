@@ -43,6 +43,10 @@ const formatDiscount = (discount, t) => {
   if (!Number.isFinite(value) || value <= 0) {
     return t('{{discount}}折', { discount: 10 });
   }
+  if (value > 1) {
+    const multiplier = Number(value.toFixed(4));
+    return `${multiplier}x ${t('倍率')}`;
+  }
   const discountValue = Number((value * 10).toFixed(2));
   return t('{{discount}}折', { discount: discountValue });
 };
@@ -70,7 +74,7 @@ const getTierBestDiscount = (tier) => {
     values.push(Number(item.discount || 1));
   });
   const validValues = values.filter(
-    (value) => Number.isFinite(value) && value > 0 && value <= 1,
+    (value) => Number.isFinite(value) && value > 0 && value <= 1000,
   );
   if (validValues.length === 0) return 1;
   return Math.min(...validValues);
