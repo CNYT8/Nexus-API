@@ -57,6 +57,7 @@ import {
   IconUserGroup,
   IconEdit,
   IconGlobe,
+  IconLayers,
 } from '@douyinfe/semi-icons';
 import UserBindingManagementModal from './UserBindingManagementModal';
 
@@ -78,6 +79,9 @@ const EditUserModal = (props) => {
   const [showAdjustQuotaRaw, setShowAdjustQuotaRaw] = useState(false);
   const [showQuotaInput, setShowQuotaInput] = useState(false);
   const [inputs, setInputs] = useState(null);
+  const [groupRatioDetails, setGroupRatioDetails] = useState([]);
+  const [groupRatioInputs, setGroupRatioInputs] = useState({});
+  const [groupRatioSaving, setGroupRatioSaving] = useState('');
 
   const isEdit = Boolean(userId);
   const membershipTierSelectOptions = useMemo(
@@ -117,21 +121,64 @@ const EditUserModal = (props) => {
 
   const handleCancel = () => props.handleClose();
 
+  const formatRatio = (value) => {
+    const ratio = Number(value);
+    if (!Number.isFinite(ratio)) return '-';
+    return ratio.toFixed(12).replace(/\.?0+$/, '');
+  };
+
+  const applyGroupRatioDetails = (details = []) => {
+    setGroupRatioDetails(details);
+    setGroupRatioInputs(
+      Object.fromEntries(
+        details.map((detail) => [
+          detail.group,
+          detail.has_custom_ratio ? detail.custom_ratio : '',
+        ]),
+      ),
+    );
+  };
+
   const loadUser = async () => {
     setLoading(true);
+    applyGroupRatioDetails([]);
     const url = userId ? `/api/user/${userId}` : `/api/user/self`;
-    const res = await API.get(url);
-    const { success, message, data } = res.data;
-    if (success) {
-      data.password = '';
-      data.quota_amount = Number(
-        quotaToDisplayAmount(data.quota || 0).toFixed(6),
-      );
-      setInputs({ ...getInitValues(), ...data });
-    } else {
-      showError(message);
+    const groupRatioRequest = userId
+      ? API.get(`/api/user/${userId}/group-ratios`).catch((error) => {
+          // Group ratios are supplementary; a failed request must not block
+          // the core user editor from loading.
+          showError(error.message);
+          return null;
+        })
+      : Promise.resolve(null);
+
+    try {
+      const [res, groupRatioRes] = await Promise.all([
+        API.get(url),
+        groupRatioRequest,
+      ]);
+      const { success, message, data } = res.data;
+      if (success) {
+        data.password = '';
+        data.quota_amount = Number(
+          quotaToDisplayAmount(data.quota || 0).toFixed(6),
+        );
+        setInputs({ ...getInitValues(), ...data });
+      } else {
+        showError(message);
+      }
+      if (groupRatioRes) {
+        if (groupRatioRes.data.success) {
+          applyGroupRatioDetails(groupRatioRes.data.data || []);
+        } else {
+          showError(groupRatioRes.data.message);
+        }
+      }
+    } catch (error) {
+      showError(error.message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -185,7 +232,11 @@ const EditUserModal = (props) => {
   const adjustQuota = async () => {
     const quotaVal = parseInt(adjustQuotaLocal) || 0;
     if (quotaVal <= 0 && adjustMode !== 'override') return;
-    if (adjustMode === 'override' && (adjustQuotaLocal === '' || adjustQuotaLocal == null)) return;
+    if (
+      adjustMode === 'override' &&
+      (adjustQuotaLocal === '' || adjustQuotaLocal == null)
+    )
+      return;
     setAdjustLoading(true);
     try {
       const res = await API.post('/api/user/manage', {
@@ -253,6 +304,56 @@ const EditUserModal = (props) => {
         -
       </Tag>
     );
+
+  const saveGroupRatio = async (group) => {
+    const ratio = Number(groupRatioInputs[group]);
+    if (
+      groupRatioInputs[group] === '' ||
+      groupRatioInputs[group] == null ||
+      !Number.isFinite(ratio) ||
+      ratio < 0 ||
+      ratio > 1000
+    ) {
+      showError(t('请输入 0 到 1000 之间的有效倍率'));
+      return;
+    }
+    setGroupRatioSaving(`${group}:save`);
+    try {
+      const res = await API.put(`/api/user/${userId}/group-ratios`, {
+        group,
+        ratio,
+      });
+      if (res.data.success) {
+        applyGroupRatioDetails(res.data.data || []);
+        showSuccess(t('分组倍率设置成功'));
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(error.message);
+    } finally {
+      setGroupRatioSaving('');
+    }
+  };
+
+  const resetGroupRatio = async (group) => {
+    setGroupRatioSaving(`${group}:reset`);
+    try {
+      const res = await API.delete(`/api/user/${userId}/group-ratios`, {
+        params: { group },
+      });
+      if (res.data.success) {
+        applyGroupRatioDetails(res.data.data || []);
+        showSuccess(t('已恢复继承分组倍率'));
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(error.message);
+    } finally {
+      setGroupRatioSaving('');
+    }
+  };
 
   /* --------------------------- UI --------------------------- */
   return (
@@ -465,6 +566,142 @@ const EditUserModal = (props) => {
                   </Card>
                 )}
 
+                {/* 分组倍率设置 */}
+                {userId && (
+                  <Card className='!rounded-2xl shadow-sm border-0'>
+                    <div className='flex items-center mb-2'>
+                      <Avatar
+                        size='small'
+                        color='orange'
+                        className='mr-2 shadow-md'
+                      >
+                        <IconLayers size={16} />
+                      </Avatar>
+                      <div>
+                        <Text className='text-lg font-medium'>
+                          {t('分组倍率设置')}
+                        </Text>
+                        <div className='text-xs text-gray-600'>
+                          {t('当前实际倍率已包含分组和会员计算结果')}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      className='max-h-80 overflow-y-auto'
+                      style={{
+                        borderTop: '1px solid var(--semi-color-border)',
+                      }}
+                    >
+                      {groupRatioDetails.length === 0 ? (
+                        <div className='py-6 text-center'>
+                          <Text type='tertiary'>{t('暂无可设置的分组')}</Text>
+                        </div>
+                      ) : (
+                        groupRatioDetails.map((detail) => (
+                          <div
+                            key={detail.group}
+                            className='flex flex-wrap items-center justify-between gap-3 py-3'
+                            style={{
+                              borderBottom:
+                                '1px solid var(--semi-color-border)',
+                            }}
+                          >
+                            <div className='min-w-0 flex-1'>
+                              <Space wrap spacing={6}>
+                                <Text strong>{detail.group}</Text>
+                                <Tag
+                                  color={
+                                    detail.has_custom_ratio
+                                      ? 'blue'
+                                      : detail.membership_discount?.applied
+                                        ? 'amber'
+                                        : 'grey'
+                                  }
+                                  shape='circle'
+                                >
+                                  {detail.has_custom_ratio
+                                    ? t('个人倍率')
+                                    : detail.membership_discount?.applied
+                                      ? t('会员')
+                                      : t('继承')}
+                                </Tag>
+                              </Space>
+                              <div className='mt-1 text-xs'>
+                                <Text type='secondary'>
+                                  {t('当前实际倍率')}：
+                                </Text>
+                                <Text strong>
+                                  {formatRatio(detail.effective_ratio)}x
+                                </Text>
+                                {detail.membership_discount?.applied && (
+                                  <Text type='tertiary' className='ml-2'>
+                                    {detail.has_custom_ratio
+                                      ? t(
+                                          '会员计算值 {{ratio}}x 已被个人设置覆盖',
+                                          {
+                                            ratio: formatRatio(
+                                              detail.membership_ratio,
+                                            ),
+                                          },
+                                        )
+                                      : t('{{tier}} 会员计算值', {
+                                          tier: detail.membership_discount
+                                            .tier_name,
+                                        })}
+                                  </Text>
+                                )}
+                              </div>
+                            </div>
+
+                            <Space spacing={6} wrap>
+                              <InputNumber
+                                value={groupRatioInputs[detail.group]}
+                                placeholder={t('输入最终倍率')}
+                                min={0}
+                                max={1000}
+                                precision={12}
+                                step={0.1}
+                                suffix='x'
+                                style={{ width: 142 }}
+                                onChange={(value) =>
+                                  setGroupRatioInputs((current) => ({
+                                    ...current,
+                                    [detail.group]: value,
+                                  }))
+                                }
+                              />
+                              <Button
+                                type='primary'
+                                theme='solid'
+                                loading={
+                                  groupRatioSaving === `${detail.group}:save`
+                                }
+                                disabled={groupRatioSaving !== ''}
+                                onClick={() => saveGroupRatio(detail.group)}
+                              >
+                                {t('保存')}
+                              </Button>
+                              {detail.has_custom_ratio && (
+                                <Button
+                                  type='tertiary'
+                                  loading={
+                                    groupRatioSaving === `${detail.group}:reset`
+                                  }
+                                  disabled={groupRatioSaving !== ''}
+                                  onClick={() => resetGroupRatio(detail.group)}
+                                >
+                                  {t('恢复继承')}
+                                </Button>
+                              )}
+                            </Space>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </Card>
+                )}
+
                 {/* IP 信息 */}
                 {userId && (
                   <Card className='!rounded-2xl shadow-sm border-0'>
@@ -630,7 +867,10 @@ const EditUserModal = (props) => {
             ? `▾ ${t('收起原生额度输入')}`
             : `▸ ${t('使用原生额度输入')}`}
         </div>
-        <div style={{ display: showAdjustQuotaRaw ? 'block' : 'none' }} className='mt-2'>
+        <div
+          style={{ display: showAdjustQuotaRaw ? 'block' : 'none' }}
+          className='mt-2'
+        >
           <div className='mb-1'>
             <Text size='small'>{t('额度')}</Text>
           </div>

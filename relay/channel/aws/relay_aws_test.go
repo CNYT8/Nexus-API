@@ -2,9 +2,11 @@ package aws
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -52,4 +54,32 @@ func TestDoAwsClientRequest_AppliesRuntimeHeaderOverrideToAnthropicBeta(t *testi
 	values, ok := anthropicBeta.([]any)
 	require.True(t, ok)
 	require.Equal(t, []any{"computer-use-2025-01-24"}, values)
+}
+
+func TestNewAwsInvokeContextInheritsClientCancellation(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	invokeContext, cancelInvoke := newAwsInvokeContext(parent)
+	t.Cleanup(cancelInvoke)
+
+	cancelParent()
+	require.ErrorIs(t, invokeContext.Err(), context.Canceled)
+}
+
+func TestNewAwsInvokeContextUsesRelayTimeoutWithClientContext(t *testing.T) {
+	originalRelayTimeout := common.RelayTimeout
+	common.RelayTimeout = 1
+	t.Cleanup(func() { common.RelayTimeout = originalRelayTimeout })
+
+	parent := context.Background()
+	invokeContext, cancelInvoke := newAwsInvokeContext(parent)
+	t.Cleanup(cancelInvoke)
+
+	_, hasDeadline := invokeContext.Deadline()
+	require.True(t, hasDeadline)
+	select {
+	case <-invokeContext.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("AWS invoke context did not respect relay timeout")
+	}
+	require.ErrorIs(t, invokeContext.Err(), context.DeadlineExceeded)
 }

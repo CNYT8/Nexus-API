@@ -33,12 +33,12 @@ func GetUserGroups(c *gin.Context) {
 		// UserUsableGroups contains the groups that the user can use
 		if desc, ok := userUsableGroups[groupName]; ok {
 			ratio := service.GetUserGroupRatio(userGroup, groupName)
-			ratio, membershipDiscount := model.ApplyMembershipDiscount(userId, groupName, ratio)
+			ratio, membershipDiscount, hasUserOverride := model.ResolveUserGroupRatio(userId, groupName, ratio)
 			groupInfo := map[string]interface{}{
 				"ratio": ratio,
 				"desc":  desc,
 			}
-			if membershipDiscount.Applied {
+			if membershipDiscount.Applied && !hasUserOverride {
 				groupInfo["membership_discount"] = membershipDiscount
 			}
 			usableGroups[groupName] = groupInfo

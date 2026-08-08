@@ -52,9 +52,9 @@ func GetPricing(c *gin.Context) {
 				if ok {
 					groupRatio[g] = ratio
 				}
-				discountedRatio, membershipDiscount := model.ApplyMembershipDiscount(userId.(int), g, groupRatio[g])
+				discountedRatio, membershipDiscount, hasUserOverride := model.ResolveUserGroupRatio(userId.(int), g, groupRatio[g])
 				groupRatio[g] = discountedRatio
-				if membershipDiscount.Applied {
+				if membershipDiscount.Applied && !hasUserOverride {
 					membershipDiscounts[g] = membershipDiscount
 				}
 			}

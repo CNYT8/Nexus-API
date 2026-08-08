@@ -120,7 +120,7 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 	if ok {
 		actualGroupRatio = userGroupRatio
 	}
-	actualGroupRatio, _ = model.ApplyMembershipDiscount(relayInfo.UserId, relayInfo.UsingGroup, actualGroupRatio)
+	actualGroupRatio, _, _ = model.ResolveUserGroupRatio(relayInfo.UserId, relayInfo.UsingGroup, actualGroupRatio)
 
 	quotaInfo := QuotaInfo{
 		InputDetails: TokenDetails{

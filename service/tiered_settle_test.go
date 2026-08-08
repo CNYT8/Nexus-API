@@ -9,6 +9,8 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 )
 
@@ -332,6 +334,58 @@ func TestTryTieredSettle_GroupRatioZero(t *testing.T) {
 	}
 	if quota != 0 {
 		t.Fatalf("quota = %d, want 0 (group ratio = 0)", quota)
+	}
+}
+
+type recordingBillingSettler struct {
+	preConsumedQuota int
+	reserveTargets   []int
+}
+
+func (s *recordingBillingSettler) Settle(int) error         { return nil }
+func (s *recordingBillingSettler) Refund(*gin.Context)      {}
+func (s *recordingBillingSettler) NeedsRefund() bool        { return false }
+func (s *recordingBillingSettler) GetPreConsumedQuota() int { return s.preConsumedQuota }
+func (s *recordingBillingSettler) Reserve(target int) error {
+	s.reserveTargets = append(s.reserveTargets, target)
+	if target > s.preConsumedQuota {
+		s.preConsumedQuota = target
+	}
+	return nil
+}
+
+func TestPrepareTieredBillingForSelectedGroupUsesFinalGroup(t *testing.T) {
+	const expr = `tier("base", p)`
+	billing := &recordingBillingSettler{preConsumedQuota: 50_000}
+	info := &relaycommon.RelayInfo{
+		Billing: billing,
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode:               "tiered_expr",
+			ExprString:                expr,
+			ExprHash:                  billingexpr.ExprHashString(expr),
+			GroupRatio:                0.10,
+			EstimatedQuotaBeforeGroup: 500_000,
+			EstimatedQuotaAfterGroup:  50_000,
+			QuotaPerUnit:              testQuotaPerUnit,
+		},
+		PriceData: types.PriceData{
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0.20},
+		},
+	}
+
+	if apiErr := PrepareTieredBillingForSelectedGroup(nil, info); apiErr != nil {
+		t.Fatalf("PrepareTieredBillingForSelectedGroup() error = %v", apiErr)
+	}
+	if len(billing.reserveTargets) != 1 || billing.reserveTargets[0] != 100_000 {
+		t.Fatalf("reserve targets = %v, want [100000]", billing.reserveTargets)
+	}
+	if info.FinalPreConsumedQuota != 100_000 {
+		t.Fatalf("FinalPreConsumedQuota = %d, want 100000", info.FinalPreConsumedQuota)
+	}
+
+	ok, quota, _ := TryTieredSettle(info, billingexpr.TokenParams{P: 1_000_000})
+	if !ok || quota != 100_000 {
+		t.Fatalf("settlement = (%v, %d), want (true, 100000)", ok, quota)
 	}
 }
 

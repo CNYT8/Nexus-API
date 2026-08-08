@@ -47,3 +47,15 @@ func TestAdvancedCustomChannelRequiresDiscoveryRouteForUpdateChecks(t *testing.T
 		})
 	}
 }
+
+func TestChannelProxyValidation(t *testing.T) {
+	validChannel := &Channel{}
+	validChannel.SetSetting(dto.ChannelSettings{Proxy: "http://proxy.example:8080"})
+	assert.NoError(t, validChannel.ValidateSettings())
+
+	invalidChannel := &Channel{}
+	invalidChannel.SetSetting(dto.ChannelSettings{Proxy: "http://proxy.example:8080/legacy"})
+	err := invalidChannel.ValidateSettings()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid channel proxy")
+}

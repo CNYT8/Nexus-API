@@ -127,7 +127,7 @@ type RelayInfo struct {
 	// 必须在提交前锁定全额。
 	ForcePreConsume bool
 	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
-	// 免费模型时为 nil。
+	// 初始免费组可为 nil；若自动重试切换到付费组，会在发送前创建。
 	Billing BillingSettler
 	// BillingSource indicates whether this request is billed from wallet quota or subscription.
 	// "" or "wallet" => wallet; "subscription" => subscription
@@ -155,13 +155,6 @@ type RelayInfo struct {
 	ParamOverrideAudit                    []string
 	QuotaClamp                            *common.QuotaClamp
 
-	// UpstreamRequestBodySize is the byte size of the marshaled upstream request
-	// body. It is set when the body is wrapped in a BodyStorage (see
-	// relay/common/outbound_body.go), so that DoApiRequest can populate
-	// http.Request.ContentLength manually (net/http only auto-detects it for
-	// *bytes.Reader/Buffer/strings.Reader). 0 means "let net/http decide".
-	UpstreamRequestBodySize int64
-
 	PriceData types.PriceData
 
 	// ChannelSystemPrompt records only the channel-level prompt that was
@@ -170,8 +163,8 @@ type RelayInfo struct {
 	ChannelSystemPrompt        string
 	ChannelSystemPromptApplied bool
 
-	// TieredBillingSnapshot is a frozen snapshot of tiered billing rules
-	// captured at pre-consume time. Non-nil only when billing mode is "tiered_expr".
+	// TieredBillingSnapshot captures tiered billing rules at pre-consume time.
+	// Auto-group retries refresh group-dependent fields before each attempt.
 	TieredBillingSnapshot *billingexpr.BillingSnapshot
 	BillingRequestInput   *billingexpr.RequestInput
 

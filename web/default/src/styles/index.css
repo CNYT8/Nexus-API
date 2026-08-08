@@ -83,12 +83,12 @@ For commercial licensing, please contact support@quantumnous.com
 .nexus-liquid-glass-layer {
   overflow: hidden;
   isolation: isolate;
-  background-color: rgba(255, 255, 255, 0.86);
+  background-color: rgba(255, 255, 255, 0.12);
   border-radius: inherit;
 }
 
 .dark .nexus-liquid-glass-layer {
-  background-color: rgba(2, 6, 23, 0.86);
+  background-color: rgba(9, 9, 11, 0.14);
 }
 
 .nexus-liquid-glass-layer > div,
@@ -132,8 +132,19 @@ For commercial licensing, please contact support@quantumnous.com
   height: 100%;
 }
 
-@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .nexus-liquid-glass-layer {
+    background-color: rgba(255, 255, 255, 0.9);
+  }
+
+  .dark .nexus-liquid-glass-layer {
+    background-color: rgba(9, 9, 11, 0.9);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  .nexus-liquid-glass-layer,
+  .dark .nexus-liquid-glass-layer {
     background-color: Canvas;
   }
 

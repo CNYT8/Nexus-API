@@ -6,6 +6,7 @@ import (
 	"runtime/debug"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -15,10 +16,18 @@ func RelayPanicRecover() gin.HandlerFunc {
 			if err := recover(); err != nil {
 				common.SysLog(fmt.Sprintf("panic detected: %v", err))
 				common.SysLog(fmt.Sprintf("stacktrace from panic: %s", string(debug.Stack())))
-				c.JSON(http.StatusInternalServerError, gin.H{
+				statusCode, message := service.ApplyErrorMaskToMessage(
+					c,
+					http.StatusInternalServerError,
+					common.MessageWithRequestId("internal server error", c.GetString(common.RequestIdKey)),
+					"internal_server_error",
+					"new_api_panic",
+				)
+				c.JSON(statusCode, gin.H{
 					"error": gin.H{
-						"message": fmt.Sprintf("Panic detected, error: %v. Please submit a issue here: https://github.com/Calcium-Ion/new-api", err),
+						"message": message,
 						"type":    "new_api_panic",
+						"code":    "internal_server_error",
 					},
 				})
 				c.Abort()

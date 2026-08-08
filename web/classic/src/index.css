@@ -39,20 +39,20 @@ html.theme-switching *::after {
 
 .classic-header {
   --classic-header-glass-fallback: rgba(255, 255, 255, 0.94);
-  --classic-header-glass-tint: rgba(255, 255, 255, 0.28);
+  --classic-header-glass-tint: rgba(255, 255, 255, 0.12);
   --classic-header-glass-highlight: rgba(255, 255, 255, 0.27);
   --classic-header-glass-highlight-soft: rgba(255, 255, 255, 0.085);
   --classic-header-glass-lowlight: rgba(15, 23, 42, 0.018);
   --classic-header-glass-edge: rgba(255, 255, 255, 0.58);
   --classic-header-logo-accent-opacity: 0.66;
-  background-color: var(--classic-header-glass-fallback);
+  background-color: transparent;
   border-bottom: 0 !important;
   box-shadow: none;
 }
 
 .dark .classic-header {
   --classic-header-glass-fallback: rgba(9, 9, 11, 0.94);
-  --classic-header-glass-tint: rgba(9, 9, 11, 0.34);
+  --classic-header-glass-tint: rgba(9, 9, 11, 0.14);
   --classic-header-glass-highlight: rgba(255, 255, 255, 0.11);
   --classic-header-glass-highlight-soft: rgba(255, 255, 255, 0.038);
   --classic-header-glass-lowlight: rgba(0, 0, 0, 0.065);
@@ -135,6 +135,12 @@ html.theme-switching *::after {
   height: 100%;
 }
 
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .nexus-liquid-glass-layer {
+    background-color: var(--classic-header-glass-fallback);
+  }
+}
+
 @media (prefers-reduced-transparency: reduce), (forced-colors: active) {
   .nexus-liquid-glass-layer {
     background-color: var(--classic-header-glass-fallback);
@@ -187,7 +193,7 @@ body[theme-mode='warm'] {
 
 body[theme-mode='warm'] .classic-header {
   --classic-header-glass-fallback: rgba(255, 253, 248, 0.94);
-  --classic-header-glass-tint: rgba(255, 249, 239, 0.34);
+  --classic-header-glass-tint: rgba(255, 249, 239, 0.14);
   --classic-header-glass-highlight: rgba(255, 255, 255, 0.29);
   --classic-header-glass-highlight-soft: rgba(255, 248, 230, 0.1);
   --classic-header-glass-lowlight: rgba(120, 53, 15, 0.026);

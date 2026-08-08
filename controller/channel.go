@@ -843,7 +843,6 @@ func AddChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	service.ResetProxyClientCache()
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -853,6 +852,13 @@ func AddChannel(c *gin.Context) {
 
 func DeleteChannel(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
+	channelProxy := ""
+	channelLookupFailed := false
+	if existing, err := model.GetChannelById(id, false); err == nil && existing != nil {
+		channelProxy = existing.GetSetting().Proxy
+	} else {
+		channelLookupFailed = true
+	}
 	channel := model.Channel{Id: id}
 	err := channel.Delete()
 	if err != nil {
@@ -860,6 +866,11 @@ func DeleteChannel(c *gin.Context) {
 		return
 	}
 	model.InitChannelCache()
+	if channelLookupFailed {
+		service.ResetProxyClientCache()
+	} else {
+		service.InvalidateProxyClient(channelProxy)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -874,6 +885,9 @@ func DeleteDisabledChannel(c *gin.Context) {
 		return
 	}
 	model.InitChannelCache()
+	// This operation removes an unknown set of channels, so invalidate every
+	// cached proxy client instead of leaving clients for deleted channels alive.
+	service.ResetProxyClientCache()
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -1052,6 +1066,13 @@ func UpdateChannel(c *gin.Context) {
 		})
 		return
 	}
+	originProxy := originChannel.GetSetting().Proxy
+	proxyChanged := false
+	if channel.Setting != nil {
+		newProxy, _ := service.NormalizeProxyURL(channel.GetSetting().Proxy)
+		normalizedOriginProxy, originProxyErr := service.NormalizeProxyURL(originProxy)
+		proxyChanged = originProxyErr != nil || normalizedOriginProxy != newProxy
+	}
 
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
 	channel.ChannelInfo = originChannel.ChannelInfo
@@ -1165,7 +1186,9 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 	model.InitChannelCache()
-	service.ResetProxyClientCache()
+	if proxyChanged {
+		service.InvalidateProxyClient(originProxy)
+	}
 	channel.Key = ""
 	clearChannelInfo(&channel.Channel)
 	c.JSON(http.StatusOK, gin.H{

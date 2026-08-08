@@ -234,6 +234,13 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		if callID == "" {
 			return true
 		}
+		// Responses providers may emit the same function call once when it is
+		// added and again when it is completed. The completed event carries no
+		// new data after argument deltas have already been forwarded.
+		if argsDelta == "" && toolCallNameSent[callID] &&
+			(name == "" || name == toolCallNameByID[callID]) {
+			return true
+		}
 		if outputText.Len() > 0 {
 			// Prefer streaming assistant text over tool calls to match non-stream behavior.
 			return true

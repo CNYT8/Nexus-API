@@ -24,6 +24,7 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type LoginRequest struct {
@@ -364,11 +365,6 @@ func GetUser(c *gin.Context) {
 
 func GenerateAccessToken(c *gin.Context) {
 	id := c.GetInt("id")
-	user, err := model.GetUserById(id, true)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
 	// get rand int 28-32
 	randI := common.GetRandomInt(4)
 	key, err := common.GenerateRandomKey(29 + randI)
@@ -377,14 +373,17 @@ func GenerateAccessToken(c *gin.Context) {
 		common.SysLog("failed to generate key: " + err.Error())
 		return
 	}
-	user.SetAccessToken(key)
-
-	if model.DB.Where("access_token = ?", user.AccessToken).First(user).RowsAffected != 0 {
+	result := model.DB.Where("access_token = ?", key).First(&model.User{})
+	if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		common.ApiError(c, result.Error)
+		return
+	}
+	if result.RowsAffected != 0 {
 		common.ApiErrorI18n(c, i18n.MsgUuidDuplicate)
 		return
 	}
 
-	if err := user.Update(false); err != nil {
+	if err := model.UpdateUserAccessToken(id, key); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -392,7 +391,7 @@ func GenerateAccessToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    user.AccessToken,
+		"data":    key,
 	})
 	return
 }
@@ -560,18 +559,26 @@ func GetUserModels(c *gin.Context) {
 		return
 	}
 	groups := service.GetUserUsableGroups(user.Group)
-	var models []string
-	for group := range groups {
-		for _, g := range model.GetGroupEnabledModels(group) {
-			if !common.StringsContains(models, g) {
-				models = append(models, g)
-			}
+	group := c.Query("group")
+	var groupsToQuery []string
+	switch {
+	case group == "":
+		for groupName := range groups {
+			groupsToQuery = append(groupsToQuery, groupName)
+		}
+	case group == "auto":
+		if _, ok := groups[group]; ok {
+			groupsToQuery = service.GetUserAutoGroup(user.Group)
+		}
+	default:
+		if _, ok := groups[group]; ok {
+			groupsToQuery = []string{group}
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    models,
+		"data":    service.GetGroupsEnabledModels(groupsToQuery),
 	})
 	return
 }

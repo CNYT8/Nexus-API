@@ -48,7 +48,7 @@ func sweepTimedOutTasks(ctx context.Context) {
 		return
 	}
 
-	const legacyTaskCutoff int64 = 1740182400 // 2026-02-22 00:00:00 UTC
+	const legacyTaskCutoff int64 = 1740182400 // 2025-02-22 00:00:00 UTC
 	reason := fmt.Sprintf("任务超时（%d分钟）", constant.TaskTimeoutMinutes)
 	legacyReason := "任务超时（旧系统遗留任务，不进行退款，请联系管理员）"
 	now := time.Now().Unix()
@@ -63,6 +63,7 @@ func sweepTimedOutTasks(ctx context.Context) {
 		task.FinishTime = now
 		if isLegacy {
 			task.FailReason = legacyReason
+			task.Quota = 0
 		} else {
 			task.FailReason = reason
 		}
@@ -226,24 +227,30 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 			continue
 		}
 
+		previousStatus := task.Status
 		task.Status = lo.If(model.TaskStatus(responseItem.Status) != "", model.TaskStatus(responseItem.Status)).Else(task.Status)
 		task.FailReason = lo.If(responseItem.FailReason != "", responseItem.FailReason).Else(task.FailReason)
 		task.SubmitTime = lo.If(responseItem.SubmitTime != 0, responseItem.SubmitTime).Else(task.SubmitTime)
 		task.StartTime = lo.If(responseItem.StartTime != 0, responseItem.StartTime).Else(task.StartTime)
 		task.FinishTime = lo.If(responseItem.FinishTime != 0, responseItem.FinishTime).Else(task.FinishTime)
-		if responseItem.FailReason != "" || task.Status == model.TaskStatusFailure {
+		isFailure := responseItem.FailReason != "" || task.Status == model.TaskStatusFailure
+		if isFailure {
 			logger.LogInfo(ctx, task.TaskID+" 构建失败，"+task.FailReason)
+			task.Status = model.TaskStatusFailure
 			task.Progress = "100%"
-			RefundTaskQuota(ctx, task, task.FailReason)
 		}
 		if responseItem.Status == model.TaskStatusSuccess {
 			task.Progress = "100%"
 		}
 		task.Data = responseItem.Data
 
-		err = task.Update()
+		won, err := task.UpdateWithStatus(previousStatus)
 		if err != nil {
-			common.SysLog("UpdateSunoTask task error: " + err.Error())
+			logger.LogError(ctx, fmt.Sprintf("UpdateSunoTask task %s error: %v", task.TaskID, err))
+		} else if !won {
+			logger.LogWarn(ctx, fmt.Sprintf("Task %s CAS lost or no-op update, skip billing", task.TaskID))
+		} else if isFailure && previousStatus != model.TaskStatusFailure && task.Quota != 0 {
+			RefundTaskQuota(ctx, task, task.FailReason)
 		}
 	}
 	return nil

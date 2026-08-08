@@ -17,6 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from './api'
+import {
+  getOAuthSessionStorage,
+  markOAuthBindPopup,
+} from '@/features/auth/lib/oauth-callback-mode'
 
 // ============================================================================
 // OAuth URL Builders
@@ -96,26 +100,42 @@ export async function getOAuthState(): Promise<string | null> {
   }
 }
 
+async function openOAuthBindPopup(
+  provider: string,
+  buildUrl: (state: string) => string
+): Promise<void> {
+  const popup = window.open('', '_blank')
+  if (!popup) return
+
+  const state = await getOAuthState()
+  if (!state) {
+    popup.close()
+    return
+  }
+  if (!markOAuthBindPopup(getOAuthSessionStorage(popup), provider, state)) {
+    popup.close()
+    return
+  }
+
+  popup.location.href = buildUrl(state)
+}
+
 /**
  * Handle GitHub OAuth binding/login
  */
 export async function handleGitHubOAuth(clientId: string): Promise<void> {
-  const state = await getOAuthState()
-  if (!state) return
-
-  const url = buildGitHubOAuthUrl(clientId, state)
-  window.open(url, '_blank')
+  await openOAuthBindPopup('github', (state) =>
+    buildGitHubOAuthUrl(clientId, state)
+  )
 }
 
 /**
  * Handle Discord OAuth binding/login
  */
 export async function handleDiscordOAuth(clientId: string): Promise<void> {
-  const state = await getOAuthState()
-  if (!state) return
-
-  const url = buildDiscordOAuthUrl(clientId, state)
-  window.open(url, '_blank')
+  await openOAuthBindPopup('discord', (state) =>
+    buildDiscordOAuthUrl(clientId, state)
+  )
 }
 
 /**
@@ -125,20 +145,16 @@ export async function handleOIDCOAuth(
   authUrl: string,
   clientId: string
 ): Promise<void> {
-  const state = await getOAuthState()
-  if (!state) return
-
-  const url = buildOIDCOAuthUrl(authUrl, clientId, state)
-  window.open(url, '_blank')
+  await openOAuthBindPopup('oidc', (state) =>
+    buildOIDCOAuthUrl(authUrl, clientId, state)
+  )
 }
 
 /**
  * Handle LinuxDO OAuth binding/login
  */
 export async function handleLinuxDOOAuth(clientId: string): Promise<void> {
-  const state = await getOAuthState()
-  if (!state) return
-
-  const url = buildLinuxDOOAuthUrl(clientId, state)
-  window.open(url, '_blank')
+  await openOAuthBindPopup('linuxdo', (state) =>
+    buildLinuxDOOAuthUrl(clientId, state)
+  )
 }

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import type { AxiosRequestConfig } from 'axios'
 import {
   createFileRoute,
@@ -30,6 +30,10 @@ import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 import { api, getSelf } from '@/lib/api'
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
 import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
+import {
+  getOAuthSessionStorage,
+  resolveOAuthCallbackMode,
+} from '@/features/auth/lib/oauth-callback-mode'
 
 type OAuthRequestConfig = AxiosRequestConfig & {
   skipBusinessError?: boolean
@@ -45,16 +49,14 @@ function OAuthCallback() {
     state?: string
     redirect?: string
   }
-  const [mode, setMode] = useState<'login' | 'bind'>(() => {
-    if (typeof window === 'undefined') return 'login'
-    return window.opener ? 'bind' : 'login'
-  })
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMode(window.opener ? 'bind' : 'login')
-  }, [])
+  const callbackState = search.state ?? ''
+  const mode =
+    typeof window === 'undefined'
+      ? 'login'
+      : resolveOAuthCallbackMode(provider, callbackState, {
+          opener: window.opener,
+          storage: getOAuthSessionStorage(window),
+        })
 
   useEffect(() => {
     ;(async () => {
@@ -82,13 +84,7 @@ function OAuthCallback() {
         safeNavigate('/sign-in')
         return
       }
-      const isBindingFlow =
-        typeof window !== 'undefined' ? Boolean(window.opener) : mode === 'bind'
-      if (isBindingFlow && mode !== 'bind') {
-        setMode('bind')
-      } else if (!isBindingFlow && mode !== 'login') {
-        setMode('login')
-      }
+      const isBindingFlow = mode === 'bind'
       const notifyBindingResult = (status: 'success' | 'error') => {
         if (typeof window === 'undefined') return
         try {
