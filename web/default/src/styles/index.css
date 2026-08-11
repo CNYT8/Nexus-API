@@ -81,14 +81,65 @@ For commercial licensing, please contact support@quantumnous.com
 /* Shared liquid-glass header surface. The package is kept behind header content,
  * while this wrapper supplies the stable fallback for unsupported browsers. */
 .nexus-liquid-glass-layer {
+  --header-glass-tint: rgba(255, 255, 255, 0.035);
+  --header-glass-highlight: rgba(255, 255, 255, 0.38);
+  --header-glass-highlight-soft: rgba(255, 255, 255, 0.13);
+  --header-glass-lowlight: rgba(15, 23, 42, 0.035);
+  --header-glass-edge: rgba(255, 255, 255, 0.68);
+  --header-glass-saturation: 152%;
+  --header-glass-contrast: 112%;
+  --header-glass-brightness: 103%;
   overflow: hidden;
   isolation: isolate;
-  background-color: rgba(255, 255, 255, 0.12);
+  background-color: var(--header-glass-tint);
   border-radius: inherit;
 }
 
 .dark .nexus-liquid-glass-layer {
-  background-color: rgba(9, 9, 11, 0.14);
+  --header-glass-tint: rgba(9, 9, 11, 0.045);
+  --header-glass-highlight: rgba(255, 255, 255, 0.2);
+  --header-glass-highlight-soft: rgba(255, 255, 255, 0.072);
+  --header-glass-lowlight: rgba(0, 0, 0, 0.075);
+  --header-glass-edge: rgba(255, 255, 255, 0.24);
+  --header-glass-saturation: 142%;
+  --header-glass-contrast: 116%;
+  --header-glass-brightness: 106%;
+  background-color: var(--header-glass-tint);
+}
+
+.nexus-liquid-glass-layer::before,
+.nexus-liquid-glass-layer::after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  content: '';
+  pointer-events: none;
+}
+
+.nexus-liquid-glass-layer::before {
+  background:
+    radial-gradient(
+      52% 145% at 12% -72%,
+      var(--header-glass-highlight),
+      transparent 72%
+    ),
+    radial-gradient(
+      38% 120% at 68% -78%,
+      var(--header-glass-highlight-soft),
+      transparent 76%
+    );
+  mix-blend-mode: screen;
+}
+
+.nexus-liquid-glass-layer::after {
+  background: linear-gradient(
+    180deg,
+    var(--header-glass-highlight-soft) 0,
+    transparent 24%,
+    transparent 76%,
+    var(--header-glass-lowlight) 100%
+  );
+  box-shadow: inset 0 1px 0 var(--header-glass-edge);
 }
 
 .nexus-liquid-glass-layer > div,
@@ -116,6 +167,15 @@ For commercial licensing, please contact support@quantumnous.com
   box-shadow: none !important;
 }
 
+.nexus-liquid-glass-surface .glass__warp {
+  -webkit-backdrop-filter: blur(6px) saturate(var(--header-glass-saturation))
+    contrast(var(--header-glass-contrast))
+    brightness(var(--header-glass-brightness)) !important;
+  backdrop-filter: blur(6px) saturate(var(--header-glass-saturation))
+    contrast(var(--header-glass-contrast))
+    brightness(var(--header-glass-brightness)) !important;
+}
+
 .nexus-liquid-glass-surface {
   border-radius: inherit !important;
 }
@@ -140,6 +200,13 @@ For commercial licensing, please contact support@quantumnous.com
   .dark .nexus-liquid-glass-layer {
     background-color: rgba(9, 9, 11, 0.9);
   }
+
+  .nexus-liquid-glass-layer > div,
+  .nexus-liquid-glass-layer > span,
+  .nexus-liquid-glass-layer::before,
+  .nexus-liquid-glass-layer::after {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-transparency: reduce), (forced-colors: active) {
@@ -149,7 +216,9 @@ For commercial licensing, please contact support@quantumnous.com
   }
 
   .nexus-liquid-glass-layer > div,
-  .nexus-liquid-glass-layer > span {
+  .nexus-liquid-glass-layer > span,
+  .nexus-liquid-glass-layer::before,
+  .nexus-liquid-glass-layer::after {
     display: none;
   }
 }

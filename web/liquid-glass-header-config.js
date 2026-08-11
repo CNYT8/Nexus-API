@@ -17,12 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-const STATIC_MOUSE_POSITION = Object.freeze({ x: 0, y: 0 });
-
 const LIQUID_GLASS_HEADER_CONFIG = Object.freeze({
-  displacementScale: 14,
-  saturation: 145,
-  aberrationIntensity: 0.35,
+  saturation: 148,
+  aberrationIntensity: 1.35,
   elasticity: 0,
   padding: '0',
   mode: 'standard',
@@ -33,9 +30,10 @@ export const getLiquidGlassHeaderProps = ({
   cornerRadius = 0,
 } = {}) => ({
   ...LIQUID_GLASS_HEADER_CONFIG,
-  blurAmount: overLight ? 0.125 : 0.375,
+  // liquid-glass-react halves displacement over light surfaces. Keep the
+  // effective refraction equal across themes without moving the header.
+  displacementScale: overLight ? 72 : 36,
+  blurAmount: 0.0625,
   cornerRadius,
   overLight,
-  globalMousePos: STATIC_MOUSE_POSITION,
-  mouseOffset: STATIC_MOUSE_POSITION,
 });

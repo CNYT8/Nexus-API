@@ -11,6 +11,4 @@ export declare const getLiquidGlassHeaderProps: (options?: {
   mode: 'standard'
   blurAmount: number
   overLight: boolean
-  globalMousePos: { x: number; y: number }
-  mouseOffset: { x: number; y: number }
 }

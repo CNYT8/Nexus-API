@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
+import { useCallback, useRef } from 'react'
 import LiquidGlass from 'liquid-glass-react'
 import { getLiquidGlassHeaderProps } from '../../../../../liquid-glass-header-config.js'
 import { cn } from '@/lib/utils'
@@ -32,8 +33,14 @@ export function LiquidGlassHeader({
   cornerRadius = 0,
   className,
 }: LiquidGlassHeaderProps) {
+  const mouseContainerRef = useRef<HTMLElement | null>(null)
+  const bindLayer = useCallback((node: HTMLDivElement | null) => {
+    mouseContainerRef.current = node?.parentElement ?? null
+  }, [])
+
   return (
     <div
+      ref={bindLayer}
       aria-hidden='true'
       className={cn(
         'nexus-liquid-glass-layer pointer-events-none absolute inset-0 z-0',
@@ -42,6 +49,7 @@ export function LiquidGlassHeader({
     >
       <LiquidGlass
         {...getLiquidGlassHeaderProps({ overLight, cornerRadius })}
+        mouseContainer={mouseContainerRef}
         className='nexus-liquid-glass-surface'
         style={{
           position: 'absolute',

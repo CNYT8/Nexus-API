@@ -59,3 +59,14 @@ func TestChannelProxyValidation(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid channel proxy")
 }
+
+func TestGetSettingDoesNotEraseInvalidStoredValue(t *testing.T) {
+	rawSetting := `{"proxy":"http://proxy.example:8080",`
+	channel := &Channel{Id: 42, Setting: &rawSetting}
+
+	setting := channel.GetSetting()
+
+	assert.Empty(t, setting.Proxy)
+	require.NotNil(t, channel.Setting)
+	assert.Equal(t, rawSetting, *channel.Setting)
+}

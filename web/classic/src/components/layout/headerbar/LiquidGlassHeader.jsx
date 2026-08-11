@@ -17,27 +17,37 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
+import { useCallback, useRef } from 'react';
 import LiquidGlass from 'liquid-glass-react';
 import { getLiquidGlassHeaderProps } from '../../../../../liquid-glass-header-config.js';
 
-const LiquidGlassHeader = ({ overLight, cornerRadius = 0, className = '' }) => (
-  <div
-    aria-hidden='true'
-    className={`nexus-liquid-glass-layer pointer-events-none absolute inset-0 z-0 ${className}`}
-  >
-    <LiquidGlass
-      {...getLiquidGlassHeaderProps({ overLight, cornerRadius })}
-      className='nexus-liquid-glass-surface'
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-      }}
-    />
-  </div>
-);
+const LiquidGlassHeader = ({ overLight, cornerRadius = 0, className = '' }) => {
+  const mouseContainerRef = useRef(null);
+  const bindLayer = useCallback((node) => {
+    mouseContainerRef.current = node?.parentElement ?? null;
+  }, []);
+
+  return (
+    <div
+      ref={bindLayer}
+      aria-hidden='true'
+      className={`nexus-liquid-glass-layer pointer-events-none absolute inset-0 z-0 ${className}`}
+    >
+      <LiquidGlass
+        {...getLiquidGlassHeaderProps({ overLight, cornerRadius })}
+        mouseContainer={mouseContainerRef}
+        className='nexus-liquid-glass-surface'
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+        }}
+      />
+    </div>
+  );
+};
 
 export default LiquidGlassHeader;

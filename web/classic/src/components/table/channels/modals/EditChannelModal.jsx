@@ -544,6 +544,9 @@ const EditChannelModal = (props) => {
     useState('');
   const [ollamaModalVisible, setOllamaModalVisible] = useState(false);
   const formApiRef = useRef(null);
+  const loadChannelRequestRef = useRef(0);
+  const loadedChannelIdRef = useRef(null);
+  const [channelLoaded, setChannelLoaded] = useState(!isEdit);
   const [vertexKeys, setVertexKeys] = useState([]);
   const [vertexFileList, setVertexFileList] = useState([]);
   const vertexErroredNames = useRef(new Set()); // 避免重复报错
@@ -819,14 +822,17 @@ const EditChannelModal = (props) => {
     proxy: '',
     pass_through_body_enabled: false,
     system_prompt: '',
+    system_prompt_override: false,
   });
+  const channelSettingsRef = useRef(channelSettings);
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
 
   // 处理渠道额外设置的更新
   const handleChannelSettingsChange = (key, value) => {
-    // 更新内部状态
-    setChannelSettings((prev) => ({ ...prev, [key]: value }));
+    const nextSettings = { ...channelSettingsRef.current, [key]: value };
+    channelSettingsRef.current = nextSettings;
+    setChannelSettings(nextSettings);
 
     // 同步更新到表单字段
     if (formApiRef.current) {
@@ -836,10 +842,7 @@ const EditChannelModal = (props) => {
     // 同步更新inputs状态
     setInputs((prev) => ({ ...prev, [key]: value }));
 
-    // 生成setting JSON并更新
-    const newSettings = { ...channelSettings, [key]: value };
-    const settingsJson = JSON.stringify(newSettings);
-    handleInputChange('setting', settingsJson);
+    handleInputChange('setting', JSON.stringify(nextSettings));
   };
 
   const handleChannelOtherSettingsChange = (key, value) => {
@@ -1121,25 +1124,49 @@ const EditChannelModal = (props) => {
     handleInputChange('param_override', '');
   };
 
-  const loadChannel = async () => {
+  const loadChannel = async (requestedChannelId) => {
+    const requestId = ++loadChannelRequestRef.current;
+    loadedChannelIdRef.current = null;
+    setChannelLoaded(false);
     setLoading(true);
-    let res = await API.get(`/api/channel/${channelId}`);
-    if (res === undefined) {
-      return;
-    }
-    const { success, message, data } = res.data;
-    if (success) {
-      if (data.models === '') {
-        data.models = [];
-      } else {
-        data.models = data.models.split(',');
+    try {
+      const res = await API.get(`/api/channel/${requestedChannelId}`, {
+        disableDuplicate: true,
+      });
+      if (
+        requestId !== loadChannelRequestRef.current ||
+        requestedChannelId !== channelId ||
+        !props.visible
+      ) {
+        return;
       }
-      if (data.group === '') {
-        data.groups = [];
-      } else {
-        data.groups = data.group.split(',');
+      if (res === undefined) {
+        return;
       }
-      if (data.model_mapping !== '') {
+      const { success, message, data: responseData } = res.data;
+      if (!success) {
+        showError(message);
+        return;
+      }
+      if (!responseData || typeof responseData !== 'object') {
+        return;
+      }
+
+      // Never mutate an Axios response object: duplicate callers may share it.
+      const data = { ...responseData };
+      data.models =
+        typeof data.models === 'string' && data.models !== ''
+          ? data.models.split(',')
+          : Array.isArray(data.models)
+            ? [...data.models]
+            : [];
+      data.groups =
+        typeof data.group === 'string' && data.group !== ''
+          ? data.group.split(',')
+          : Array.isArray(data.groups)
+            ? [...data.groups]
+            : [];
+      if (typeof data.model_mapping === 'string' && data.model_mapping !== '') {
         data.model_mapping = JSON.stringify(
           JSON.parse(data.model_mapping),
           null,
@@ -1174,13 +1201,8 @@ const EditChannelModal = (props) => {
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
         } catch (error) {
-          console.error('解析渠道设置失败:', error);
-          data.force_format = false;
-          data.thinking_to_content = false;
-          data.proxy = '';
-          data.pass_through_body_enabled = false;
-          data.system_prompt = '';
-          data.system_prompt_override = false;
+          console.error('Failed to parse channel setting:', error);
+          throw new Error(t('加载失败，请重试'));
         }
       } else {
         data.force_format = false;
@@ -1234,25 +1256,8 @@ const EditChannelModal = (props) => {
             ? JSON.stringify(parsedSettings.advanced_custom, null, 2)
             : '';
         } catch (error) {
-          console.error('解析其他设置失败:', error);
-          data.azure_responses_version = '';
-          data.region = '';
-          data.vertex_key_type = 'json';
-          data.aws_key_type = 'ak_sk';
-          data.is_enterprise_account = false;
-          data.allow_service_tier = false;
-          data.disable_store = false;
-          data.allow_safety_identifier = false;
-          data.allow_include_obfuscation = false;
-          data.allow_inference_geo = false;
-          data.allow_speed = false;
-          data.claude_beta_query = false;
-          data.upstream_model_update_check_enabled = false;
-          data.upstream_model_update_auto_sync_enabled = false;
-          data.upstream_model_update_last_check_time = 0;
-          data.upstream_model_update_last_detected_models = [];
-          data.upstream_model_update_ignored_models = '';
-          data.advanced_custom = '';
+          console.error('Failed to parse channel settings:', error);
+          throw new Error(t('加载失败，请重试'));
         }
       } else {
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
@@ -1296,14 +1301,16 @@ const EditChannelModal = (props) => {
       setIsEnterpriseAccount(data.is_enterprise_account || false);
       setBasicModels(getChannelModels(data.type));
       // 同步更新channelSettings状态显示
-      setChannelSettings({
+      const loadedChannelSettings = {
         force_format: data.force_format,
         thinking_to_content: data.thinking_to_content,
         proxy: data.proxy,
         pass_through_body_enabled: data.pass_through_body_enabled,
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
-      });
+      };
+      channelSettingsRef.current = loadedChannelSettings;
+      setChannelSettings(loadedChannelSettings);
       initialModelsRef.current = (data.models || [])
         .map((model) => (model || '').trim())
         .filter(Boolean);
@@ -1350,10 +1357,24 @@ const EditChannelModal = (props) => {
       if (hasAdvancedValues) {
         setAdvancedSettingsOpen(true);
       }
-    } else {
-      showError(message);
+      loadedChannelIdRef.current = requestedChannelId;
+      setChannelLoaded(true);
+    } catch (error) {
+      if (
+        requestId === loadChannelRequestRef.current &&
+        requestedChannelId === channelId &&
+        props.visible
+      ) {
+        showError(error);
+      }
+    } finally {
+      if (
+        requestId === loadChannelRequestRef.current &&
+        requestedChannelId === channelId
+      ) {
+        setLoading(false);
+      }
     }
-    setLoading(false);
   };
 
   const fetchUpstreamModelList = async (name, options = {}) => {
@@ -1646,8 +1667,10 @@ const EditChannelModal = (props) => {
     setModelSearchValue('');
     if (props.visible) {
       if (isEdit) {
-        loadChannel();
+        loadChannel(channelId);
       } else {
+        loadedChannelIdRef.current = null;
+        setChannelLoaded(true);
         formApiRef.current?.setValues(getInitValues());
         try {
           navigator?.clipboard?.readText()?.then((text) => {
@@ -1669,6 +1692,10 @@ const EditChannelModal = (props) => {
       // 统一的模态框关闭重置逻辑
       resetModalState();
     }
+
+    return () => {
+      loadChannelRequestRef.current += 1;
+    };
   }, [props.visible, channelId]);
 
   useEffect(() => {
@@ -1690,17 +1717,22 @@ const EditChannelModal = (props) => {
 
   // 统一的模态框重置函数
   const resetModalState = () => {
+    loadedChannelIdRef.current = null;
+    setChannelLoaded(!isEdit);
+    setLoading(false);
     resolveStatusCodeRiskConfirm(false);
     formApiRef.current?.reset();
     // 重置渠道设置状态
-    setChannelSettings({
+    const emptyChannelSettings = {
       force_format: false,
       thinking_to_content: false,
       proxy: '',
       pass_through_body_enabled: false,
       system_prompt: '',
       system_prompt_override: false,
-    });
+    };
+    channelSettingsRef.current = emptyChannelSettings;
+    setChannelSettings(emptyChannelSettings);
     // 重置密钥模式状态
     setKeyMode('append');
     // 重置企业账户状态
@@ -1858,8 +1890,19 @@ const EditChannelModal = (props) => {
   };
 
   const submit = async () => {
+    if (
+      isEdit &&
+      (loading ||
+        !channelLoaded ||
+        loadedChannelIdRef.current !== channelId)
+    ) {
+      return;
+    }
     const formValues = formApiRef.current ? formApiRef.current.getValues() : {};
-    let localInputs = { ...formValues };
+    let localInputs = { ...inputs, ...formValues };
+    Object.entries(channelSettingsRef.current).forEach(([field, value]) => {
+      localInputs[field] = value;
+    });
     localInputs.param_override = inputs.param_override;
     let codexConfigCount = 0;
 
@@ -2554,6 +2597,13 @@ const EditChannelModal = (props) => {
               theme='solid'
               onClick={() => formApiRef.current?.submitForm()}
               icon={<IconSave />}
+              loading={isEdit && loading}
+              disabled={
+                isEdit &&
+                (!channelLoaded ||
+                  loading ||
+                  loadedChannelIdRef.current !== channelId)
+              }
             >
               {t('提交')}
             </Button>
@@ -2571,7 +2621,7 @@ const EditChannelModal = (props) => {
         onCancel={() => handleCancel()}
       >
         <Form
-          key={isEdit ? 'edit' : 'new'}
+          key={isEdit ? `edit-${channelId}` : 'new'}
           initValues={originInputs}
           getFormApi={(api) => (formApiRef.current = api)}
           onSubmit={submit}
