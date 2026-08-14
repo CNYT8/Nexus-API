@@ -20,7 +20,9 @@ For commercial licensing, please contact support@quantumnous.com
 const LIQUID_GLASS_HEADER_CONFIG = Object.freeze({
   saturation: 148,
   aberrationIntensity: 2,
-  elasticity: 0,
+  // Keep the full-width header fixed while allowing the oversized optical
+  // surface to respond subtly to the pointer.
+  elasticity: 0.055,
   padding: '0',
   mode: 'standard',
 });
