@@ -78,187 +78,127 @@ For commercial licensing, please contact support@quantumnous.com
   }
 }
 
-/* Shared liquid-glass header surface. The package is kept behind header content,
- * while this wrapper supplies the stable fallback for unsupported browsers. */
-.nexus-liquid-glass-layer {
-  --header-glass-tint: rgba(255, 255, 255, 0.035);
-  --header-glass-highlight: rgba(255, 255, 255, 0.38);
-  --header-glass-highlight-soft: rgba(255, 255, 255, 0.13);
-  --header-glass-lowlight: rgba(15, 23, 42, 0.035);
-  --header-glass-edge: rgba(255, 255, 255, 0.68);
-  --header-glass-saturation: 152%;
-  --header-glass-contrast: 112%;
-  --header-glass-brightness: 103%;
-  --header-glass-blur: 10px;
+/* Handcrafted frosted header material shared by authenticated and public layouts. */
+.nexus-frosted-glass-layer {
+  --header-frosted-fallback: rgba(255, 255, 255, 0.94);
+  --header-frosted-surface: rgba(255, 255, 255, 0.58);
+  --header-frosted-surface-deep: rgba(248, 250, 252, 0.38);
+  --header-frosted-highlight: rgba(255, 255, 255, 0.54);
+  --header-frosted-edge: rgba(255, 255, 255, 0.76);
+  --header-frosted-lowlight: rgba(15, 23, 42, 0.055);
+  --header-frosted-shadow: rgba(15, 23, 42, 0.09);
+  --header-frosted-grain: rgba(255, 255, 255, 0.2);
+  --header-frosted-blur: 18px;
+  --header-frosted-saturation: 165%;
+  --header-frosted-contrast: 104%;
+  --header-frosted-brightness: 102%;
   overflow: hidden;
-  background-color: transparent;
   border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    var(--header-frosted-surface),
+    var(--header-frosted-surface-deep)
+  );
+  box-shadow:
+    inset 0 1px 0 var(--header-frosted-edge),
+    inset 0 -1px 0 var(--header-frosted-lowlight),
+    0 8px 24px var(--header-frosted-shadow);
+  -webkit-backdrop-filter: blur(var(--header-frosted-blur))
+    saturate(var(--header-frosted-saturation))
+    contrast(var(--header-frosted-contrast))
+    brightness(var(--header-frosted-brightness));
+  backdrop-filter: blur(var(--header-frosted-blur))
+    saturate(var(--header-frosted-saturation))
+    contrast(var(--header-frosted-contrast))
+    brightness(var(--header-frosted-brightness));
 }
 
-.dark .nexus-liquid-glass-layer {
-  --header-glass-tint: rgba(9, 9, 11, 0.045);
-  --header-glass-highlight: rgba(255, 255, 255, 0.2);
-  --header-glass-highlight-soft: rgba(255, 255, 255, 0.072);
-  --header-glass-lowlight: rgba(0, 0, 0, 0.075);
-  --header-glass-edge: rgba(255, 255, 255, 0.24);
-  --header-glass-saturation: 142%;
-  --header-glass-contrast: 116%;
-  --header-glass-brightness: 106%;
-  --header-glass-blur: 8px;
-  background-color: transparent;
+.dark .nexus-frosted-glass-layer {
+  --header-frosted-fallback: rgba(12, 13, 17, 0.94);
+  --header-frosted-surface: rgba(18, 19, 24, 0.62);
+  --header-frosted-surface-deep: rgba(9, 10, 14, 0.48);
+  --header-frosted-highlight: rgba(255, 255, 255, 0.13);
+  --header-frosted-edge: rgba(255, 255, 255, 0.18);
+  --header-frosted-lowlight: rgba(0, 0, 0, 0.22);
+  --header-frosted-shadow: rgba(0, 0, 0, 0.28);
+  --header-frosted-grain: rgba(255, 255, 255, 0.1);
+  --header-frosted-saturation: 138%;
+  --header-frosted-contrast: 106%;
+  --header-frosted-brightness: 98%;
 }
 
-.nexus-liquid-glass-layer::before,
-.nexus-liquid-glass-layer::after {
+.nexus-frosted-glass-layer::before,
+.nexus-frosted-glass-layer::after {
   position: absolute;
   inset: 0;
   content: '';
   pointer-events: none;
 }
 
-.nexus-liquid-glass-layer::before {
-  z-index: 0;
+.nexus-frosted-glass-layer::before {
   background:
     radial-gradient(
-      52% 145% at 12% -72%,
-      var(--header-glass-highlight),
-      transparent 72%
+      70% 190% at 12% -110%,
+      var(--header-frosted-highlight),
+      transparent 68%
     ),
-    radial-gradient(
-      38% 120% at 68% -78%,
-      var(--header-glass-highlight-soft),
-      transparent 76%
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.12),
+      transparent 38%,
+      var(--header-frosted-lowlight)
+    );
+}
+
+.nexus-frosted-glass-layer::after {
+  background:
+    repeating-linear-gradient(
+      115deg,
+      transparent 0 3px,
+      var(--header-frosted-grain) 3.5px 4px,
+      transparent 4.5px 9px
     ),
-    var(--header-glass-tint);
-  -webkit-backdrop-filter: blur(var(--header-glass-blur))
-    saturate(var(--header-glass-saturation))
-    contrast(var(--header-glass-contrast))
-    brightness(var(--header-glass-brightness));
-  backdrop-filter: blur(var(--header-glass-blur))
-    saturate(var(--header-glass-saturation))
-    contrast(var(--header-glass-contrast))
-    brightness(var(--header-glass-brightness));
-}
-
-.nexus-liquid-glass-layer::after {
-  z-index: 2;
-  background: linear-gradient(
-    180deg,
-    var(--header-glass-highlight-soft) 0,
-    transparent 24%,
-    transparent 76%,
-    var(--header-glass-lowlight) 100%
-  );
-  box-shadow:
-    inset 0 1px 0 var(--header-glass-edge),
-    inset 1px 0 0 rgba(34, 211, 238, 0.1),
-    inset -1px 0 0 rgba(244, 114, 182, 0.08),
-    inset 0 -1px 0 rgba(99, 102, 241, 0.08);
-  opacity: 0.55;
-}
-
-.nexus-liquid-glass-layer > div,
-.nexus-liquid-glass-layer > span {
-  pointer-events: none !important;
-}
-
-.nexus-liquid-glass-layer > .nexus-liquid-glass-surface,
-.nexus-liquid-glass-layer > span {
-  position: absolute !important;
-  top: 50% !important;
-  left: 50% !important;
-  width: calc(100% + 48px) !important;
-  height: calc(100% + 24px) !important;
-  transform-origin: center !important;
-  will-change: transform;
-}
-
-.nexus-liquid-glass-layer > .nexus-liquid-glass-surface {
-  z-index: 1;
-  transition: transform 200ms cubic-bezier(0.23, 1, 0.32, 1) !important;
-}
-
-.nexus-liquid-glass-layer > span {
-  z-index: 3;
-  opacity: 0.34 !important;
-  transition:
-    transform 200ms cubic-bezier(0.23, 1, 0.32, 1),
-    opacity 160ms ease-out !important;
-}
-
-.nexus-liquid-glass-layer > div[class*='bg-black'] {
-  opacity: 0 !important;
-}
-
-.nexus-liquid-glass-surface > .glass {
-  display: flex !important;
-  width: 100% !important;
-  height: 100% !important;
-  padding: 0 !important;
-  border-radius: inherit !important;
-  box-shadow: none !important;
-}
-
-.nexus-liquid-glass-surface .glass__warp {
-  -webkit-backdrop-filter: blur(3px) saturate(var(--header-glass-saturation))
-    contrast(var(--header-glass-contrast))
-    brightness(var(--header-glass-brightness)) !important;
-  backdrop-filter: blur(3px) saturate(var(--header-glass-saturation))
-    contrast(var(--header-glass-contrast))
-    brightness(var(--header-glass-brightness)) !important;
-}
-
-.nexus-liquid-glass-surface {
-  border-radius: inherit !important;
-}
-
-.nexus-liquid-glass-surface > svg {
-  position: absolute !important;
-  inset: 0 !important;
-  width: 100% !important;
-  height: 100% !important;
-}
-
-.nexus-liquid-glass-surface > .glass > div {
-  width: 100%;
-  height: 100%;
+    repeating-linear-gradient(
+      25deg,
+      transparent 0 5px,
+      var(--header-frosted-grain) 5.5px 6px,
+      transparent 6.5px 13px
+    );
+  background-size:
+    11px 13px,
+    13px 11px;
+  mix-blend-mode: soft-light;
+  opacity: 0.16;
 }
 
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  .nexus-liquid-glass-layer {
-    background-color: rgba(255, 255, 255, 0.9);
+  .nexus-frosted-glass-layer {
+    background: var(--header-frosted-fallback);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .nexus-frosted-glass-layer {
+    background: var(--header-frosted-fallback);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
-  .dark .nexus-liquid-glass-layer {
-    background-color: rgba(9, 9, 11, 0.9);
-  }
-
-  .nexus-liquid-glass-layer > div,
-  .nexus-liquid-glass-layer > span,
-  .nexus-liquid-glass-layer::before,
-  .nexus-liquid-glass-layer::after {
+  .nexus-frosted-glass-layer::after {
     display: none;
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .nexus-liquid-glass-layer > .nexus-liquid-glass-surface,
-  .nexus-liquid-glass-layer > span {
-    transform: translate(-50%, -50%) !important;
-    transition: none !important;
-  }
-}
-
-@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
-  .nexus-liquid-glass-layer,
-  .dark .nexus-liquid-glass-layer {
-    background-color: Canvas;
+@media (forced-colors: active) {
+  .nexus-frosted-glass-layer {
+    background: Canvas;
+    box-shadow: inset 0 -1px 0 CanvasText;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
-  .nexus-liquid-glass-layer > div,
-  .nexus-liquid-glass-layer > span,
-  .nexus-liquid-glass-layer::before,
-  .nexus-liquid-glass-layer::after {
+  .nexus-frosted-glass-layer::before,
+  .nexus-frosted-glass-layer::after {
     display: none;
   }
 }

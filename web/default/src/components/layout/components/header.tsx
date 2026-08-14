@@ -19,16 +19,14 @@ For commercial licensing, please contact support@quantumnous.com
 import { cn } from '@/lib/utils'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { useLogoAccent } from '@/hooks/use-logo-accent'
-import { useTheme } from '@/context/theme-provider'
 import { SidebarTrigger } from '@/components/ui/sidebar'
-import { LiquidGlassHeader } from './liquid-glass-header'
+import { FrostedGlassHeader } from './frosted-glass-header'
 
 type HeaderProps = React.HTMLAttributes<HTMLElement>
 
 export function Header({ className, children, style, ...props }: HeaderProps) {
   const { logo } = useSystemConfig()
   const logoAccent = useLogoAccent(logo)
-  const { resolvedTheme } = useTheme()
 
   return (
     <header
@@ -44,7 +42,7 @@ export function Header({ className, children, style, ...props }: HeaderProps) {
       }}
       {...props}
     >
-      <LiquidGlassHeader overLight={resolvedTheme !== 'dark'} />
+      <FrostedGlassHeader />
       {logoAccent.active && (
         <div
           aria-hidden='true'

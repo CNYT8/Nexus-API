@@ -26,7 +26,7 @@ import MobileMenuButton from './MobileMenuButton';
 import HeaderLogo from './HeaderLogo';
 import Navigation from './Navigation';
 import ActionButtons from './ActionButtons';
-import LiquidGlassHeader from './LiquidGlassHeader';
+import FrostedGlassHeader from './FrostedGlassHeader';
 import { useLogoAccent } from '../../../hooks/common/useLogoAccent';
 
 const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
@@ -46,7 +46,6 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     isDemoSiteMode,
     isConsoleRoute,
     theme,
-    actualTheme,
     headerNavModules,
     pricingRequireAuth,
     logout,
@@ -85,7 +84,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
         unreadKeys={getUnreadKeys()}
       />
 
-      <LiquidGlassHeader overLight={actualTheme !== 'dark'} />
+      <FrostedGlassHeader />
 
       {logoAccent.active && (
         <div

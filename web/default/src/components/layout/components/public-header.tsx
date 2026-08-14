@@ -25,7 +25,6 @@ import { useNotifications } from '@/hooks/use-notifications'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { useLogoAccent } from '@/hooks/use-logo-accent'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
-import { useTheme } from '@/context/theme-provider'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -42,8 +41,8 @@ import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { defaultTopNavLinks } from '../config/top-nav.config'
 import type { TopNavLink } from '../types'
+import { FrostedGlassHeader } from './frosted-glass-header'
 import { HeaderLogo } from './header-logo'
-import { LiquidGlassHeader } from './liquid-glass-header'
 
 const AUTH_PROMPT_SECONDS = 5
 
@@ -98,7 +97,6 @@ export function PublicHeader(props: PublicHeaderProps) {
   } = useSystemConfig()
   const dynamicLinks = useTopNavLinks()
   const notifications = useNotifications()
-  const { resolvedTheme } = useTheme()
   const routerState = useRouterState()
   const pathname = routerState.location.pathname
 
@@ -205,12 +203,7 @@ export function PublicHeader(props: PublicHeaderProps) {
                 : undefined
             }
           >
-            {scrolled && (
-              <LiquidGlassHeader
-                overLight={resolvedTheme !== 'dark'}
-                cornerRadius={16}
-              />
-            )}
+            {scrolled && <FrostedGlassHeader cornerRadius={16} />}
             {logoAccent.active && (
               <div
                 aria-hidden='true'

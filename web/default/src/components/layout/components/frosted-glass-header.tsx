@@ -17,25 +17,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-const LIQUID_GLASS_HEADER_CONFIG = Object.freeze({
-  saturation: 148,
-  aberrationIntensity: 2,
-  // Keep the full-width header fixed while allowing the oversized optical
-  // surface to respond subtly to the pointer.
-  elasticity: 0.055,
-  padding: '0',
-  mode: 'standard',
-});
+import { cn } from '@/lib/utils'
 
-export const getLiquidGlassHeaderProps = ({
-  overLight = false,
+type FrostedGlassHeaderProps = {
+  cornerRadius?: number
+  className?: string
+}
+
+export function FrostedGlassHeader({
   cornerRadius = 0,
-} = {}) => ({
-  ...LIQUID_GLASS_HEADER_CONFIG,
-  // liquid-glass-react halves displacement over light surfaces. Keep a
-  // clearly visible, equal refraction strength across themes.
-  displacementScale: overLight ? 96 : 48,
-  blurAmount: 0.0625,
-  cornerRadius,
-  overLight,
-});
+  className,
+}: FrostedGlassHeaderProps) {
+  return (
+    <div
+      aria-hidden='true'
+      className={cn(
+        'nexus-frosted-glass-layer pointer-events-none absolute inset-0 z-0',
+        className
+      )}
+      style={{ borderRadius: `${cornerRadius}px` }}
+    />
+  )
+}
