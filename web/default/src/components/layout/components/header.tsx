@@ -33,7 +33,7 @@ export function Header({ className, children, style, ...props }: HeaderProps) {
   return (
     <header
       className={cn(
-        'border-transparent bg-transparent sticky top-0 z-40 isolate h-[var(--app-header-height,3rem)] w-full shrink-0 overflow-hidden border-b shadow-none',
+        'border-transparent bg-transparent sticky top-0 z-40 h-[var(--app-header-height,3rem)] w-full shrink-0 overflow-hidden border-b shadow-none',
         className
       )}
       style={{

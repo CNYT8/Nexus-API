@@ -70,7 +70,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
 
   return (
     <header
-      className='classic-header text-semi-color-text-0 sticky top-0 z-50 isolate border-0 transition-colors duration-300'
+      className='classic-header text-semi-color-text-0 sticky top-0 z-50 border-0 transition-colors duration-300'
       style={
         logoAccent.active
           ? { '--classic-header-logo-accent': logoAccent.rgb }

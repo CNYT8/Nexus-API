@@ -194,7 +194,7 @@ export function PublicHeader(props: PublicHeaderProps) {
         >
           <nav
             className={cn(
-              'relative isolate overflow-hidden flex items-center justify-between transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
+              'relative overflow-hidden flex items-center justify-between transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
               scrolled
                 ? 'bg-transparent ring-white/40 h-12 rounded-2xl pr-1.5 pl-4 shadow-none ring-[0.5px] dark:ring-white/15'
                 : 'h-16 px-2'

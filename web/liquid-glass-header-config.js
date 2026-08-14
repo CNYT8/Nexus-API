@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 const LIQUID_GLASS_HEADER_CONFIG = Object.freeze({
   saturation: 148,
-  aberrationIntensity: 1.35,
+  aberrationIntensity: 2,
   elasticity: 0,
   padding: '0',
   mode: 'standard',
@@ -30,9 +30,9 @@ export const getLiquidGlassHeaderProps = ({
   cornerRadius = 0,
 } = {}) => ({
   ...LIQUID_GLASS_HEADER_CONFIG,
-  // liquid-glass-react halves displacement over light surfaces. Keep the
-  // effective refraction equal across themes without moving the header.
-  displacementScale: overLight ? 72 : 36,
+  // liquid-glass-react halves displacement over light surfaces. Keep a
+  // clearly visible, equal refraction strength across themes.
+  displacementScale: overLight ? 96 : 48,
   blurAmount: 0.0625,
   cornerRadius,
   overLight,

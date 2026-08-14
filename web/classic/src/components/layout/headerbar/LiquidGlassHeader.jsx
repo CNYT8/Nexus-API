@@ -17,14 +17,54 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import LiquidGlass from 'liquid-glass-react';
 import { getLiquidGlassHeaderProps } from '../../../../../liquid-glass-header-config.js';
 
 const LiquidGlassHeader = ({ overLight, cornerRadius = 0, className = '' }) => {
+  const layerRef = useRef(null);
   const mouseContainerRef = useRef(null);
   const bindLayer = useCallback((node) => {
+    layerRef.current = node;
     mouseContainerRef.current = node?.parentElement ?? null;
+  }, []);
+
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!layer) return undefined;
+
+    // The package map is square and defaults to `slice`, which crops away the
+    // refractive edges on a wide header. Re-fit it after package rerenders.
+    let frameId = 0;
+    const fitDisplacementMap = () => {
+      layer
+        .querySelectorAll('.nexus-liquid-glass-surface feImage')
+        .forEach((image) => {
+          if (image.getAttribute('preserveAspectRatio') !== 'none') {
+            image.setAttribute('preserveAspectRatio', 'none');
+          }
+        });
+    };
+    const scheduleFit = () => {
+      cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(fitDisplacementMap);
+    };
+
+    fitDisplacementMap();
+    if (typeof MutationObserver === 'undefined') return undefined;
+
+    const observer = new MutationObserver(scheduleFit);
+    observer.observe(layer, {
+      attributes: true,
+      attributeFilter: ['href', 'preserveAspectRatio'],
+      childList: true,
+      subtree: true,
+    });
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      observer.disconnect();
+    };
   }, []);
 
   return (
@@ -45,7 +85,9 @@ const LiquidGlassHeader = ({ overLight, cornerRadius = 0, className = '' }) => {
           height: '100%',
           pointerEvents: 'none',
         }}
-      />
+      >
+        {null}
+      </LiquidGlass>
     </div>
   );
 };
