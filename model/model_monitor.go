@@ -17,11 +17,13 @@ const (
 	modelMonitorSlowSeconds   = 30
 	modelMonitorOutputTimeTPS = 10.0
 
-	modelMonitorFreshWeight      = 2.0
-	modelMonitorHotEdgeWeight    = 1.5
-	modelMonitorWindowEdgeWeight = 0.2
-	modelMonitorPriorScore       = 70.0
-	modelMonitorConfidenceScale  = 10.0
+	modelMonitorFreshWeight                     = 2.0
+	modelMonitorHotEdgeWeight                   = 1.5
+	modelMonitorWindowEdgeWeight                = 0.2
+	modelMonitorPriorScore                      = 70.0
+	modelMonitorConfidenceScale                 = 10.0
+	modelMonitorLatestHealthyBonusPoints        = 2.0
+	modelMonitorLatestHealthyBonusWindowSeconds = 60 * 60
 )
 
 type ModelMonitorModel struct {
@@ -78,6 +80,8 @@ type modelMonitorBucket struct {
 	weightedUseTime          float64
 	weightedEmptyOutputs     float64
 	weightedSlowRequests     float64
+	latestHealthyAt          int64
+	latestUnhealthyAt        int64
 }
 
 type modelMonitorModelKey struct {
@@ -104,6 +108,8 @@ type modelMonitorBucketRow struct {
 	WeightedUseTime          float64
 	WeightedEmptyOutputs     float64
 	WeightedSlowRequests     float64
+	LatestHealthyAt          int64
+	LatestUnhealthyAt        int64
 }
 
 func normalizeModelMonitorGroup(group string) string {
@@ -218,6 +224,23 @@ func modelMonitorSampleConfidence(sampleCount int64) float64 {
 	return 1 - math.Exp(-float64(sampleCount)/modelMonitorConfidenceScale)
 }
 
+// A fresh healthy result should be noticeable without allowing one success to
+// erase the reliability, empty-output, or low-sample guardrails below.
+func modelMonitorLatestHealthyBonus(bucket modelMonitorBucket, now int64) float64 {
+	if bucket.latestHealthyAt <= 0 || bucket.latestHealthyAt < bucket.latestUnhealthyAt {
+		return 0
+	}
+	age := now - bucket.latestHealthyAt
+	if age < 0 {
+		age = 0
+	}
+	if age >= modelMonitorLatestHealthyBonusWindowSeconds {
+		return 0
+	}
+	return modelMonitorLatestHealthyBonusPoints *
+		(1 - float64(age)/float64(modelMonitorLatestHealthyBonusWindowSeconds))
+}
+
 // A relay request can emit several channel-error logs before it finally
 // succeeds or fails. Discount that retry fan-out so one user request does not
 // look like several independent failures.
@@ -247,6 +270,12 @@ func mergeModelMonitorBucket(dst modelMonitorBucket, src modelMonitorBucket) mod
 	dst.weightedUseTime += src.weightedUseTime
 	dst.weightedEmptyOutputs += src.weightedEmptyOutputs
 	dst.weightedSlowRequests += src.weightedSlowRequests
+	if src.latestHealthyAt > dst.latestHealthyAt {
+		dst.latestHealthyAt = src.latestHealthyAt
+	}
+	if src.latestUnhealthyAt > dst.latestUnhealthyAt {
+		dst.latestUnhealthyAt = src.latestUnhealthyAt
+	}
 	return dst
 }
 
@@ -262,6 +291,8 @@ func modelMonitorBucketFromRow(item modelMonitorBucketRow) modelMonitorBucket {
 		weightedUseTime:          item.WeightedUseTime,
 		weightedEmptyOutputs:     item.WeightedEmptyOutputs,
 		weightedSlowRequests:     item.WeightedSlowRequests,
+		latestHealthyAt:          item.LatestHealthyAt,
+		latestUnhealthyAt:        item.LatestUnhealthyAt,
 	}
 }
 
@@ -399,6 +430,10 @@ func modelMonitorStatus(score int, hasData bool) (string, string) {
 }
 
 func scoreModelMonitorBucket(bucket modelMonitorBucket) int {
+	return scoreModelMonitorBucketAt(bucket, common.GetTimestamp())
+}
+
+func scoreModelMonitorBucketAt(bucket modelMonitorBucket, now int64) int {
 	effectiveRequests := modelMonitorEffectiveRequestWeight(bucket)
 	if bucket.sampleCount <= 0 || effectiveRequests <= 0 {
 		return 1
@@ -438,6 +473,9 @@ func scoreModelMonitorBucket(bucket modelMonitorBucket) int {
 		outputBalanceScore*0.08
 	confidence := modelMonitorSampleConfidence(bucket.sampleCount)
 	score := modelMonitorPriorScore + (rawScore-modelMonitorPriorScore)*confidence
+	// Apply the small freshness reward before hard caps so recent recovery is
+	// visible but cannot bypass accumulated quality problems.
+	score += modelMonitorLatestHealthyBonus(bucket, now)
 	if errorRate >= 0.8 {
 		score = math.Min(score, 42)
 	} else if errorRate >= 0.5 {
@@ -533,10 +571,10 @@ func getOrCreateModelMonitorVendor(vendorMap map[string]*ModelMonitorVendor, ven
 	return group
 }
 
-func appendModelMonitorModel(vendorMap map[string]*ModelMonitorVendor, vendor PricingVendor, modelName string, group string, bucket modelMonitorBucket, hasData bool) {
+func appendModelMonitorModel(vendorMap map[string]*ModelMonitorVendor, vendor PricingVendor, modelName string, group string, bucket modelMonitorBucket, hasData bool, now int64) {
 	score := 0
 	if hasData {
-		score = scoreModelMonitorBucket(bucket)
+		score = scoreModelMonitorBucketAt(bucket, now)
 	}
 	status, statusText := modelMonitorStatus(score, hasData)
 	vendorGroup := getOrCreateModelMonitorVendor(vendorMap, vendor, modelName)
@@ -668,7 +706,9 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 		"SUM(CASE WHEN type = ? THEN completion_tokens * (" + weightSQL + ") ELSE 0 END) AS weighted_completion_tokens, " +
 		"SUM(CASE WHEN type = ? THEN use_time * (" + weightSQL + ") ELSE 0 END) AS weighted_use_time, " +
 		"SUM(CASE WHEN type = ? AND prompt_tokens > 0 AND completion_tokens <= 0 THEN " + weightSQL + " ELSE 0 END) AS weighted_empty_outputs, " +
-		"SUM(CASE WHEN type = ? AND use_time >= (? + completion_tokens / ?) THEN " + weightSQL + " ELSE 0 END) AS weighted_slow_requests"
+		"SUM(CASE WHEN type = ? AND use_time >= (? + completion_tokens / ?) THEN " + weightSQL + " ELSE 0 END) AS weighted_slow_requests, " +
+		"MAX(CASE WHEN type = ? AND NOT (prompt_tokens > 0 AND completion_tokens <= 0) THEN created_at ELSE 0 END) AS latest_healthy_at, " +
+		"MAX(CASE WHEN type = ? OR (type = ? AND prompt_tokens > 0 AND completion_tokens <= 0) THEN created_at ELSE 0 END) AS latest_unhealthy_at"
 
 	selectArgs := make([]any, 0, 128)
 	selectArgs = append(selectArgs, LogTypeError, LogTypeConsume, LogTypeError, LogTypeError)
@@ -686,6 +726,7 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
 	selectArgs = append(selectArgs, LogTypeConsume, modelMonitorSlowSeconds, modelMonitorOutputTimeTPS)
 	selectArgs = appendModelMonitorWeightSQLArgs(selectArgs, now)
+	selectArgs = append(selectArgs, LogTypeConsume, LogTypeError, LogTypeConsume)
 
 	var rows []modelMonitorBucketRow
 	if len(activeModels) > 0 {
@@ -713,7 +754,9 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 		"SUM(CASE WHEN status = ? THEN completion_tokens * (" + weightSQL + ") ELSE 0 END) AS weighted_completion_tokens, " +
 		"SUM(CASE WHEN status = ? THEN use_time * (" + weightSQL + ") ELSE 0 END) AS weighted_use_time, " +
 		"SUM(CASE WHEN status = ? AND prompt_tokens > 0 AND completion_tokens <= 0 THEN " + weightSQL + " ELSE 0 END) AS weighted_empty_outputs, " +
-		"SUM(CASE WHEN status = ? AND use_time >= (? + completion_tokens / ?) THEN " + weightSQL + " ELSE 0 END) AS weighted_slow_requests"
+		"SUM(CASE WHEN status = ? AND use_time >= (? + completion_tokens / ?) THEN " + weightSQL + " ELSE 0 END) AS weighted_slow_requests, " +
+		"MAX(CASE WHEN status = ? AND NOT (prompt_tokens > 0 AND completion_tokens <= 0) THEN created_at ELSE 0 END) AS latest_healthy_at, " +
+		"MAX(CASE WHEN status = ? OR (status = ? AND prompt_tokens > 0 AND completion_tokens <= 0) THEN created_at ELSE 0 END) AS latest_unhealthy_at"
 
 	sampleSelectArgs := make([]any, 0, 128)
 	sampleSelectArgs = append(sampleSelectArgs, ModelMonitorSampleStatusError, ModelMonitorSampleStatusSuccess, ModelMonitorSampleStatusError)
@@ -731,6 +774,7 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 	sampleSelectArgs = appendModelMonitorWeightSQLArgs(sampleSelectArgs, now)
 	sampleSelectArgs = append(sampleSelectArgs, ModelMonitorSampleStatusSuccess, modelMonitorSlowSeconds, modelMonitorOutputTimeTPS)
 	sampleSelectArgs = appendModelMonitorWeightSQLArgs(sampleSelectArgs, now)
+	sampleSelectArgs = append(sampleSelectArgs, ModelMonitorSampleStatusSuccess, ModelMonitorSampleStatusError, ModelMonitorSampleStatusSuccess)
 
 	var sampleRows []modelMonitorBucketRow
 	if len(activeModels) > 0 {
@@ -752,7 +796,7 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 			group:     item.group,
 		}
 		bucket, hasData := buckets[key]
-		appendModelMonitorModel(vendorMap, item.vendor, item.modelName, item.group, bucket, hasData)
+		appendModelMonitorModel(vendorMap, item.vendor, item.modelName, item.group, bucket, hasData, now)
 	}
 
 	vendors := make([]ModelMonitorVendor, 0, len(vendorMap))

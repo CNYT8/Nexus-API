@@ -169,6 +169,7 @@ export const channelFormSchema = z
     multi_key_type: z.enum(['random', 'polling']).optional(),
     batch_add_set_key_prefix_2_name: z.boolean().optional(),
     key_mode: z.enum(['append', 'replace']).optional(), // For editing multi-key channels
+    convert_to_multi_key: z.boolean().optional(),
     // Channel extra settings (stored in setting JSON, not sent directly)
     force_format: z.boolean().optional(),
     thinking_to_content: z.boolean().optional(),
@@ -195,6 +196,10 @@ export const channelFormSchema = z
     upstream_model_update_ignored_models: z.string().optional(),
   })
   .superRefine((data, ctx) => {
+    if (data.convert_to_multi_key === true && !data.key.trim()) {
+      addRequiredIssue(ctx, 'key', ERROR_MESSAGES.REQUIRED_KEY)
+    }
+
     if ([3, 8, 36, 45].includes(data.type) && !data.base_url?.trim()) {
       addRequiredIssue(
         ctx,
@@ -318,6 +323,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   multi_key_type: 'random',
   batch_add_set_key_prefix_2_name: false,
   key_mode: 'append',
+  convert_to_multi_key: false,
   // Channel extra settings
   force_format: false,
   thinking_to_content: false,
@@ -456,6 +462,7 @@ export function transformChannelToFormDefaults(
     multi_key_type: channel.channel_info.multi_key_mode || 'random',
     batch_add_set_key_prefix_2_name: false,
     key_mode: 'append', // Default to append mode for editing multi-key channels
+    convert_to_multi_key: false,
     // Channel extra settings
     ...extraSettings,
     // Type-specific settings

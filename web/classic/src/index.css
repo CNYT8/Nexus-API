@@ -39,14 +39,14 @@ html.theme-switching *::after {
 
 .classic-header {
   --classic-header-frosted-fallback: rgba(255, 255, 255, 0.94);
-  --classic-header-frosted-surface: rgba(255, 255, 255, 0.58);
-  --classic-header-frosted-surface-deep: rgba(248, 250, 252, 0.38);
+  --classic-header-frosted-surface: rgba(255, 255, 255, 0.52);
+  --classic-header-frosted-surface-deep: rgba(248, 250, 252, 0.32);
   --classic-header-frosted-highlight: rgba(255, 255, 255, 0.54);
   --classic-header-frosted-edge: rgba(255, 255, 255, 0.76);
   --classic-header-frosted-lowlight: rgba(15, 23, 42, 0.055);
   --classic-header-frosted-shadow: rgba(15, 23, 42, 0.09);
   --classic-header-frosted-grain: rgba(255, 255, 255, 0.2);
-  --classic-header-frosted-blur: 18px;
+  --classic-header-frosted-blur: 16px;
   --classic-header-frosted-saturation: 165%;
   --classic-header-frosted-contrast: 104%;
   --classic-header-frosted-brightness: 102%;
@@ -58,14 +58,14 @@ html.theme-switching *::after {
 
 .dark .classic-header {
   --classic-header-frosted-fallback: rgba(12, 13, 17, 0.94);
-  --classic-header-frosted-surface: rgba(18, 19, 24, 0.62);
-  --classic-header-frosted-surface-deep: rgba(9, 10, 14, 0.48);
+  --classic-header-frosted-surface: rgba(18, 19, 24, 0.56);
+  --classic-header-frosted-surface-deep: rgba(9, 10, 14, 0.42);
   --classic-header-frosted-highlight: rgba(255, 255, 255, 0.13);
   --classic-header-frosted-edge: rgba(255, 255, 255, 0.18);
   --classic-header-frosted-lowlight: rgba(0, 0, 0, 0.22);
   --classic-header-frosted-shadow: rgba(0, 0, 0, 0.28);
   --classic-header-frosted-grain: rgba(255, 255, 255, 0.1);
-  --classic-header-frosted-blur: 18px;
+  --classic-header-frosted-blur: 16px;
   --classic-header-frosted-saturation: 138%;
   --classic-header-frosted-contrast: 106%;
   --classic-header-frosted-brightness: 98%;
@@ -162,7 +162,7 @@ html.theme-switching *::after {
     11px 13px,
     13px 11px;
   mix-blend-mode: soft-light;
-  opacity: 0.16;
+  opacity: 0.13;
 }
 
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
@@ -238,14 +238,14 @@ body[theme-mode='warm'] {
 
 body[theme-mode='warm'] .classic-header {
   --classic-header-frosted-fallback: rgba(255, 253, 248, 0.94);
-  --classic-header-frosted-surface: rgba(255, 249, 239, 0.6);
-  --classic-header-frosted-surface-deep: rgba(255, 242, 219, 0.4);
+  --classic-header-frosted-surface: rgba(255, 249, 239, 0.54);
+  --classic-header-frosted-surface-deep: rgba(255, 242, 219, 0.34);
   --classic-header-frosted-highlight: rgba(255, 255, 255, 0.56);
   --classic-header-frosted-edge: rgba(255, 255, 255, 0.76);
   --classic-header-frosted-lowlight: rgba(120, 53, 15, 0.06);
   --classic-header-frosted-shadow: rgba(120, 53, 15, 0.09);
   --classic-header-frosted-grain: rgba(255, 248, 230, 0.22);
-  --classic-header-frosted-blur: 18px;
+  --classic-header-frosted-blur: 16px;
   --classic-header-frosted-saturation: 148%;
   --classic-header-frosted-contrast: 103%;
   --classic-header-frosted-brightness: 102%;

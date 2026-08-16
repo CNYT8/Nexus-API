@@ -92,7 +92,7 @@
     "匹配文本（含此子串即命中，留空表示匹配任意）": "Match text (contains this substring to hit; empty matches any)",
     "替换文案，支持占位符 {message} {code} {status} ...": "Replacement text, supports placeholders {message} {code} {status} ...",
     "保存错误掩码设置": "Save Error Mask Settings",
-    "错误掩码用于在上游返回错误时按规则替换错误信息，避免向终端用户暴露敏感细节，并可同时覆盖响应的 HTTP 状态码。规则按从上到下顺序匹配，首条命中即应用。": "Error Mask replaces error messages from upstream by rule to avoid exposing sensitive details to end users, and can also override the HTTP status code of the response. Rules are matched top to bottom; the first hit applies.",
+    "错误掩码用于按规则替换上游错误信息，并可覆盖响应的 HTTP 状态码。规则优先匹配权重较高的项（1-10），权重相同时按从上到下顺序，首条命中即应用。": "Error Mask replaces upstream error messages by rule and can override the response HTTP status code. Rules with higher weights (1-10) are matched first; rules with the same weight retain their top-to-bottom order, and the first match is applied.",
     "新注册用户默认分组": "Default group for new users",
     "会员": "Member",
     "会员中心": "Membership Center",

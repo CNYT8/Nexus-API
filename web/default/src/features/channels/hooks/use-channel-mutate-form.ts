@@ -26,7 +26,7 @@ import {
   transformFormDataToUpdatePayload,
   type ChannelFormValues,
 } from '../lib'
-import type { Channel } from '../types'
+import type { Channel, UpdateChannelRequest } from '../types'
 
 type UseChannelMutateFormParams = {
   currentRow?: Channel | null
@@ -70,13 +70,27 @@ export function useChannelMutateForm(props: UseChannelMutateFormParams) {
           data,
           props.currentRow.id
         )
-        const payloadWithKeyMode =
-          props.isMultiKeyChannel && data.key_mode
+        const isConvertingToMultiKey =
+          data.convert_to_multi_key === true && !props.isMultiKeyChannel
+        const payloadWithKeyMode: UpdateChannelRequest = {
+          ...payload,
+          ...((props.isMultiKeyChannel || isConvertingToMultiKey) &&
+          data.key_mode
             ? {
-                ...payload,
-                key_mode: data.key_mode,
+                key_mode: isConvertingToMultiKey
+                  ? ('append' as const)
+                  : data.key_mode,
               }
-            : payload
+            : {}),
+          ...(props.isMultiKeyChannel || isConvertingToMultiKey
+            ? {
+                multi_key_mode: data.multi_key_type || 'random',
+                ...(isConvertingToMultiKey
+                  ? { convert_to_multi_key: true }
+                  : {}),
+              }
+            : {}),
+        }
 
         const response = await updateChannel(
           props.currentRow.id,

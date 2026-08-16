@@ -373,6 +373,7 @@ export function ChannelMutateDrawer({
   const multiKeyMode = form.watch('multi_key_mode')
   const multiKeyType = form.watch('multi_key_type')
   const keyMode = form.watch('key_mode')
+  const convertToMultiKey = form.watch('convert_to_multi_key') === true
   const currentGroups = form.watch('group')
   const currentType = form.watch('type')
   const currentBaseUrl = form.watch('base_url')
@@ -953,8 +954,11 @@ export function ChannelMutateDrawer({
   // Submit handler
   const onSubmit = useCallback(
     async (data: ChannelFormValues) => {
-      // Validate key is required when creating
-      if (!isEditing && !data.key?.trim()) {
+      // Validate key is required when creating or converting a single-key channel.
+      if (
+        (!isEditing || data.convert_to_multi_key === true) &&
+        !data.key?.trim()
+      ) {
         form.setError('key', {
           type: 'manual',
           message: ERROR_MESSAGES.REQUIRED_KEY,
@@ -1943,13 +1947,62 @@ export function ChannelMutateDrawer({
                         />
                       )}
 
+                      {isEditing && !isMultiKeyChannel && (
+                        <FormField
+                          control={form.control}
+                          name='convert_to_multi_key'
+                          render={({ field }) => (
+                            <FormItem
+                              className={sideDrawerSwitchItemClassName()}
+                            >
+                              <div className='flex flex-col gap-0.5'>
+                                <FormLabel>
+                                  {t(
+                                    'Multi-Key Mode (multiple keys, one channel)'
+                                  )}
+                                </FormLabel>
+                                <FormDescription className='text-xs'>
+                                  {t(
+                                    'Append mode: New keys will be added to the end of the existing key list'
+                                  )}
+                                </FormDescription>
+                              </div>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value === true}
+                                  onCheckedChange={(checked) => {
+                                    field.onChange(checked)
+                                    if (checked) {
+                                      form.setValue('key_mode', 'append')
+                                      if (!form.getValues('multi_key_type')) {
+                                        form.setValue(
+                                          'multi_key_type',
+                                          'random'
+                                        )
+                                      }
+                                    } else {
+                                      form.setValue('key', '', {
+                                        shouldDirty: true,
+                                        shouldValidate: true,
+                                      })
+                                    }
+                                  }}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                      )}
+
                       <FormField
                         control={form.control}
                         name='key'
                         render={({ field }) => {
                           const keyPlaceholder = (() => {
                             if (isEditing) {
-                              return t('Leave empty to keep existing key')
+                              return convertToMultiKey
+                                ? t(getKeyPromptForType(currentType))
+                                : t('Leave empty to keep existing key')
                             }
                             if (currentType === 33) {
                               if (awsKeyType === 'api_key') {
@@ -1989,9 +2042,13 @@ export function ChannelMutateDrawer({
                                   <span>
                                     {isEditing ? (
                                       <>
-                                        {t(
-                                          'Enter new key to update, or leave empty to keep current key'
-                                        )}
+                                        {convertToMultiKey
+                                          ? t(
+                                              'Append mode: New keys will be added to the end of the existing key list'
+                                            )
+                                          : t(
+                                              'Enter new key to update, or leave empty to keep current key'
+                                            )}
                                         {isMultiKeyChannel && (
                                           <span className='text-warning mt-1 block'>
                                             {t(
@@ -2200,7 +2257,10 @@ export function ChannelMutateDrawer({
                         />
                       )}
 
-                      {!isEditing && multiKeyMode === 'multi_to_single' && (
+                      {((!isEditing &&
+                        multiKeyMode === 'multi_to_single') ||
+                        (isEditing &&
+                          (convertToMultiKey || isMultiKeyChannel))) && (
                         <FormField
                           control={form.control}
                           name='multi_key_type'

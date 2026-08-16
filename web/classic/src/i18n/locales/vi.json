@@ -91,7 +91,7 @@
     "匹配文本（含此子串即命中，留空表示匹配任意）": "Văn bản khớp (chứa chuỗi con này là khớp; để trống khớp mọi thứ)",
     "替换文案，支持占位符 {message} {code} {status} ...": "Văn bản thay thế, hỗ trợ {message} {code} {status} ...",
     "保存错误掩码设置": "Lưu cài đặt mặt nạ lỗi",
-    "错误掩码用于在上游返回错误时按规则替换错误信息，避免向终端用户暴露敏感细节，并可同时覆盖响应的 HTTP 状态码。规则按从上到下顺序匹配，首条命中即应用。": "Mặt nạ lỗi thay thế thông báo lỗi từ thượng nguồn theo quy tắc để tránh lộ chi tiết nhạy cảm cho người dùng cuối, và có thể ghi đè mã trạng thái HTTP của phản hồi. Quy tắc khớp từ trên xuống; lần khớp đầu tiên được áp dụng.",
+    "错误掩码用于按规则替换上游错误信息，并可覆盖响应的 HTTP 状态码。规则优先匹配权重较高的项（1-10），权重相同时按从上到下顺序，首条命中即应用。": "Mặt nạ lỗi thay thế thông báo lỗi từ thượng nguồn theo quy tắc và có thể ghi đè mã trạng thái HTTP của phản hồi. Quy tắc có trọng số cao hơn (1-10) được ưu tiên khớp trước; nếu cùng trọng số, quy tắc được xét từ trên xuống và áp dụng kết quả khớp đầu tiên.",
     "新注册用户默认分组": "Nhóm mặc định cho người dùng mới đăng ký",
     "会员": "Hội viên",
     "会员中心": "Trung tâm hội viên",

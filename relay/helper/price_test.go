@@ -6,10 +6,12 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -59,6 +61,66 @@ func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	require.Equal(t, "stream", info.TieredBillingSnapshot.EstimatedTier)
 	require.Equal(t, billing_setting.BillingModeTieredExpr, info.TieredBillingSnapshot.BillingMode)
 	require.Equal(t, common.QuotaPerUnit, info.TieredBillingSnapshot.QuotaPerUnit)
+}
+
+func TestModelPriceHelperRatioPreConsumeUsesCompletionFallbackAndRatio(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	originalModelRatio := ratio_setting.ModelRatio2JSONString()
+	originalCompletionRatio := ratio_setting.CompletionRatio2JSONString()
+	originalGroupRatio := ratio_setting.GroupRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(originalModelRatio))
+		require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(originalCompletionRatio))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroupRatio))
+	})
+
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"security-ratio-model":2}`))
+	require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(`{"security-ratio-model":3}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1}`))
+
+	newContext := func() *gin.Context {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		ctx.Set("group", "default")
+		return ctx
+	}
+	newInfo := func(request dto.Request) *relaycommon.RelayInfo {
+		return &relaycommon.RelayInfo{
+			OriginModelName: "security-ratio-model",
+			UserGroup:       "default",
+			UsingGroup:      "default",
+			Request:         request,
+		}
+	}
+
+	fallback, err := ModelPriceHelper(
+		newContext(),
+		newInfo(&dto.GeneralOpenAIRequest{}),
+		1000,
+		&types.TokenCountMeta{},
+	)
+	require.NoError(t, err)
+	require.Equal(t, 51152, fallback.QuotaToPreConsume)
+
+	explicit, err := ModelPriceHelper(
+		newContext(),
+		newInfo(&dto.GeneralOpenAIRequest{}),
+		1000,
+		&types.TokenCountMeta{MaxTokens: 100},
+	)
+	require.NoError(t, err)
+	require.Equal(t, 2600, explicit.QuotaToPreConsume)
+
+	embedding, err := ModelPriceHelper(
+		newContext(),
+		newInfo(&dto.EmbeddingRequest{}),
+		1000,
+		&types.TokenCountMeta{},
+	)
+	require.NoError(t, err)
+	require.Equal(t, 2000, embedding.QuotaToPreConsume)
 }
 
 func TestModelPriceHelperTieredPreConsumeMaxTokensFallback(t *testing.T) {
@@ -120,6 +182,7 @@ func TestModelPriceHelperTieredPreConsumeMaxTokensFallback(t *testing.T) {
 				OriginModelName: "tiered-fallback-model",
 				UserGroup:       tc.group,
 				UsingGroup:      tc.group,
+				Request:         &dto.GeneralOpenAIRequest{},
 				RequestHeaders:  map[string]string{"Content-Type": "application/json"},
 				BillingRequestInput: &billingexpr.RequestInput{
 					Headers: map[string]string{"Content-Type": "application/json"},

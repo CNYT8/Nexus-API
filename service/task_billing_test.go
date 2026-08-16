@@ -250,6 +250,48 @@ func TestRefundTaskQuota_Subscription(t *testing.T) {
 	assert.Equal(t, model.LogTypeRefund, log.Type)
 }
 
+func TestRefundTaskQuota_SubscriptionDoesNotCrossPeriod(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID, subID = 20, 20, 20, 20
+	const preConsumed = 2000
+	const tokenRemain = 8000
+
+	seedUser(t, userID, 0)
+	seedToken(t, tokenID, userID, "sk-cross-period", tokenRemain)
+	seedChannel(t, channelID)
+	sub := &model.UserSubscription{
+		Id:            subID,
+		UserId:        userID,
+		AmountTotal:   100000,
+		AmountUsed:    3000,
+		Status:        "active",
+		StartTime:     50,
+		EndTime:       time.Now().Add(30 * 24 * time.Hour).Unix(),
+		LastResetTime: 200,
+	}
+	require.NoError(t, model.DB.Create(sub).Error)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceSubscription, subID)
+	task.SubmitTime = 150
+	task.PrivateData.SubscriptionPeriodStart = 100
+
+	RefundTaskQuota(ctx, task, "old-period task failed")
+
+	// The expired subscription period must not refund into the new period.
+	assert.Equal(t, int64(3000), getSubscriptionUsed(t, subID))
+	// Token quota is lifetime-scoped and still receives its task refund.
+	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, 0, task.Quota)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	var other map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(log.Other), &other))
+	assert.Equal(t, true, other["subscription_period_expired"])
+}
+
 func TestRefundTaskQuota_ZeroQuota(t *testing.T) {
 	truncate(t)
 	ctx := context.Background()

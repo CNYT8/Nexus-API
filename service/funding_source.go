@@ -37,7 +37,7 @@ func (w *WalletFunding) PreConsume(amount int) error {
 	if amount <= 0 {
 		return nil
 	}
-	if err := model.DecreaseUserQuota(w.userId, amount, false); err != nil {
+	if err := model.ReserveUserQuota(w.userId, amount); err != nil {
 		return err
 	}
 	w.consumed = amount
@@ -49,18 +49,24 @@ func (w *WalletFunding) Settle(delta int) error {
 		return nil
 	}
 	if delta > 0 {
-		return model.DecreaseUserQuota(w.userId, delta, false)
+		// Settlement records actual usage even when it exceeds the remaining
+		// wallet balance. The resulting debt blocks later atomic reservations.
+		return model.DecreaseUserQuotaDirect(w.userId, delta)
 	}
-	return model.IncreaseUserQuota(w.userId, -delta, false)
+	return model.IncreaseUserQuotaDirect(w.userId, -delta)
 }
 
 func (w *WalletFunding) Refund() error {
 	if w.consumed <= 0 {
 		return nil
 	}
-	// IncreaseUserQuota 是 quota += N 的非幂等操作，不能重试，否则会多退额度。
-	// 订阅的 RefundSubscriptionPreConsume 有 requestId 幂等保护所以可以重试。
-	return model.IncreaseUserQuota(w.userId, w.consumed, false)
+	// 钱包退款是 quota += N：仅在数据库成功后清零本地预扣状态，
+	// 使同一 Funding 实例的重复调用保持幂等；失败时保留状态供上层恢复。
+	if err := model.IncreaseUserQuotaDirect(w.userId, w.consumed); err != nil {
+		return err
+	}
+	w.consumed = 0
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -68,12 +74,15 @@ func (w *WalletFunding) Refund() error {
 // ---------------------------------------------------------------------------
 
 type SubscriptionFunding struct {
-	requestId      string
-	userId         int
-	modelName      string
-	amount         int64 // 预扣的订阅额度（subConsume）
-	subscriptionId int
-	preConsumed    int64
+	requestId         string
+	userId            int
+	modelName         string
+	amount            int64 // 预扣的订阅额度（subConsume）
+	subscriptionId    int
+	preConsumed       int64
+	periodStart       int64
+	operationTime     int64
+	lastSettleApplied bool
 	// 以下字段在 PreConsume 成功后填充，供 RelayInfo 同步使用
 	AmountTotal     int64
 	AmountUsedAfter int64
@@ -91,6 +100,7 @@ func (s *SubscriptionFunding) PreConsume(_ int) error {
 	}
 	s.subscriptionId = res.UserSubscriptionId
 	s.preConsumed = res.PreConsumed
+	s.periodStart = res.PeriodStart
 	s.AmountTotal = res.AmountTotal
 	s.AmountUsedAfter = res.AmountUsedAfter
 	// 获取订阅计划信息
@@ -105,7 +115,14 @@ func (s *SubscriptionFunding) Settle(delta int) error {
 	if delta == 0 {
 		return nil
 	}
-	return model.PostConsumeUserSubscriptionDelta(s.subscriptionId, int64(delta))
+	applied, err := model.SettleUserSubscriptionDelta(
+		s.subscriptionId,
+		int64(delta),
+		s.periodStart,
+		s.operationTime,
+	)
+	s.lastSettleApplied = applied
+	return err
 }
 
 func (s *SubscriptionFunding) Refund() error {

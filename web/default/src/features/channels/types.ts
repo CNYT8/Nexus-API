@@ -362,3 +362,9 @@ export interface AddChannelRequest {
   batch_add_set_key_prefix_2_name?: boolean
   channel: Partial<Channel>
 }
+
+export type UpdateChannelRequest = Partial<Channel> & {
+  key_mode?: 'append' | 'replace'
+  multi_key_mode?: 'random' | 'polling'
+  convert_to_multi_key?: boolean
+}

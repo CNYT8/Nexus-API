@@ -82,6 +82,43 @@ func TestApplyErrorMaskUpdatesClaudeRelayErrorMessage(t *testing.T) {
 	require.Equal(t, "masked claude error", apiErr.ToClaudeError().Message)
 }
 
+func TestApplyErrorMaskHigherWeightWins(t *testing.T) {
+	withErrorMaskConfig(t, true, `[
+		{"pattern":"upstream","replacement":"low priority mask","status":400,"weight":1},
+		{"pattern":"quota exhausted","replacement":"high priority mask","status":503,"weight":10}
+	]`)
+
+	apiErr := types.NewOpenAIError(errors.New("upstream quota exhausted"), types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests)
+
+	ApplyErrorMask(nil, apiErr)
+
+	require.Equal(t, "high priority mask", apiErr.Error())
+	require.Equal(t, http.StatusServiceUnavailable, apiErr.StatusCode)
+
+	statusCode, message := ApplyErrorMaskToMessage(
+		nil,
+		http.StatusTooManyRequests,
+		"upstream quota exhausted",
+		"rate_limit_exceeded",
+		"rate_limit_error",
+	)
+	require.Equal(t, http.StatusServiceUnavailable, statusCode)
+	require.Equal(t, "high priority mask", message)
+}
+
+func TestApplyErrorMaskEqualWeightKeepsConfiguredOrder(t *testing.T) {
+	withErrorMaskConfig(t, true, `[
+		{"pattern":"upstream","replacement":"first mask","status":0,"weight":7},
+		{"pattern":"quota exhausted","replacement":"second mask","status":0,"weight":7}
+	]`)
+
+	apiErr := types.NewOpenAIError(errors.New("upstream quota exhausted"), types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests)
+
+	ApplyErrorMask(nil, apiErr)
+
+	require.Equal(t, "first mask", apiErr.Error())
+}
+
 func withErrorMaskConfig(t *testing.T, enabled bool, rules string) {
 	t.Helper()
 

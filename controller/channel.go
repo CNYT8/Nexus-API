@@ -1037,8 +1037,131 @@ func DeleteChannelBatch(c *gin.Context) {
 
 type PatchChannel struct {
 	model.Channel
-	MultiKeyMode *string `json:"multi_key_mode"`
-	KeyMode      *string `json:"key_mode"` // 多key模式下密钥覆盖或者追加
+	MultiKeyMode      *string `json:"multi_key_mode"`
+	KeyMode           *string `json:"key_mode"` // 多key模式下密钥覆盖或者追加
+	ConvertToMultiKey *bool   `json:"convert_to_multi_key"`
+}
+
+func normalizeMultiKeyMode(raw *string) (constant.MultiKeyMode, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return constant.MultiKeyModeRandom, nil
+	}
+	mode := constant.MultiKeyMode(strings.TrimSpace(*raw))
+	switch mode {
+	case constant.MultiKeyModeRandom, constant.MultiKeyModePolling:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("不支持的多密钥使用策略: %s", *raw)
+	}
+}
+
+func usesVertexJSONKey(channel *model.Channel, originChannel *model.Channel) bool {
+	if channel.Type != constant.ChannelTypeVertexAi {
+		return false
+	}
+	settingsChannel := channel
+	if strings.TrimSpace(channel.OtherSettings) == "" {
+		settingsChannel = originChannel
+	}
+	return settingsChannel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey
+}
+
+func parseKeysForSingleToMultiKeyConversion(raw string, vertexJSON bool) ([]string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	if !vertexJSON {
+		return splitStoredChannelKeys(trimmed), nil
+	}
+	if strings.HasPrefix(trimmed, "[") {
+		return getVertexArrayKeys(trimmed)
+	}
+	var keyObject map[string]interface{}
+	if err := json.Unmarshal([]byte(trimmed), &keyObject); err != nil {
+		return nil, fmt.Errorf("Vertex AI 密钥必须是标准的 JSON 对象: %w", err)
+	}
+	if len(keyObject) == 0 {
+		return nil, fmt.Errorf("Vertex AI 密钥不能为空")
+	}
+	encoded, err := json.Marshal(keyObject)
+	if err != nil {
+		return nil, fmt.Errorf("Vertex AI key JSON 编码失败: %w", err)
+	}
+	return []string{string(encoded)}, nil
+}
+
+func mergeUniqueChannelKeys(keyGroups ...[]string) []string {
+	merged := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, keys := range keyGroups {
+		for _, key := range keys {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			merged = append(merged, key)
+		}
+	}
+	return merged
+}
+
+func applySingleToMultiKeyConversion(channel *PatchChannel, originChannel *model.Channel) (bool, error) {
+	if channel.ConvertToMultiKey == nil || !*channel.ConvertToMultiKey || originChannel.ChannelInfo.IsMultiKey {
+		return false, nil
+	}
+	if channel.Type != originChannel.Type {
+		return true, fmt.Errorf("转换为多密钥模式时不能同时更改渠道类型")
+	}
+	if strings.TrimSpace(channel.Key) == "" {
+		return true, fmt.Errorf("转换为多密钥模式时必须提供至少一个新密钥")
+	}
+
+	mode, err := normalizeMultiKeyMode(channel.MultiKeyMode)
+	if err != nil {
+		return true, err
+	}
+	channel.ChannelInfo.MultiKeyMode = mode
+
+	if channel.Type == constant.ChannelTypeCodex {
+		appendMode := "append"
+		channel.KeyMode = &appendMode
+		if err := applyCodexChannelKeyUpdate(channel, originChannel); err != nil {
+			return true, err
+		}
+		if !channel.ChannelInfo.IsMultiKey || channel.ChannelInfo.MultiKeySize < 2 {
+			return true, fmt.Errorf("转换后至少需要两个不同的配置")
+		}
+		return true, nil
+	}
+
+	vertexJSON := usesVertexJSONKey(&channel.Channel, originChannel)
+	existingKeys, err := parseKeysForSingleToMultiKeyConversion(originChannel.Key, vertexJSON)
+	if err != nil {
+		return true, err
+	}
+	newKeys, err := parseKeysForSingleToMultiKeyConversion(channel.Key, vertexJSON)
+	if err != nil {
+		return true, err
+	}
+	mergedKeys := mergeUniqueChannelKeys(existingKeys, newKeys)
+	if len(mergedKeys) < 2 {
+		return true, fmt.Errorf("转换后至少需要两个不同的密钥")
+	}
+
+	channel.Key = strings.Join(mergedKeys, "\n")
+	channel.ChannelInfo.IsMultiKey = true
+	channel.ChannelInfo.MultiKeySize = len(mergedKeys)
+	channel.ChannelInfo.MultiKeyStatusList = nil
+	channel.ChannelInfo.MultiKeyDisabledReason = nil
+	channel.ChannelInfo.MultiKeyDisabledTime = nil
+	channel.ChannelInfo.MultiKeyPollingIndex = 0
+	channel.ChannelInfo.MultiKeyMode = mode
+	return true, nil
 }
 
 func UpdateChannel(c *gin.Context) {
@@ -1077,21 +1200,39 @@ func UpdateChannel(c *gin.Context) {
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
 	channel.ChannelInfo = originChannel.ChannelInfo
 
-	// If the request explicitly specifies a new MultiKeyMode, apply it on top of the original info.
+	// If the request explicitly specifies a new MultiKeyMode, validate and apply it on top of the original info.
 	if channel.MultiKeyMode != nil && *channel.MultiKeyMode != "" {
-		channel.ChannelInfo.MultiKeyMode = constant.MultiKeyMode(*channel.MultiKeyMode)
+		mode, modeErr := normalizeMultiKeyMode(channel.MultiKeyMode)
+		if modeErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": modeErr.Error(),
+			})
+			return
+		}
+		channel.ChannelInfo.MultiKeyMode = mode
 	}
 
-	if err := applyCodexChannelKeyUpdate(&channel, originChannel); err != nil {
+	convertedToMultiKey, err := applySingleToMultiKeyConversion(&channel, originChannel)
+	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": err.Error(),
 		})
 		return
 	}
+	if !convertedToMultiKey {
+		if err := applyCodexChannelKeyUpdate(&channel, originChannel); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	}
 
-	// 处理多key模式下的密钥追加/覆盖逻辑
-	if channel.Type != constant.ChannelTypeCodex && channel.KeyMode != nil && channel.ChannelInfo.IsMultiKey {
+	// 处理原有多key模式下的密钥追加/覆盖逻辑；单转多已在上方完成合并。
+	if !convertedToMultiKey && channel.Type != constant.ChannelTypeCodex && channel.KeyMode != nil && channel.ChannelInfo.IsMultiKey {
 		switch *channel.KeyMode {
 		case "append":
 			// 追加模式：将新密钥添加到现有密钥列表

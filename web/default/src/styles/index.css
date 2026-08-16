@@ -81,14 +81,14 @@ For commercial licensing, please contact support@quantumnous.com
 /* Handcrafted frosted header material shared by authenticated and public layouts. */
 .nexus-frosted-glass-layer {
   --header-frosted-fallback: rgba(255, 255, 255, 0.94);
-  --header-frosted-surface: rgba(255, 255, 255, 0.58);
-  --header-frosted-surface-deep: rgba(248, 250, 252, 0.38);
+  --header-frosted-surface: rgba(255, 255, 255, 0.52);
+  --header-frosted-surface-deep: rgba(248, 250, 252, 0.32);
   --header-frosted-highlight: rgba(255, 255, 255, 0.54);
   --header-frosted-edge: rgba(255, 255, 255, 0.76);
   --header-frosted-lowlight: rgba(15, 23, 42, 0.055);
   --header-frosted-shadow: rgba(15, 23, 42, 0.09);
   --header-frosted-grain: rgba(255, 255, 255, 0.2);
-  --header-frosted-blur: 18px;
+  --header-frosted-blur: 16px;
   --header-frosted-saturation: 165%;
   --header-frosted-contrast: 104%;
   --header-frosted-brightness: 102%;
@@ -115,8 +115,8 @@ For commercial licensing, please contact support@quantumnous.com
 
 .dark .nexus-frosted-glass-layer {
   --header-frosted-fallback: rgba(12, 13, 17, 0.94);
-  --header-frosted-surface: rgba(18, 19, 24, 0.62);
-  --header-frosted-surface-deep: rgba(9, 10, 14, 0.48);
+  --header-frosted-surface: rgba(18, 19, 24, 0.56);
+  --header-frosted-surface-deep: rgba(9, 10, 14, 0.42);
   --header-frosted-highlight: rgba(255, 255, 255, 0.13);
   --header-frosted-edge: rgba(255, 255, 255, 0.18);
   --header-frosted-lowlight: rgba(0, 0, 0, 0.22);
@@ -168,7 +168,7 @@ For commercial licensing, please contact support@quantumnous.com
     11px 13px,
     13px 11px;
   mix-blend-mode: soft-light;
-  opacity: 0.16;
+  opacity: 0.13;
 }
 
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {

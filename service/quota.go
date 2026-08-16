@@ -216,12 +216,16 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 
 	// record all the consume log even if quota is 0
 	if totalTokens == 0 {
-		// in this case, must be some error happened
-		// we cannot just return, because we may have to return the pre-consumed quota
-		quota = 0
-		logContent += "（可能是上游超时）"
-		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
-			"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, modelName, relayInfo.FinalPreConsumedQuota))
+		// Missing usage on an otherwise successful response is not free: retain
+		// the reservation so the request cannot bypass billing.
+		quota = conservativeSettlementQuota(relayInfo)
+		logContent += "（上游无计费信息，按预扣额度保守结算）"
+		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, settle with pre-consumed quota, userId %d, channelId %d, "+
+			"tokenId %d, model %s, pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, modelName, quota))
+		if quota > 0 {
+			model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
+			model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
+		}
 	} else {
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
@@ -339,12 +343,16 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 
 	// record all the consume log even if quota is 0
 	if totalTokens == 0 {
-		// in this case, must be some error happened
-		// we cannot just return, because we may have to return the pre-consumed quota
-		quota = 0
-		logContent += "（可能是上游超时）"
-		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
-			"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, relayInfo.OriginModelName, relayInfo.FinalPreConsumedQuota))
+		// Missing usage on an otherwise successful response is not free: retain
+		// the reservation so the request cannot bypass billing.
+		quota = conservativeSettlementQuota(relayInfo)
+		logContent += "（上游无计费信息，按预扣额度保守结算）"
+		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, settle with pre-consumed quota, userId %d, channelId %d, "+
+			"tokenId %d, model %s, pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, relayInfo.OriginModelName, quota))
+		if quota > 0 {
+			model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
+			model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
+		}
 	} else {
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
@@ -384,49 +392,94 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 }
 
 func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
+	if relayInfo == nil {
+		return errors.New("relayInfo is nil")
+	}
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
-	if relayInfo.IsPlayground {
+	if relayInfo.IsPlayground || quota == 0 {
 		return nil
 	}
-	//if relayInfo.TokenUnlimited {
-	//	return nil
-	//}
-	token, err := model.GetTokenByKey(relayInfo.TokenKey, false)
-	if err != nil {
-		return err
+	if relayInfo.TokenUnlimited {
+		// Unlimited tokens still track usage, but do not use a finite-balance guard.
+		return model.DecreaseTokenQuotaDirect(relayInfo.TokenId, relayInfo.TokenKey, quota)
 	}
-	if !relayInfo.TokenUnlimited && token.RemainQuota < quota {
-		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
-	}
-	err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
-	if err != nil {
+	if err := model.ReserveTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota); err != nil {
+		if errors.Is(err, model.ErrInsufficientQuota) {
+			token, queryErr := model.GetTokenByKey(relayInfo.TokenKey, true)
+			if queryErr != nil {
+				return err
+			}
+			return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
+		}
 		return err
 	}
 	return nil
 }
 
+func conservativeSettlementQuota(relayInfo *relaycommon.RelayInfo) int {
+	if relayInfo == nil {
+		return 0
+	}
+	// A known zero-ratio/free group is genuinely free. Do not retain a reserve
+	// merely because an earlier auto-group attempt used a paid ratio.
+	knownPricing := relayInfo.PriceData.UsePrice || relayInfo.PriceData.ModelRatio != 0 || relayInfo.TieredBillingSnapshot != nil
+	if relayInfo.PriceData.FreeModel || (knownPricing && relayInfo.PriceData.GroupRatioInfo.GroupRatio == 0) {
+		return 0
+	}
+	quota := relayInfo.FinalPreConsumedQuota
+	if relayInfo.Billing != nil {
+		quota = relayInfo.Billing.GetPreConsumedQuota()
+	}
+	if quota < 0 {
+		return 0
+	}
+	return quota
+}
+
 func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) (err error) {
+	if relayInfo == nil {
+		return errors.New("relayInfo is nil")
+	}
+	if quota == 0 {
+		if sendEmail && preConsumedQuota != 0 {
+			checkAndSendQuotaNotify(relayInfo, quota, preConsumedQuota)
+		}
+		return nil
+	}
 
 	// 1) Consume from wallet quota OR subscription item
-	if relayInfo != nil && relayInfo.BillingSource == BillingSourceSubscription {
+	if relayInfo.BillingSource == BillingSourceSubscription {
 		if relayInfo.SubscriptionId == 0 {
 			return errors.New("subscription id is missing")
 		}
 		delta := int64(quota)
 		if delta != 0 {
-			if err := model.PostConsumeUserSubscriptionDelta(relayInfo.SubscriptionId, delta); err != nil {
-				return err
+			operationTime := common.GetTimestamp()
+			if !relayInfo.StartTime.IsZero() {
+				operationTime = relayInfo.StartTime.Unix()
 			}
-			relayInfo.SubscriptionPostDelta += delta
+			applied, adjustErr := model.SettleUserSubscriptionDelta(
+				relayInfo.SubscriptionId,
+				delta,
+				relayInfo.SubscriptionPeriodStart,
+				operationTime,
+			)
+			if adjustErr != nil {
+				return adjustErr
+			}
+			if applied {
+				relayInfo.SubscriptionPostDelta += delta
+			}
 		}
 	} else {
-		// Wallet
+		// Wallet settlement is written through immediately. Positive deltas may
+		// create debt so successful upstream usage is never dropped.
 		if quota > 0 {
-			err = model.DecreaseUserQuota(relayInfo.UserId, quota, false)
+			err = model.DecreaseUserQuotaDirect(relayInfo.UserId, quota)
 		} else {
-			err = model.IncreaseUserQuota(relayInfo.UserId, -quota, false)
+			err = model.IncreaseUserQuotaDirect(relayInfo.UserId, -quota)
 		}
 		if err != nil {
 			return err
@@ -435,9 +488,9 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 
 	if !relayInfo.IsPlayground {
 		if quota > 0 {
-			err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
+			err = model.DecreaseTokenQuotaDirect(relayInfo.TokenId, relayInfo.TokenKey, quota)
 		} else {
-			err = model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, -quota)
+			err = model.IncreaseTokenQuotaDirect(relayInfo.TokenId, relayInfo.TokenKey, -quota)
 		}
 		if err != nil {
 			return err

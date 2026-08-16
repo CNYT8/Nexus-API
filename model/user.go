@@ -22,6 +22,8 @@ import (
 
 const UserNameMaxLength = 20
 
+var ErrInsufficientQuota = errors.New("insufficient quota")
+
 var userSortColumns = map[string]string{
 	"id":            "id",
 	"username":      "username",
@@ -1084,6 +1086,95 @@ func decreaseUserQuota(id int, quota int) (err error) {
 		return err
 	}
 	return err
+}
+
+// ReserveUserQuota atomically reserves quota without allowing the wallet to go negative.
+// It always writes through to the database so concurrent requests and multi-instance
+// deployments share the same balance guard; cache updates happen only after DB success.
+func ReserveUserQuota(id int, quota int) error {
+	if id <= 0 {
+		return errors.New("invalid user id")
+	}
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	if quota == 0 {
+		return nil
+	}
+	result := DB.Model(&User{}).
+		Where("id = ? AND quota >= ?", id, quota).
+		Update("quota", gorm.Expr("quota - ?", quota))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrInsufficientQuota
+	}
+	gopool.Go(func() {
+		if err := cacheDecrUserQuota(id, int64(quota)); err != nil {
+			common.SysLog("failed to decrease user quota cache after reserve: " + err.Error())
+		}
+	})
+	return nil
+}
+
+// DecreaseUserQuotaDirect records a debit immediately and updates Redis only
+// after the database write succeeds. Settlement debits may make quota negative
+// so actual usage is retained as debt instead of being silently dropped.
+func DecreaseUserQuotaDirect(id int, quota int) error {
+	if id <= 0 {
+		return errors.New("invalid user id")
+	}
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	if quota == 0 {
+		return nil
+	}
+	result := DB.Model(&User{}).
+		Where("id = ?", id).
+		Update("quota", gorm.Expr("quota - ?", quota))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("user %d not found while debiting quota", id)
+	}
+	gopool.Go(func() {
+		if err := cacheDecrUserQuota(id, int64(quota)); err != nil {
+			common.SysLog("failed to decrease user quota cache after direct debit: " + err.Error())
+		}
+	})
+	return nil
+}
+
+// IncreaseUserQuotaDirect records a refund immediately and updates Redis only
+// after the database write succeeds.
+func IncreaseUserQuotaDirect(id int, quota int) error {
+	if id <= 0 {
+		return errors.New("invalid user id")
+	}
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	if quota == 0 {
+		return nil
+	}
+	result := DB.Model(&User{}).
+		Where("id = ?", id).
+		Update("quota", gorm.Expr("quota + ?", quota))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("user %d not found while refunding quota", id)
+	}
+	gopool.Go(func() {
+		if err := cacheIncrUserQuota(id, int64(quota)); err != nil {
+			common.SysLog("failed to increase user quota cache after direct refund: " + err.Error())
+		}
+	})
+	return nil
 }
 
 func DeltaUpdateUserQuota(id int, delta int) (err error) {

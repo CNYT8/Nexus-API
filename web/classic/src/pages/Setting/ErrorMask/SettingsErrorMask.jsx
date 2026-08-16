@@ -116,7 +116,7 @@ export default function SettingsErrorMask(props) {
           <Banner
             type='info'
             description={t(
-              '错误掩码用于在上游返回错误时按规则替换错误信息，避免向终端用户暴露敏感细节，并可同时覆盖响应的 HTTP 状态码。规则按从上到下顺序匹配，首条命中即应用。',
+              '错误掩码用于按规则替换上游错误信息，并可覆盖响应的 HTTP 状态码。规则优先匹配权重较高的项（1-10），权重相同时按从上到下顺序，首条命中即应用。',
             )}
             style={{ marginBottom: 16 }}
           />

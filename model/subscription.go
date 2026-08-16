@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +37,8 @@ const (
 var (
 	ErrSubscriptionOrderNotFound      = errors.New("subscription order not found")
 	ErrSubscriptionOrderStatusInvalid = errors.New("subscription order status invalid")
+	ErrSubscriptionPeriodChanged      = errors.New("subscription quota period changed")
+	errSubscriptionPreConsumeRetry    = errors.New("retry subscription pre-consume")
 )
 
 const (
@@ -270,6 +273,9 @@ type UserSubscription struct {
 
 	LastResetTime int64 `json:"last_reset_time" gorm:"type:bigint;default:0"`
 	NextResetTime int64 `json:"next_reset_time" gorm:"type:bigint;default:0;index"`
+	// QuotaPeriodStart is an independent, monotonic period marker. It changes on
+	// every scheduled or manual quota reset without altering reset scheduling.
+	QuotaPeriodStart int64 `json:"quota_period_start" gorm:"type:bigint;not null;default:0"`
 
 	UpgradeGroup  string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
 	PrevUserGroup string `json:"prev_user_group" gorm:"type:varchar(64);default:''"`
@@ -280,6 +286,7 @@ type UserSubscription struct {
 
 func (s *UserSubscription) BeforeCreate(tx *gorm.DB) error {
 	now := common.GetTimestamp()
+	ensureSubscriptionQuotaPeriod(s, now)
 	s.CreatedAt = now
 	s.UpdatedAt = now
 	return nil
@@ -519,20 +526,21 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 		}
 	}
 	sub := &UserSubscription{
-		UserId:        userId,
-		PlanId:        plan.Id,
-		AmountTotal:   plan.TotalAmount,
-		AmountUsed:    0,
-		StartTime:     now.Unix(),
-		EndTime:       endUnix,
-		Status:        "active",
-		Source:        source,
-		LastResetTime: lastReset,
-		NextResetTime: nextReset,
-		UpgradeGroup:  upgradeGroup,
-		PrevUserGroup: prevGroup,
-		CreatedAt:     common.GetTimestamp(),
-		UpdatedAt:     common.GetTimestamp(),
+		UserId:           userId,
+		PlanId:           plan.Id,
+		AmountTotal:      plan.TotalAmount,
+		AmountUsed:       0,
+		StartTime:        now.Unix(),
+		EndTime:          endUnix,
+		Status:           "active",
+		Source:           source,
+		LastResetTime:    lastReset,
+		NextResetTime:    nextReset,
+		QuotaPeriodStart: now.Unix(),
+		UpgradeGroup:     upgradeGroup,
+		PrevUserGroup:    prevGroup,
+		CreatedAt:        common.GetTimestamp(),
+		UpdatedAt:        common.GetTimestamp(),
 	}
 	if err := tx.Create(sub).Error; err != nil {
 		return nil, err
@@ -966,9 +974,68 @@ func AdminDeleteUserSubscription(userSubscriptionId int) (string, error) {
 	return "", nil
 }
 
+func addSubscriptionAmountChecked(current int64, delta int64) (int64, error) {
+	if delta > 0 && current > math.MaxInt64-delta {
+		return 0, errors.New("subscription amount overflow")
+	}
+	if delta < 0 && current < math.MinInt64-delta {
+		return 0, errors.New("subscription amount underflow")
+	}
+	return current + delta, nil
+}
+
+func currentSubscriptionQuotaPeriodStart(sub *UserSubscription) int64 {
+	if sub == nil {
+		return 0
+	}
+	periodStart := sub.QuotaPeriodStart
+	// Backward/downgrade compatibility: an original New API instance does not
+	// know quota_period_start, but it still advances last_reset_time. Prefer the
+	// newer marker so a reset performed there cannot revive an old-period refund.
+	if sub.LastResetTime > periodStart {
+		periodStart = sub.LastResetTime
+	}
+	if periodStart <= 0 {
+		periodStart = sub.StartTime
+	}
+	return periodStart
+}
+
+func ensureSubscriptionQuotaPeriod(sub *UserSubscription, now int64) {
+	if sub == nil {
+		return
+	}
+	periodStart := currentSubscriptionQuotaPeriodStart(sub)
+	if periodStart <= 0 {
+		periodStart = now
+	}
+	sub.QuotaPeriodStart = periodStart
+}
+
+func advanceSubscriptionQuotaPeriod(sub *UserSubscription, candidate int64) error {
+	if sub == nil {
+		return errors.New("subscription is nil")
+	}
+	current := currentSubscriptionQuotaPeriodStart(sub)
+	if candidate <= current {
+		if current == math.MaxInt64 {
+			return errors.New("subscription quota period overflow")
+		}
+		candidate = current + 1
+	}
+	if candidate <= 0 {
+		return errors.New("invalid subscription quota period")
+	}
+	sub.QuotaPeriodStart = candidate
+	return nil
+}
+
 func resetUserSubscriptionTx(tx *gorm.DB, sub *UserSubscription, plan *SubscriptionPlan, now int64, advanceResetTime bool) error {
 	if tx == nil || sub == nil || plan == nil {
 		return errors.New("invalid reset args")
+	}
+	if err := advanceSubscriptionQuotaPeriod(sub, now); err != nil {
+		return err
 	}
 	sub.AmountUsed = 0
 	if advanceResetTime {
@@ -1091,6 +1158,7 @@ type SubscriptionPreConsumeResult struct {
 	AmountTotal        int64
 	AmountUsedBefore   int64
 	AmountUsedAfter    int64
+	PeriodStart        int64
 }
 
 // ExpireDueSubscriptions marks expired subscriptions and handles group downgrade.
@@ -1187,7 +1255,8 @@ type SubscriptionPreConsumeRecord struct {
 	UserId             int    `json:"user_id" gorm:"index"`
 	UserSubscriptionId int    `json:"user_subscription_id" gorm:"index"`
 	PreConsumed        int64  `json:"pre_consumed" gorm:"type:bigint;not null;default:0"`
-	Status             string `json:"status" gorm:"type:varchar(32);index"` // consumed/refunded
+	PeriodStart        int64  `json:"period_start" gorm:"type:bigint;not null;default:0"`
+	Status             string `json:"status" gorm:"type:varchar(32);index"` // consumed/refunded/period_expired
 	CreatedAt          int64  `json:"created_at" gorm:"bigint"`
 	UpdatedAt          int64  `json:"updated_at" gorm:"bigint;index"`
 }
@@ -1234,10 +1303,30 @@ func maybeResetUserSubscriptionWithPlanTx(tx *gorm.DB, sub *UserSubscription, pl
 		}
 		return nil
 	}
+	if err := advanceSubscriptionQuotaPeriod(sub, base.Unix()); err != nil {
+		return err
+	}
 	sub.AmountUsed = 0
 	sub.LastResetTime = base.Unix()
 	sub.NextResetTime = next
 	return tx.Save(sub).Error
+}
+
+func subscriptionPeriodMatches(periodStart int64, operationTime int64, sub *UserSubscription) bool {
+	if sub == nil {
+		return false
+	}
+	currentPeriodStart := currentSubscriptionQuotaPeriodStart(sub)
+	if periodStart > 0 {
+		return periodStart == currentPeriodStart
+	}
+	// Compatibility for records/tasks created before period_start existed.
+	// A legacy operation is current only when it was created after the latest
+	// known reset marker.
+	if currentPeriodStart <= 0 {
+		return true
+	}
+	return operationTime > 0 && operationTime >= currentPeriodStart
 }
 
 // PreConsumeUserSubscription pre-consumes from any active subscription total quota.
@@ -1255,96 +1344,117 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 
 	returnValue := &SubscriptionPreConsumeResult{}
 
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		var existing SubscriptionPreConsumeRecord
-		query := tx.Where("request_id = ?", requestId).Limit(1).Find(&existing)
-		if query.Error != nil {
-			return query.Error
-		}
-		if query.RowsAffected > 0 {
-			if existing.Status == "refunded" {
-				return errors.New("subscription pre-consume already refunded")
+	var err error
+	var lastCreateErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		err = DB.Transaction(func(tx *gorm.DB) error {
+			var existing SubscriptionPreConsumeRecord
+			query := lockForUpdate(tx).Where("request_id = ?", requestId).Limit(1).Find(&existing)
+			if query.Error != nil {
+				return query.Error
 			}
-			var sub UserSubscription
-			if err := tx.Where("id = ?", existing.UserSubscriptionId).First(&sub).Error; err != nil {
-				return err
+			if query.RowsAffected > 0 {
+				if existing.UserId != userId {
+					return errors.New("subscription pre-consume request belongs to another user")
+				}
+				if existing.Status != "consumed" {
+					return fmt.Errorf("subscription pre-consume is %s", existing.Status)
+				}
+				var sub UserSubscription
+				if err := lockForUpdate(tx).Where("id = ?", existing.UserSubscriptionId).First(&sub).Error; err != nil {
+					return err
+				}
+				if !subscriptionPeriodMatches(existing.PeriodStart, existing.CreatedAt, &sub) {
+					return ErrSubscriptionPeriodChanged
+				}
+				returnValue.UserSubscriptionId = sub.Id
+				returnValue.PreConsumed = existing.PreConsumed
+				returnValue.AmountTotal = sub.AmountTotal
+				returnValue.AmountUsedBefore = sub.AmountUsed
+				returnValue.AmountUsedAfter = sub.AmountUsed
+				returnValue.PeriodStart = currentSubscriptionQuotaPeriodStart(&sub)
+				return nil
 			}
-			returnValue.UserSubscriptionId = sub.Id
-			returnValue.PreConsumed = existing.PreConsumed
-			returnValue.AmountTotal = sub.AmountTotal
-			returnValue.AmountUsedBefore = sub.AmountUsed
-			returnValue.AmountUsedAfter = sub.AmountUsed
-			return nil
-		}
 
-		var subs []UserSubscription
-		if err := lockForUpdate(tx).
-			Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
-			Order("end_time asc, id asc").
-			Find(&subs).Error; err != nil {
-			return errors.New("no active subscription")
-		}
-		if len(subs) == 0 {
-			return errors.New("no active subscription")
-		}
-		for _, candidate := range subs {
-			sub := candidate
-			plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
-			if err != nil {
+			var subs []UserSubscription
+			if err := lockForUpdate(tx).
+				Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
+				Order("end_time asc, id asc").
+				Find(&subs).Error; err != nil {
 				return err
 			}
-			if err := maybeResetUserSubscriptionWithPlanTx(tx, &sub, plan, now); err != nil {
-				return err
+			if len(subs) == 0 {
+				return errors.New("no active subscription")
 			}
-			usedBefore := sub.AmountUsed
-			if sub.AmountTotal > 0 {
-				remain := sub.AmountTotal - usedBefore
-				if remain < amount {
-					continue
+			for _, candidate := range subs {
+				sub := candidate
+				plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+				if err != nil {
+					return err
 				}
-			}
-			record := &SubscriptionPreConsumeRecord{
-				RequestId:          requestId,
-				UserId:             userId,
-				UserSubscriptionId: sub.Id,
-				PreConsumed:        amount,
-				Status:             "consumed",
-			}
-			if err := tx.Create(record).Error; err != nil {
-				var dup SubscriptionPreConsumeRecord
-				if err2 := tx.Where("request_id = ?", requestId).First(&dup).Error; err2 == nil {
-					if dup.Status == "refunded" {
-						return errors.New("subscription pre-consume already refunded")
+				if err := maybeResetUserSubscriptionWithPlanTx(tx, &sub, plan, now); err != nil {
+					return err
+				}
+				ensureSubscriptionQuotaPeriod(&sub, now)
+				usedBefore := sub.AmountUsed
+				if usedBefore < 0 || sub.AmountTotal < 0 {
+					return errors.New("invalid negative subscription amount")
+				}
+				if sub.AmountTotal > 0 {
+					remain := sub.AmountTotal - usedBefore
+					if remain < amount {
+						continue
 					}
-					returnValue.UserSubscriptionId = sub.Id
-					returnValue.PreConsumed = dup.PreConsumed
-					returnValue.AmountTotal = sub.AmountTotal
-					returnValue.AmountUsedBefore = sub.AmountUsed
-					returnValue.AmountUsedAfter = sub.AmountUsed
-					return nil
 				}
-				return err
+				record := &SubscriptionPreConsumeRecord{
+					RequestId:          requestId,
+					UserId:             userId,
+					UserSubscriptionId: sub.Id,
+					PreConsumed:        amount,
+					PeriodStart:        currentSubscriptionQuotaPeriodStart(&sub),
+					Status:             "consumed",
+				}
+				if createErr := tx.Create(record).Error; createErr != nil {
+					// Roll back the whole transaction before retrying. This is safe
+					// on PostgreSQL (where a unique violation aborts the transaction),
+					// MySQL, and SQLite. A request-id race is then resolved through
+					// the locked existing-record branch on the next attempt.
+					lastCreateErr = createErr
+					return errSubscriptionPreConsumeRetry
+				}
+				newUsed, addErr := addSubscriptionAmountChecked(sub.AmountUsed, amount)
+				if addErr != nil {
+					return addErr
+				}
+				sub.AmountUsed = newUsed
+				if err := tx.Save(&sub).Error; err != nil {
+					return err
+				}
+				returnValue.UserSubscriptionId = sub.Id
+				returnValue.PreConsumed = amount
+				returnValue.AmountTotal = sub.AmountTotal
+				returnValue.AmountUsedBefore = usedBefore
+				returnValue.AmountUsedAfter = sub.AmountUsed
+				returnValue.PeriodStart = currentSubscriptionQuotaPeriodStart(&sub)
+				return nil
 			}
-			sub.AmountUsed += amount
-			if err := tx.Save(&sub).Error; err != nil {
-				return err
-			}
-			returnValue.UserSubscriptionId = sub.Id
-			returnValue.PreConsumed = amount
-			returnValue.AmountTotal = sub.AmountTotal
-			returnValue.AmountUsedBefore = usedBefore
-			returnValue.AmountUsedAfter = sub.AmountUsed
-			return nil
+			return fmt.Errorf("subscription quota insufficient, need=%d", amount)
+		})
+		if !errors.Is(err, errSubscriptionPreConsumeRetry) {
+			break
 		}
-		return fmt.Errorf("subscription quota insufficient, need=%d", amount)
-	})
+	}
 	if err != nil {
+		if errors.Is(err, errSubscriptionPreConsumeRetry) && lastCreateErr != nil {
+			return nil, lastCreateErr
+		}
 		return nil, err
 	}
 	return returnValue, nil
 }
 
 // RefundSubscriptionPreConsume is idempotent and refunds pre-consumed subscription quota by requestId.
+// Refunds never cross quota reset periods: expired-period quota cannot be carried into a new period.
 func RefundSubscriptionPreConsume(requestId string) error {
 	if strings.TrimSpace(requestId) == "" {
 		return errors.New("requestId is empty")
@@ -1355,17 +1465,33 @@ func RefundSubscriptionPreConsume(requestId string) error {
 			Where("request_id = ?", requestId).First(&record).Error; err != nil {
 			return err
 		}
-		if record.Status == "refunded" {
+		if record.Status == "refunded" || record.Status == "period_expired" {
 			return nil
+		}
+		if record.Status != "consumed" {
+			return fmt.Errorf("invalid subscription pre-consume status: %s", record.Status)
 		}
 		if record.PreConsumed <= 0 {
 			record.Status = "refunded"
 			return tx.Save(&record).Error
 		}
-		if err := PostConsumeUserSubscriptionDelta(record.UserSubscriptionId, -record.PreConsumed); err != nil {
+		applied, err := adjustUserSubscriptionDeltaTx(
+			tx,
+			record.UserSubscriptionId,
+			-record.PreConsumed,
+			record.PeriodStart,
+			record.CreatedAt,
+			true,
+			false,
+		)
+		if err != nil {
 			return err
 		}
-		record.Status = "refunded"
+		if applied {
+			record.Status = "refunded"
+		} else {
+			record.Status = "period_expired"
+		}
 		return tx.Save(&record).Error
 	})
 }
@@ -1452,29 +1578,116 @@ func GetSubscriptionPlanInfoByUserSubscriptionId(userSubscriptionId int) (*Subsc
 	return info, nil
 }
 
-// Update subscription used amount by delta (positive consume more, negative refund).
-func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error {
+func adjustUserSubscriptionDeltaTx(
+	tx *gorm.DB,
+	userSubscriptionId int,
+	delta int64,
+	periodStart int64,
+	operationTime int64,
+	requireCurrentPeriod bool,
+	allowOverage bool,
+) (bool, error) {
+	if tx == nil {
+		return false, errors.New("tx is nil")
+	}
 	if userSubscriptionId <= 0 {
-		return errors.New("invalid userSubscriptionId")
+		return false, errors.New("invalid userSubscriptionId")
 	}
 	if delta == 0 {
-		return nil
+		return true, nil
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
-		var sub UserSubscription
-		if err := lockForUpdate(tx).
-			Where("id = ?", userSubscriptionId).
-			First(&sub).Error; err != nil {
-			return err
-		}
-		newUsed := sub.AmountUsed + delta
-		if newUsed < 0 {
-			newUsed = 0
-		}
-		if sub.AmountTotal > 0 && newUsed > sub.AmountTotal {
-			return fmt.Errorf("subscription used exceeds total, used=%d total=%d", newUsed, sub.AmountTotal)
-		}
-		sub.AmountUsed = newUsed
-		return tx.Save(&sub).Error
+	var sub UserSubscription
+	if err := lockForUpdate(tx).
+		Where("id = ?", userSubscriptionId).
+		First(&sub).Error; err != nil {
+		return false, err
+	}
+	if requireCurrentPeriod && !subscriptionPeriodMatches(periodStart, operationTime, &sub) {
+		return false, nil
+	}
+	if sub.AmountUsed < 0 || sub.AmountTotal < 0 {
+		return false, errors.New("invalid negative subscription amount")
+	}
+	newUsed, addErr := addSubscriptionAmountChecked(sub.AmountUsed, delta)
+	if addErr != nil {
+		return false, addErr
+	}
+	if newUsed < 0 {
+		newUsed = 0
+	}
+	if !allowOverage && sub.AmountTotal > 0 && newUsed > sub.AmountTotal {
+		return false, fmt.Errorf("subscription used exceeds total, used=%d total=%d", newUsed, sub.AmountTotal)
+	}
+	sub.AmountUsed = newUsed
+	if err := tx.Save(&sub).Error; err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func adjustUserSubscriptionDelta(
+	userSubscriptionId int,
+	delta int64,
+	periodStart int64,
+	operationTime int64,
+	requireCurrentPeriod bool,
+	allowOverage bool,
+) (bool, error) {
+	var applied bool
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		applied, err = adjustUserSubscriptionDeltaTx(
+			tx,
+			userSubscriptionId,
+			delta,
+			periodStart,
+			operationTime,
+			requireCurrentPeriod,
+			allowOverage,
+		)
+		return err
 	})
+	return applied, err
+}
+
+// PostConsumeUserSubscriptionDelta preserves the legacy capped adjustment behavior.
+func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error {
+	_, err := adjustUserSubscriptionDelta(userSubscriptionId, delta, 0, 0, false, false)
+	return err
+}
+
+// ReserveUserSubscriptionDelta extends an in-flight reservation only within the
+// period in which the original reservation was created.
+func ReserveUserSubscriptionDelta(userSubscriptionId int, delta int64, periodStart int64) error {
+	applied, err := adjustUserSubscriptionDelta(userSubscriptionId, delta, periodStart, common.GetTimestamp(), true, false)
+	if err != nil {
+		return err
+	}
+	if !applied {
+		return ErrSubscriptionPeriodChanged
+	}
+	return nil
+}
+
+// SettleUserSubscriptionDelta records actual usage. Positive deltas may exceed
+// the plan total so the overage remains visible and blocks later reservations;
+// negative deltas are applied only to their original quota period.
+func SettleUserSubscriptionDelta(userSubscriptionId int, delta int64, periodStart int64, operationTime int64) (bool, error) {
+	return adjustUserSubscriptionDelta(
+		userSubscriptionId,
+		delta,
+		periodStart,
+		operationTime,
+		delta < 0,
+		delta > 0,
+	)
+}
+
+// RefundUserSubscriptionDelta refunds a direct/task reservation only when the
+// subscription is still in the same quota period.
+func RefundUserSubscriptionDelta(userSubscriptionId int, amount int64, periodStart int64, operationTime int64) (bool, error) {
+	if amount < 0 {
+		return false, errors.New("refund amount cannot be negative")
+	}
+	return adjustUserSubscriptionDelta(userSubscriptionId, -amount, periodStart, operationTime, true, false)
 }

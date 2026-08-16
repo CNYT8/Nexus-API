@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -35,10 +36,23 @@ func modelPriceNotConfiguredError(modelName string, userId int) error {
 // https://docs.claude.com/en/docs/build-with-claude/prompt-caching#1-hour-cache-duration
 const claudeCacheCreation1hMultiplier = 6 / 3.75
 
-// defaultTieredPreConsumeMaxTokens is the fallback completion-token estimate
-// used for tiered expression pre-consume when the client omits max_tokens, so
-// the pre-consumed quota still reflects a plausible output cost in paid groups.
-const defaultTieredPreConsumeMaxTokens = 8192
+// defaultPreConsumeMaxTokens is the conservative completion-token estimate
+// used whenever a paid request omits max_tokens. Actual settlement refunds the
+// unused reservation, while the larger reserve prevents one request from
+// bypassing a finite wallet/subscription with an unbounded output.
+const defaultPreConsumeMaxTokens = 8192
+
+func requestMayGenerateText(request dto.Request) bool {
+	switch request.(type) {
+	case *dto.GeneralOpenAIRequest,
+		*dto.OpenAIResponsesRequest,
+		*dto.ClaudeRequest,
+		*dto.GeminiChatRequest:
+		return true
+	default:
+		return false
+	}
+}
 
 // HandleGroupRatio checks for "auto_group" in the context and updates the group ratio and relayInfo.UsingGroup if present
 func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.GroupRatioInfo {
@@ -98,10 +112,6 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	var audioCompletionRatio float64
 	var freeModel bool
 	if !usePrice {
-		preConsumedTokens := common.Max(promptTokens, common.PreConsumedQuota)
-		if meta.MaxTokens != 0 {
-			preConsumedTokens += meta.MaxTokens
-		}
 		var success bool
 		var matchName string
 		modelRatio, success, matchName = ratio_setting.GetModelRatio(info.OriginModelName)
@@ -115,6 +125,9 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 			}
 		}
 		completionRatio = ratio_setting.GetCompletionRatio(info.OriginModelName)
+		if completionRatio < 0 {
+			return types.PriceData{}, fmt.Errorf("completion ratio cannot be negative: %f", completionRatio)
+		}
 		cacheRatio, _ = ratio_setting.GetCacheRatio(info.OriginModelName)
 		cacheCreationRatio, _ = ratio_setting.GetCreateCacheRatio(info.OriginModelName)
 		cacheCreationRatio5m = cacheCreationRatio
@@ -123,8 +136,17 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		imageRatio, _ = ratio_setting.GetImageRatio(info.OriginModelName)
 		audioRatio = ratio_setting.GetAudioRatio(info.OriginModelName)
 		audioCompletionRatio = ratio_setting.GetAudioCompletionRatio(info.OriginModelName)
-		ratio := modelRatio * groupRatioInfo.GroupRatio
-		quota, err := common.QuotaFromFloatStrict(float64(preConsumedTokens) * ratio)
+
+		estimatedCompletionTokens := meta.MaxTokens
+		if estimatedCompletionTokens == 0 &&
+			groupRatioInfo.GroupRatio != 0 &&
+			modelRatio != 0 &&
+			requestMayGenerateText(info.Request) {
+			estimatedCompletionTokens = defaultPreConsumeMaxTokens
+		}
+		promptQuota := float64(common.Max(promptTokens, common.PreConsumedQuota)) * modelRatio
+		completionQuota := float64(estimatedCompletionTokens) * modelRatio * completionRatio
+		quota, err := common.QuotaFromFloatStrict((promptQuota + completionQuota) * groupRatioInfo.GroupRatio)
 		if err != nil {
 			return types.PriceData{}, err
 		}
@@ -284,8 +306,8 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 	}
 
 	estimatedCompletionTokens := meta.MaxTokens
-	if estimatedCompletionTokens == 0 && groupRatioInfo.GroupRatio != 0 {
-		estimatedCompletionTokens = defaultTieredPreConsumeMaxTokens
+	if estimatedCompletionTokens == 0 && groupRatioInfo.GroupRatio != 0 && requestMayGenerateText(info.Request) {
+		estimatedCompletionTokens = defaultPreConsumeMaxTokens
 	}
 
 	requestInput, err := ResolveIncomingBillingExprRequestInput(c, info)

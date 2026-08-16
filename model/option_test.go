@@ -120,12 +120,16 @@ func TestUpdateOptionRejectsInvalidErrorMaskRulesBeforePersist(t *testing.T) {
 	common.OptionMap = map[string]string{}
 	common.OptionMapRWMutex.Unlock()
 
-	validValue := `[{"status":429,"pattern":"quota","replacement":"masked error"}]`
+	validValue := `[{"status":429,"pattern":"quota","replacement":"masked error","weight":7}]`
 	require.NoError(t, UpdateOption("error_mask_setting.rules", validValue))
 
-	invalidValue := `[{"status":99,"pattern":"quota","replacement":"bad status"}]`
-	require.Error(t, UpdateOption("error_mask_setting.rules", invalidValue))
-	require.Error(t, updateOptionMap("error_mask_setting.rules", invalidValue))
+	invalidStatusValue := `[{"status":99,"pattern":"quota","replacement":"bad status","weight":7}]`
+	require.Error(t, UpdateOption("error_mask_setting.rules", invalidStatusValue))
+	require.Error(t, updateOptionMap("error_mask_setting.rules", invalidStatusValue))
+
+	invalidWeightValue := `[{"status":429,"pattern":"quota","replacement":"bad weight","weight":11}]`
+	require.Error(t, UpdateOption("error_mask_setting.rules", invalidWeightValue))
+	require.Error(t, updateOptionMap("error_mask_setting.rules", invalidWeightValue))
 
 	var option Option
 	require.NoError(t, DB.Where("key = ?", "error_mask_setting.rules").First(&option).Error)
@@ -138,4 +142,5 @@ func TestUpdateOptionRejectsInvalidErrorMaskRulesBeforePersist(t *testing.T) {
 	require.Len(t, rules, 1)
 	assert.Equal(t, 429, rules[0].Status)
 	assert.Equal(t, "masked error", rules[0].Replacement)
+	assert.Equal(t, 7, rules[0].Weight)
 }

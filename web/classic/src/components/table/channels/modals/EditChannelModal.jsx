@@ -551,6 +551,7 @@ const EditChannelModal = (props) => {
   const [vertexFileList, setVertexFileList] = useState([]);
   const vertexErroredNames = useRef(new Set()); // 避免重复报错
   const [isMultiKeyChannel, setIsMultiKeyChannel] = useState(false);
+  const [convertToMultiKey, setConvertToMultiKey] = useState(false);
   const [channelSearchValue, setChannelSearchValue] = useState('');
   const [useManualInput, setUseManualInput] = useState(false); // 是否使用手动输入模式
   const [keyMode, setKeyMode] = useState('append'); // 密钥模式：replace（覆盖）或 append（追加）
@@ -1176,6 +1177,7 @@ const EditChannelModal = (props) => {
       const chInfo = data.channel_info || {};
       const isMulti = chInfo.is_multi_key === true;
       setIsMultiKeyChannel(isMulti);
+      setConvertToMultiKey(false);
       setKeyMode(data.type === 57 ? 'replace' : 'append');
       if (isMulti) {
         setBatch(true);
@@ -1186,6 +1188,8 @@ const EditChannelModal = (props) => {
       } else {
         setBatch(false);
         setMultiToSingle(false);
+        setMultiKeyMode('random');
+        data.multi_key_mode = 'random';
       }
       // 解析渠道额外设置并合并到data中
       if (data.setting) {
@@ -1734,7 +1738,12 @@ const EditChannelModal = (props) => {
     channelSettingsRef.current = emptyChannelSettings;
     setChannelSettings(emptyChannelSettings);
     // 重置密钥模式状态
+    setBatch(false);
+    setMultiToSingle(false);
+    setMultiKeyMode('random');
+    setIsMultiKeyChannel(false);
     setKeyMode('append');
+    setConvertToMultiKey(false);
     // 重置企业账户状态
     setIsEnterpriseAccount(false);
     // 重置豆包隐藏入口状态
@@ -2003,12 +2012,22 @@ const EditChannelModal = (props) => {
               delete localInputs.key;
             }
           } else {
-            localInputs.key = batch
-              ? JSON.stringify(keys)
-              : JSON.stringify(keys[0]);
+            localInputs.key =
+              batch || convertToMultiKey
+                ? JSON.stringify(keys)
+                : JSON.stringify(keys[0]);
           }
         }
       }
+    }
+
+    if (
+      isEdit &&
+      convertToMultiKey &&
+      (!localInputs.key || localInputs.key.trim() === '')
+    ) {
+      showInfo(t('请输入密钥！'));
+      return;
     }
 
     // 如果是编辑模式且 key 为空字符串，避免提交空值覆盖旧密钥
@@ -2269,8 +2288,14 @@ const EditChannelModal = (props) => {
       res = await API.put(`/api/channel/`, {
         ...localInputs,
         id: parseInt(channelId),
+        convert_to_multi_key: convertToMultiKey || undefined,
         key_mode:
-          isMultiKeyChannel || localInputs.type === 57 ? keyMode : undefined,
+          isMultiKeyChannel || convertToMultiKey || localInputs.type === 57
+            ? keyMode
+            : undefined,
+        multi_key_mode: convertToMultiKey
+          ? multiKeyMode || 'random'
+          : localInputs.multi_key_mode,
       });
     } else {
       res = await API.post(`/api/channel/`, {
@@ -2389,7 +2414,7 @@ const EditChannelModal = (props) => {
   const showCodexAggregationMode =
     isEdit && inputs.type === 57 && keyMode === 'append';
   const showMultiKeyModeSelect =
-    (batch && multiToSingle) || showCodexAggregationMode;
+    (batch && multiToSingle) || showCodexAggregationMode || convertToMultiKey;
   const batchExtra = batchAllowed ? (
     <Space>
       {!isEdit && (
@@ -3169,6 +3194,42 @@ const EditChannelModal = (props) => {
                         }
                       />
                     )}
+                    {isEdit && !isMultiKeyChannel && (
+                      <div className='mb-4 flex flex-col gap-1'>
+                        <Checkbox
+                          checked={convertToMultiKey}
+                          disabled={isIonetLocked}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setConvertToMultiKey(checked);
+                            setKeyMode(
+                              checked
+                                ? 'append'
+                                : inputs.type === 57
+                                  ? 'replace'
+                                  : 'append',
+                            );
+                            if (checked) {
+                              const mode = multiKeyMode || 'random';
+                              setMultiKeyMode(mode);
+                              handleInputChange('multi_key_mode', mode);
+                            } else {
+                              formApiRef.current?.setValue('key', '');
+                              handleInputChange('key', '');
+                              setVertexKeys([]);
+                              setVertexFileList([]);
+                              formApiRef.current?.setValue('vertex_files', []);
+                            }
+                          }}
+                        >
+                          {t('密钥聚合模式')}
+                        </Checkbox>
+                        <Text type='tertiary' size='small'>
+                          {t('追加模式：新密钥将添加到现有密钥列表的末尾')}
+                        </Text>
+                      </div>
+                    )}
+
                     {batch ? (
                       inputs.type === 41 &&
                       (inputs.vertex_key_type || 'json') === 'json' ? (
@@ -3225,7 +3286,7 @@ const EditChannelModal = (props) => {
                           extraText={
                             <div className='flex items-center gap-2 flex-wrap'>
                               {isEdit &&
-                                isMultiKeyChannel &&
+                                (isMultiKeyChannel || convertToMultiKey) &&
                                 keyMode === 'append' && (
                                   <Text type='warning' size='small'>
                                     {t(
@@ -3347,7 +3408,7 @@ const EditChannelModal = (props) => {
                                       </Button>
                                     )}
                                     {batchExtra}
-                                    {isEdit && (
+                                    {isEdit && !convertToMultiKey && (
                                       <Button
                                         size='small'
                                         type='primary'
@@ -3475,7 +3536,8 @@ const EditChannelModal = (props) => {
                                       {t('请输入完整的 JSON 格式密钥内容')}
                                     </Text>
                                     {isEdit &&
-                                      isMultiKeyChannel &&
+                                      (isMultiKeyChannel ||
+                                        convertToMultiKey) &&
                                       keyMode === 'append' && (
                                         <Text type='warning' size='small'>
                                           {t(
@@ -3556,7 +3618,7 @@ const EditChannelModal = (props) => {
                             extraText={
                               <div className='flex items-center gap-2'>
                                 {isEdit &&
-                                  isMultiKeyChannel &&
+                                  (isMultiKeyChannel || convertToMultiKey) &&
                                   keyMode === 'append' && (
                                     <Text type='warning' size='small'>
                                       {t(

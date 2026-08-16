@@ -380,8 +380,14 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 
 	if summary.TotalTokens == 0 {
-		extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
-		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
+		retainedQuota := conservativeSettlementQuota(relayInfo)
+		summary.Quota = retainedQuota
+		extraContent = append(extraContent, "上游没有返回计费信息，无法精确结算，按预扣额度保守计费")
+		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, settle with pre-consumed quota, userId %d, channelId %d, tokenId %d, model %s, pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, retainedQuota))
+		if retainedQuota > 0 {
+			model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, retainedQuota)
+			model.UpdateChannelUsedQuota(relayInfo.ChannelId, retainedQuota)
+		}
 	} else {
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)

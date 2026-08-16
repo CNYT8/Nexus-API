@@ -439,6 +439,113 @@ func decreaseTokenQuota(id int, quota int) (err error) {
 	return err
 }
 
+// ReserveTokenQuota atomically reserves finite-token quota without allowing
+// remain_quota to become negative. The database condition is the source of truth;
+// Redis is updated only after the guarded write succeeds.
+func ReserveTokenQuota(id int, key string, quota int) error {
+	if id <= 0 {
+		return errors.New("invalid token id")
+	}
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	if quota == 0 {
+		return nil
+	}
+	result := DB.Model(&Token{}).
+		Where("id = ? AND remain_quota >= ?", id, quota).
+		Updates(map[string]interface{}{
+			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
+			"used_quota":    gorm.Expr("used_quota + ?", quota),
+			"accessed_time": common.GetTimestamp(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrInsufficientQuota
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheDecrTokenQuota(key, int64(quota)); err != nil {
+				common.SysLog("failed to decrease token quota cache after reserve: " + err.Error())
+			}
+		})
+	}
+	return nil
+}
+
+// DecreaseTokenQuotaDirect records a post-settlement debit without the batch
+// update buffer. It may create an explicit negative balance (debt), which blocks
+// later finite-token reservations instead of silently losing actual usage.
+func DecreaseTokenQuotaDirect(id int, key string, quota int) error {
+	if id <= 0 {
+		return errors.New("invalid token id")
+	}
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	if quota == 0 {
+		return nil
+	}
+	result := DB.Model(&Token{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
+			"used_quota":    gorm.Expr("used_quota + ?", quota),
+			"accessed_time": common.GetTimestamp(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("token %d not found while debiting quota", id)
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheDecrTokenQuota(key, int64(quota)); err != nil {
+				common.SysLog("failed to decrease token quota cache after direct debit: " + err.Error())
+			}
+		})
+	}
+	return nil
+}
+
+// IncreaseTokenQuotaDirect records a refund immediately in the database and
+// updates Redis only after the write succeeds.
+func IncreaseTokenQuotaDirect(id int, key string, quota int) error {
+	if id <= 0 {
+		return errors.New("invalid token id")
+	}
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	if quota == 0 {
+		return nil
+	}
+	result := DB.Model(&Token{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"remain_quota":  gorm.Expr("remain_quota + ?", quota),
+			"used_quota":    gorm.Expr("used_quota - ?", quota),
+			"accessed_time": common.GetTimestamp(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("token %d not found while refunding quota", id)
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheIncrTokenQuota(key, int64(quota)); err != nil {
+				common.SysLog("failed to increase token quota cache after direct refund: " + err.Error())
+			}
+		})
+	}
+	return nil
+}
+
 // CountUserTokens returns total number of tokens for the given user, used for pagination
 func CountUserTokens(userId int) (int64, error) {
 	var total int64

@@ -86,14 +86,32 @@ func taskIsSubscription(task *model.Task) bool {
 }
 
 // taskAdjustFunding 调整任务的资金来源（钱包或订阅），delta > 0 表示扣费，delta < 0 表示退还。
-func taskAdjustFunding(task *model.Task, delta int) error {
+// applied=false 表示订阅已进入新额度周期，旧周期退款被安全丢弃。
+func taskAdjustFunding(task *model.Task, delta int) (applied bool, err error) {
 	if taskIsSubscription(task) {
-		return model.PostConsumeUserSubscriptionDelta(task.PrivateData.SubscriptionId, int64(delta))
+		operationTime := task.SubmitTime
+		if operationTime <= 0 {
+			operationTime = task.CreatedAt
+		}
+		if delta > 0 {
+			return model.SettleUserSubscriptionDelta(
+				task.PrivateData.SubscriptionId,
+				int64(delta),
+				task.PrivateData.SubscriptionPeriodStart,
+				operationTime,
+			)
+		}
+		return model.RefundUserSubscriptionDelta(
+			task.PrivateData.SubscriptionId,
+			int64(-delta),
+			task.PrivateData.SubscriptionPeriodStart,
+			operationTime,
+		)
 	}
 	if delta > 0 {
-		return model.DecreaseUserQuota(task.UserId, delta, false)
+		return true, model.DecreaseUserQuotaDirect(task.UserId, delta)
 	}
-	return model.IncreaseUserQuota(task.UserId, -delta, false)
+	return true, model.IncreaseUserQuotaDirect(task.UserId, -delta)
 }
 
 // taskAdjustTokenQuota 调整任务的令牌额度，delta > 0 表示扣费，delta < 0 表示退还。
@@ -108,9 +126,9 @@ func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
 	}
 	var err error
 	if delta > 0 {
-		err = model.DecreaseTokenQuota(task.PrivateData.TokenId, tokenKey, delta)
+		err = model.DecreaseTokenQuotaDirect(task.PrivateData.TokenId, tokenKey, delta)
 	} else {
-		err = model.IncreaseTokenQuota(task.PrivateData.TokenId, tokenKey, -delta)
+		err = model.IncreaseTokenQuotaDirect(task.PrivateData.TokenId, tokenKey, -delta)
 	}
 	if err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("调整令牌额度失败 (delta=%d, task=%s): %s", delta, task.TaskID, err.Error()))
@@ -157,9 +175,13 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 	}
 
 	// 1. 退还资金来源（钱包或订阅）
-	if err := taskAdjustFunding(task, -quota); err != nil {
+	fundingRefunded, err := taskAdjustFunding(task, -quota)
+	if err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, err.Error()))
 		return
+	}
+	if !fundingRefunded {
+		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 属于已结束的订阅额度周期，不向新周期退还额度", task.TaskID))
 	}
 
 	// 2. 退还令牌额度
@@ -169,6 +191,9 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 	other := taskBillingOther(task)
 	other["task_id"] = task.TaskID
 	other["reason"] = reason
+	if !fundingRefunded {
+		other["subscription_period_expired"] = true
+	}
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   model.LogTypeRefund,
@@ -212,9 +237,13 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	))
 
 	// 调整资金来源
-	if err := taskAdjustFunding(task, quotaDelta); err != nil {
+	fundingAdjusted, err := taskAdjustFunding(task, quotaDelta)
+	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("差额结算资金调整失败 task %s: %s", task.TaskID, err.Error()))
 		return
+	}
+	if !fundingAdjusted && quotaDelta < 0 {
+		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 属于已结束的订阅额度周期，不向新周期返还差额", task.TaskID))
 	}
 
 	// 调整令牌额度
@@ -240,6 +269,9 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	other["task_id"] = task.TaskID
 	other["pre_consumed_quota"] = preConsumedQuota
 	other["actual_quota"] = actualQuota
+	if !fundingAdjusted {
+		other["subscription_period_expired"] = true
+	}
 	for _, clamp := range clamps {
 		if clamp != nil {
 			attachQuotaSaturationToOther(other, clamp)

@@ -122,9 +122,8 @@ type RelayInfo struct {
 	SendResponseCount      int
 	ReceivedResponseCount  int
 	FinalPreConsumedQuota  int // 最终预消耗的配额
-	// ForcePreConsume 为 true 时禁用 BillingSession 的信任额度旁路，
-	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
-	// 必须在提交前锁定全额。
+	// ForcePreConsume 保留为异步任务的计费语义标记。安全加固后所有付费请求
+	// 都会预扣额度，不再允许仅依赖进程内余额快照的信任旁路。
 	ForcePreConsume bool
 	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
 	// 初始免费组可为 nil；若自动重试切换到付费组，会在发送前创建。
@@ -136,6 +135,8 @@ type RelayInfo struct {
 	SubscriptionId int
 	// SubscriptionPreConsumed is the amount pre-consumed on subscription item (quota units or 1)
 	SubscriptionPreConsumed int64
+	// SubscriptionPeriodStart binds refunds to the quota period that funded the request.
+	SubscriptionPeriodStart int64
 	// SubscriptionPostDelta is the post-consume delta applied to amount_used (quota units; can be negative).
 	SubscriptionPostDelta int64
 	// SubscriptionPlanId / SubscriptionPlanTitle are used for logging/UI display.

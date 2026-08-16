@@ -47,6 +47,89 @@ func TestModelMonitorWeight(t *testing.T) {
 	}
 }
 
+func TestModelMonitorLatestHealthyBonus(t *testing.T) {
+	now := int64(1_000_000)
+
+	fullBonus := modelMonitorLatestHealthyBonus(modelMonitorBucket{
+		latestHealthyAt: now,
+	}, now)
+	require.InDelta(t, modelMonitorLatestHealthyBonusPoints, fullBonus, 0.000001)
+
+	halfBonus := modelMonitorLatestHealthyBonus(modelMonitorBucket{
+		latestHealthyAt: now - modelMonitorLatestHealthyBonusWindowSeconds/2,
+	}, now)
+	require.InDelta(t, modelMonitorLatestHealthyBonusPoints/2, halfBonus, 0.000001)
+
+	expiredBonus := modelMonitorLatestHealthyBonus(modelMonitorBucket{
+		latestHealthyAt: now - modelMonitorLatestHealthyBonusWindowSeconds,
+	}, now)
+	require.Zero(t, expiredBonus)
+
+	newerFailureBonus := modelMonitorLatestHealthyBonus(modelMonitorBucket{
+		latestHealthyAt:   now - 2,
+		latestUnhealthyAt: now - 1,
+	}, now)
+	require.Zero(t, newerFailureBonus)
+
+	equalTimestampBonus := modelMonitorLatestHealthyBonus(modelMonitorBucket{
+		latestHealthyAt:   now,
+		latestUnhealthyAt: now,
+	}, now)
+	require.InDelta(t, modelMonitorLatestHealthyBonusPoints, equalTimestampBonus, 0.000001)
+}
+
+func TestScoreModelMonitorBucketLatestHealthyBonusRespectsCaps(t *testing.T) {
+	now := int64(1_000_000)
+	healthy := modelMonitorBucket{
+		sampleCount:              10,
+		weightedSuccess:          10,
+		weightedPromptTokens:     6000,
+		weightedCompletionTokens: 4000,
+		weightedUseTime:          20,
+	}
+	baseScore := scoreModelMonitorBucketAt(healthy, now)
+	healthy.latestHealthyAt = now
+	require.Equal(t, baseScore+2, scoreModelMonitorBucketAt(healthy, now))
+
+	healthy.latestUnhealthyAt = now + 1
+	require.Equal(t, baseScore, scoreModelMonitorBucketAt(healthy, now))
+
+	halfFailing := modelMonitorBucket{
+		rawErrorLogCount:         5,
+		sampleCount:              10,
+		errorSampleCount:         5,
+		weightedSuccess:          5,
+		weightedErrors:           5,
+		weightedPromptTokens:     3000,
+		weightedCompletionTokens: 2000,
+		weightedUseTime:          10,
+		latestHealthyAt:          now,
+	}
+	require.LessOrEqual(t, scoreModelMonitorBucketAt(halfFailing, now), 58)
+
+	lowSample := modelMonitorBucket{
+		sampleCount:              1,
+		weightedSuccess:          1,
+		weightedPromptTokens:     600,
+		weightedCompletionTokens: 400,
+		weightedUseTime:          1,
+		latestHealthyAt:          now,
+	}
+	require.LessOrEqual(t, scoreModelMonitorBucketAt(lowSample, now), 68)
+}
+
+func TestMergeModelMonitorBucketKeepsLatestHealth(t *testing.T) {
+	merged := mergeModelMonitorBucket(modelMonitorBucket{
+		latestHealthyAt:   100,
+		latestUnhealthyAt: 80,
+	}, modelMonitorBucket{
+		latestHealthyAt:   90,
+		latestUnhealthyAt: 120,
+	})
+	require.Equal(t, int64(100), merged.latestHealthyAt)
+	require.Equal(t, int64(120), merged.latestUnhealthyAt)
+}
+
 func TestScoreModelMonitorBucket(t *testing.T) {
 	healthy := modelMonitorBucket{
 		sampleCount:              10,
@@ -297,6 +380,82 @@ func TestGetModelMonitorSummaryAggregatesRecentLogs(t *testing.T) {
 	require.GreaterOrEqual(t, normalModel.Score, 1)
 	require.LessOrEqual(t, normalModel.Score, 100)
 	require.Less(t, emptyModel.Score, normalModel.Score)
+}
+
+func TestGetModelMonitorSummaryRewardsLatestHealthyResult(t *testing.T) {
+	InvalidateModelMonitorCache()
+	t.Cleanup(InvalidateModelMonitorCache)
+	InvalidatePricingCache()
+	t.Cleanup(InvalidatePricingCache)
+	resetModelMonitorTables(t)
+
+	now := common.GetTimestamp()
+	recentHealthyModel := "gpt-latest-healthy-bonus"
+	recentErrorModel := "gpt-latest-error-no-bonus"
+	require.NoError(t, DB.Create(&Channel{
+		Id:     998,
+		Type:   1,
+		Status: common.ChannelStatusEnabled,
+	}).Error)
+	for _, modelName := range []string{recentHealthyModel, recentErrorModel} {
+		require.NoError(t, DB.Create(&Ability{
+			Group:     "default",
+			Model:     modelName,
+			ChannelId: 998,
+			Enabled:   true,
+		}).Error)
+		for i := 0; i < 19; i++ {
+			require.NoError(t, LOG_DB.Create(&Log{
+				CreatedAt:        now - 120 - int64(i),
+				Type:             LogTypeConsume,
+				ModelName:        modelName,
+				Group:            "default",
+				PromptTokens:     600,
+				CompletionTokens: 400,
+				UseTime:          2,
+			}).Error)
+		}
+	}
+	require.NoError(t, LOG_DB.Create(&Log{
+		CreatedAt:        now - 1,
+		Type:             LogTypeConsume,
+		ModelName:        recentHealthyModel,
+		Group:            "default",
+		PromptTokens:     600,
+		CompletionTokens: 400,
+		UseTime:          2,
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		CreatedAt: now - 2,
+		Type:      LogTypeError,
+		ModelName: recentHealthyModel,
+		Group:     "default",
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		CreatedAt:        now - 2,
+		Type:             LogTypeConsume,
+		ModelName:        recentErrorModel,
+		Group:            "default",
+		PromptTokens:     600,
+		CompletionTokens: 400,
+		UseTime:          2,
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		CreatedAt: now - 1,
+		Type:      LogTypeError,
+		ModelName: recentErrorModel,
+		Group:     "default",
+	}).Error)
+
+	summary, err := GetModelMonitorSummary()
+	require.NoError(t, err)
+	require.Len(t, summary.Vendors, 1)
+	models := make(map[string]ModelMonitorModel)
+	for _, item := range summary.Vendors[0].Models {
+		models[item.ModelName] = item
+	}
+	require.Greater(t, models[recentHealthyModel].Score, models[recentErrorModel].Score)
+	require.LessOrEqual(t, models[recentHealthyModel].Score-models[recentErrorModel].Score, 3)
 }
 
 func TestGetModelMonitorSummaryAggregatesChannelTestSamples(t *testing.T) {

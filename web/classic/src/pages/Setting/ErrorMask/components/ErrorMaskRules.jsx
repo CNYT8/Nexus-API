@@ -29,8 +29,25 @@ import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
 
+// Keep these bounds aligned with setting/error_mask_setting/error_mask.go.
+const MIN_RULE_WEIGHT = 1;
+const MAX_RULE_WEIGHT = 10;
+const DEFAULT_RULE_WEIGHT = 1;
+
 let _idCounter = 0;
 const uid = () => `em_${++_idCounter}`;
+
+function normalizeRuleWeight(value) {
+  if (value === null || value === undefined || value === '') {
+    return DEFAULT_RULE_WEIGHT;
+  }
+  const weight = Number(value);
+  if (!Number.isFinite(weight)) return DEFAULT_RULE_WEIGHT;
+  return Math.min(
+    MAX_RULE_WEIGHT,
+    Math.max(MIN_RULE_WEIGHT, Math.round(weight)),
+  );
+}
 
 function safeParse(str) {
   if (!str || !str.trim()) return [];
@@ -49,6 +66,7 @@ export function parseErrorMaskRules(jsonStr) {
     status: typeof r.status === 'number' ? r.status : 0,
     pattern: typeof r.pattern === 'string' ? r.pattern : '',
     replacement: typeof r.replacement === 'string' ? r.replacement : '',
+    weight: normalizeRuleWeight(r.weight),
   }));
 }
 
@@ -58,6 +76,7 @@ export function serializeErrorMaskRules(rules) {
       status: Number.isFinite(r.status) ? r.status : 0,
       pattern: r.pattern || '',
       replacement: r.replacement || '',
+      weight: normalizeRuleWeight(r.weight),
     }))
     .filter((r) => r.replacement.trim() !== '');
   if (cleaned.length === 0) return '';
@@ -93,7 +112,13 @@ export default function ErrorMaskRules({ value, onChange }) {
   const addRule = useCallback(() => {
     emit([
       ...rules,
-      { _id: uid(), status: 0, pattern: '', replacement: '' },
+      {
+        _id: uid(),
+        status: 0,
+        pattern: '',
+        replacement: '',
+        weight: DEFAULT_RULE_WEIGHT,
+      },
     ]);
   }, [rules, emit]);
 
@@ -110,6 +135,18 @@ export default function ErrorMaskRules({ value, onChange }) {
             className='flex items-center gap-2'
             style={{ marginBottom: 6 }}
           >
+            <InputNumber
+              size='small'
+              value={rule.weight}
+              min={MIN_RULE_WEIGHT}
+              max={MAX_RULE_WEIGHT}
+              precision={0}
+              prefix={t('权重')}
+              onChange={(v) =>
+                updateRule(rule._id, 'weight', normalizeRuleWeight(v))
+              }
+              style={{ width: 112 }}
+            />
             <InputNumber
               size='small'
               value={rule.status || undefined}

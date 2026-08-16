@@ -15,7 +15,8 @@ import (
 )
 
 // ApplyErrorMask mutates *types.NewAPIError in place if any configured rule matches.
-// First-match-wins. Safe to call with nil error or nil context. No-op when feature disabled.
+// Higher-weight rules are checked first; equal weights retain configured order.
+// Safe to call with nil error or nil context. No-op when feature disabled.
 func ApplyErrorMask(c *gin.Context, apiErr *types.NewAPIError) {
 	if apiErr == nil {
 		return
