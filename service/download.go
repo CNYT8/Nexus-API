@@ -29,9 +29,8 @@ func DoWorkerRequest(req *WorkerRequest) (*http.Response, error) {
 		return nil, fmt.Errorf("only support https url")
 	}
 
-	// SSRF防护：验证请求URL
-	fetchSetting := system_setting.GetFetchSetting()
-	if err := common.ValidateURLWithFetchSetting(req.URL, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
+	// Worker最终会自行解析目标，因此API侧至少始终执行强制的非私网/端口校验。
+	if err := ValidateUntrustedOutboundURL(req.URL); err != nil {
 		return nil, fmt.Errorf("request reject: %v", err)
 	}
 
@@ -58,12 +57,12 @@ func DoDownloadRequest(originUrl string, reason ...string) (resp *http.Response,
 		}
 		return DoWorkerRequest(req)
 	} else {
-		// SSRF防护：验证请求URL（非Worker模式）
-		if err := ValidateSSRFProtectedFetchURL(originUrl); err != nil {
+		// 用户可控下载目标始终启用强制防护，不受root关闭普通SSRF开关影响。
+		if err := ValidateUntrustedOutboundURL(originUrl); err != nil {
 			return nil, fmt.Errorf("request reject: %v", err)
 		}
 
 		common.SysLog(fmt.Sprintf("downloading from origin: %s, reason: %s", common.MaskSensitiveInfo(originUrl), strings.Join(reason, ", ")))
-		return GetSSRFProtectedHTTPClient().Get(originUrl)
+		return GetMandatorySSRFProtectedHTTPClient().Get(originUrl)
 	}
 }

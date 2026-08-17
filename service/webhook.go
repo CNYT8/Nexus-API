@@ -87,8 +87,8 @@ func SendWebhookNotify(webhookURL string, secret string, data dto.Notify) error 
 			return fmt.Errorf("webhook request failed with status code: %d", resp.StatusCode)
 		}
 	} else {
-		// SSRF防护：验证Webhook URL（非Worker模式）
-		if err := ValidateSSRFProtectedFetchURL(webhookURL); err != nil {
+		// 用户可控Webhook目标始终启用强制防护。
+		if err := ValidateUntrustedOutboundURL(webhookURL); err != nil {
 			return fmt.Errorf("request reject: %v", err)
 		}
 
@@ -107,7 +107,7 @@ func SendWebhookNotify(webhookURL string, secret string, data dto.Notify) error 
 		}
 
 		// 发送请求
-		client := GetSSRFProtectedHTTPClient()
+		client := GetMandatorySSRFProtectedHTTPClient()
 		resp, err = client.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to send webhook request: %v", err)

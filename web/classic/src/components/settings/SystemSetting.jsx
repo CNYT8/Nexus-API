@@ -104,12 +104,12 @@ const SystemSetting = () => {
     ServerAddress: '',
     // SSRF防护配置
     'fetch_setting.enable_ssrf_protection': true,
-    'fetch_setting.allow_private_ip': '',
+    'fetch_setting.allow_private_ip': false,
     'fetch_setting.domain_filter_mode': false, // true 白名单，false 黑名单
     'fetch_setting.ip_filter_mode': false, // true 白名单，false 黑名单
     'fetch_setting.domain_list': [],
     'fetch_setting.ip_list': [],
-    'fetch_setting.allowed_ports': [],
+    'fetch_setting.allowed_ports': ['80', '443'],
     'fetch_setting.apply_ip_filter_for_domain': true,
   });
 
@@ -126,7 +126,7 @@ const SystemSetting = () => {
   const [ipFilterMode, setIpFilterMode] = useState(true);
   const [domainList, setDomainList] = useState([]);
   const [ipList, setIpList] = useState([]);
-  const [allowedPorts, setAllowedPorts] = useState([]);
+  const [allowedPorts, setAllowedPorts] = useState(['80', '443']);
 
   const getOptions = async () => {
     setLoading(true);
@@ -170,7 +170,7 @@ const SystemSetting = () => {
               const ports = item.value ? JSON.parse(item.value) : [];
               setAllowedPorts(Array.isArray(ports) ? ports : []);
             } catch (e) {
-              setAllowedPorts(['80', '443', '8080', '8443']);
+              setAllowedPorts(['80', '443']);
             }
             break;
           case 'PasswordLoginEnabled':

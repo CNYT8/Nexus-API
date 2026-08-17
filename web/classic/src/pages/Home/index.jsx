@@ -17,7 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect, useState } from 'react';
+import React, {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   Button,
   Typography,
@@ -65,12 +71,31 @@ import {
 
 const { Text } = Typography;
 
+const StableCustomHome = React.memo(function StableCustomHome({ html }) {
+  const containerRef = useRef(null);
+  const appliedHtmlRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container || appliedHtmlRef.current === html) {
+      return;
+    }
+
+    container.innerHTML = html;
+    appliedHtmlRef.current = html;
+  }, [html]);
+
+  return <div ref={containerRef} className='mt-[60px]' />;
+});
+
 const Home = () => {
   const { t, i18n } = useTranslation();
   const [statusState] = useContext(StatusContext);
   const actualTheme = useActualTheme();
   const [homePageContentLoaded, setHomePageContentLoaded] = useState(false);
-  const [homePageContent, setHomePageContent] = useState('');
+  const [homePageContent, setHomePageContent] = useState(
+    () => localStorage.getItem('home_page_content') || '',
+  );
   const [noticeVisible, setNoticeVisible] = useState(false);
   const isMobile = useIsMobile();
   const isDemoSiteMode = statusState?.status?.demo_site_enabled || false;
@@ -80,9 +105,9 @@ const Home = () => {
   const endpointItems = API_ENDPOINTS.map((e) => ({ value: e }));
   const [endpointIndex, setEndpointIndex] = useState(0);
   const isChinese = i18n.language.startsWith('zh');
+  const hasCustomHomePage = homePageContent.trim() !== '';
 
   const displayHomePageContent = async () => {
-    setHomePageContent(localStorage.getItem('home_page_content') || '');
     const res = await API.get('/api/home_page_content');
     const { success, message, data } = res.data;
     if (success) {
@@ -90,8 +115,12 @@ const Home = () => {
       if (!data.startsWith('https://')) {
         content = marked.parse(data);
       }
-      setHomePageContent(content);
-      localStorage.setItem('home_page_content', content);
+      setHomePageContent((previous) =>
+        previous === content ? previous : content,
+      );
+      if (localStorage.getItem('home_page_content') !== content) {
+        localStorage.setItem('home_page_content', content);
+      }
 
       // 如果内容是 URL，则发送主题模式
       if (data.startsWith('https://')) {
@@ -150,11 +179,19 @@ const Home = () => {
   }, [homePageContent]);
 
   useEffect(() => {
+    if (
+      !homePageContentLoaded ||
+      hasCustomHomePage ||
+      endpointItems.length === 0
+    ) {
+      return undefined;
+    }
+
     const timer = setInterval(() => {
       setEndpointIndex((prev) => (prev + 1) % endpointItems.length);
     }, 3000);
     return () => clearInterval(timer);
-  }, [endpointItems.length]);
+  }, [endpointItems.length, hasCustomHomePage, homePageContentLoaded]);
 
   return (
     <div className='classic-page-fill classic-home-page w-full overflow-x-hidden'>
@@ -350,10 +387,7 @@ const Home = () => {
               className='w-full h-screen border-none'
             />
           ) : (
-            <div
-              className='mt-[60px]'
-              dangerouslySetInnerHTML={{ __html: homePageContent }}
-            />
+            <StableCustomHome html={homePageContent} />
           )}
         </div>
       )}

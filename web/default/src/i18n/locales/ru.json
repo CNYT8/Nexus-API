@@ -866,7 +866,7 @@
     "Comfortable": "Просторная",
     "Coming Soon!": "Скоро!",
     "Comma-separated exact model names. Prefix with regex: to ignore by regular expression.": "Точные имена моделей через запятую. Добавьте префикс regex:, чтобы игнорировать по регулярному выражению.",
-    "Comma-separated list of allowed ports (empty = all ports)": "Список разрешенных портов, разделенных запятыми (пусто = все порты)",
+    "Comma-separated list of allowed ports (empty = block all ports)": "Список разрешенных портов через запятую (пусто = все порты заблокированы)",
     "Comma-separated model names (leave empty to keep current)": "Названия моделей, разделенные запятыми (оставьте пустым, чтобы сохранить текущие)",
     "Comma-separated model names, e.g., gpt-4,gpt-3.5-turbo": "Имена моделей, разделённые запятыми, например, gpt-4,gpt-3.5-turbo",
     "Command": "Команда",

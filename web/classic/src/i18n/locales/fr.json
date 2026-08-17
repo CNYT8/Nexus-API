@@ -2769,7 +2769,7 @@
     "站点所有额度将按汇率换算为自定义货币显示": "Tous les quotas du site seront convertis en devise personnalisée selon le taux de change",
     "站点额度展示类型及汇率": "Type d'affichage du quota du site et taux de change",
     "端口号必须在1-65535之间": "Port number must be between 1-65535",
-    "端口配置详细说明": "Limitez les requêtes externes à des ports spécifiques. Utilisez des ports uniques (80, 443) ou des plages (8000-8999). Une liste vide autorise tous les ports. La valeur par défaut inclut les ports Web courants.",
+    "端口配置详细说明": "Limitez les requêtes externes à des ports spécifiques. Utilisez des ports uniques (80, 443) ou des plages (8000-8999). Une liste vide bloque tous les ports. La valeur sécurisée par défaut autorise uniquement les ports 80 et 443.",
     "端点": "Point de terminaison",
     "端点 URL 必须是完整地址（以 http:// 或 https:// 开头）": "L'URL du point de terminaison doit être une adresse complète (commençant par http:// ou https://)",
     "端点映射": "Mappage de points de terminaison",

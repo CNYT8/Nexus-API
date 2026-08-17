@@ -866,7 +866,7 @@
     "Comfortable": "Thoải mái",
     "Coming Soon!": "Sắp ra mắt!",
     "Comma-separated exact model names. Prefix with regex: to ignore by regular expression.": "Tên mô hình chính xác, phân tách bằng dấu phẩy. Thêm tiền tố regex: để bỏ qua bằng biểu thức chính quy.",
-    "Comma-separated list of allowed ports (empty = all ports)": "Danh sách các cổng được phép, phân cách bằng dấu phẩy (để trống = tất cả các cổng)",
+    "Comma-separated list of allowed ports (empty = block all ports)": "Danh sách cổng được phép, phân cách bằng dấu phẩy (để trống = chặn tất cả các cổng)",
     "Comma-separated model names (leave empty to keep current)": "Tên mô hình phân tách bằng dấu phẩy (để trống để giữ nguyên hiện tại)",
     "Comma-separated model names, e.g., gpt-4,gpt-3.5-turbo": "Tên mô hình được phân tách bằng dấu phẩy, ví dụ: gpt-4,gpt-3.5-turbo",
     "Command": "Lệnh",

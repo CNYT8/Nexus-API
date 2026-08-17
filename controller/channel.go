@@ -467,6 +467,75 @@ func validateTwoFactorAuth(twoFA *model.TwoFA, code string) bool {
 }
 
 // validateChannel 通用的渠道校验函数
+func canonicalChannelBaseURL(raw string) string {
+	return strings.TrimRight(strings.TrimSpace(raw), "/")
+}
+
+func trustedChannelBaseURL(channelType int) string {
+	if channelType < 0 || channelType >= len(constant.ChannelBaseURLs) {
+		return ""
+	}
+	baseURL := canonicalChannelBaseURL(constant.ChannelBaseURLs[channelType])
+	if strings.Contains(strings.ToLower(baseURL), "localhost") {
+		return ""
+	}
+	return baseURL
+}
+
+func effectiveChannelBaseURL(channelType int, configured string) string {
+	baseURL := canonicalChannelBaseURL(configured)
+	if baseURL != "" {
+		return baseURL
+	}
+	if channelType < 0 || channelType >= len(constant.ChannelBaseURLs) {
+		return ""
+	}
+	return canonicalChannelBaseURL(constant.ChannelBaseURLs[channelType])
+}
+
+func validateDelegatedAdminChannelNetwork(c *gin.Context, channel *model.Channel, origin *model.Channel) error {
+	if c == nil || c.GetInt("role") != common.RoleAdminUser || channel == nil {
+		return nil
+	}
+
+	if origin == nil {
+		baseURL := effectiveChannelBaseURL(channel.Type, channel.GetBaseURL())
+		if baseURL != "" && baseURL != trustedChannelBaseURL(channel.Type) {
+			return fmt.Errorf("delegated administrators cannot configure a custom or private channel base URL")
+		}
+		if strings.TrimSpace(channel.GetSetting().Proxy) != "" {
+			return fmt.Errorf("delegated administrators cannot configure a channel proxy")
+		}
+		return nil
+	}
+
+	effectiveType := channel.Type
+	if effectiveType == 0 && origin.Type != 0 {
+		effectiveType = origin.Type
+	}
+	typeChanged := channel.Type != 0 && channel.Type != origin.Type
+	if channel.BaseURL != nil || typeChanged {
+		configuredBaseURL := origin.GetBaseURL()
+		if channel.BaseURL != nil {
+			configuredBaseURL = channel.GetBaseURL()
+		}
+		newBaseURL := effectiveChannelBaseURL(effectiveType, configuredBaseURL)
+		originBaseURL := effectiveChannelBaseURL(origin.Type, origin.GetBaseURL())
+		if newBaseURL != originBaseURL && newBaseURL != "" && newBaseURL != trustedChannelBaseURL(effectiveType) {
+			return fmt.Errorf("delegated administrators cannot change a channel to a custom or private base URL")
+		}
+	}
+
+	if channel.Setting != nil {
+		newProxy := strings.TrimSpace(channel.GetSetting().Proxy)
+		originProxy := strings.TrimSpace(origin.GetSetting().Proxy)
+		if newProxy != originProxy && newProxy != "" {
+			return fmt.Errorf("delegated administrators cannot configure a channel proxy")
+		}
+	}
+	return nil
+}
+
 func validateChannel(channel *model.Channel, isAdd bool) error {
 	if channel == nil {
 		return fmt.Errorf("channel cannot be empty")
@@ -712,6 +781,13 @@ func AddChannel(c *gin.Context) {
 
 	// 使用统一的校验函数
 	if err := validateChannel(addChannelRequest.Channel, true); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	if err := validateDelegatedAdminChannelNetwork(c, addChannelRequest.Channel, nil); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": err.Error(),
@@ -1189,6 +1265,14 @@ func UpdateChannel(c *gin.Context) {
 		})
 		return
 	}
+	if err := validateDelegatedAdminChannelNetwork(c, &channel.Channel, originChannel); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
 	originProxy := originChannel.GetSetting().Proxy
 	proxyChanged := false
 	if channel.Setting != nil {

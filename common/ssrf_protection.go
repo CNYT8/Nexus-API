@@ -26,7 +26,7 @@ var DefaultSSRFProtection = &SSRFProtection{
 	DomainList:       []string{},
 	IpFilterMode:     true,
 	IpList:           []string{},
-	AllowedPorts:     []int{},
+	AllowedPorts:     []int{80, 443},
 }
 
 // NewSSRFProtectionFromFetchSetting builds an SSRFProtection from persisted fetch_setting values.
@@ -80,7 +80,9 @@ var privateIPv6Nets = func() []net.IPNet {
 		"100::/64",      // Discard-Only
 		"2001::/23",     // IETF Protocol Assignments
 		"2001:db8::/32", // 文档
+		"2002::/16",     // 6to4，可编码并间接访问非公网 IPv4 目标
 		"fc00::/7",      // Unique Local Address (ULA)
+		"fec0::/10",     // 已弃用的 Site-Local，部分旧网络仍可能路由
 		"fe80::/10",     // 链路本地
 		"ff00::/8",      // 组播
 	}
@@ -194,7 +196,7 @@ func parsePortRanges(portConfigs []string) ([]int, error) {
 // isAllowedPort 检查端口是否被允许
 func (p *SSRFProtection) isAllowedPort(port int) bool {
 	if len(p.AllowedPorts) == 0 {
-		return true // 如果没有配置端口限制，则允许所有端口
+		return false // 安全失败：空列表不应意外开放全部端口
 	}
 
 	for _, allowedPort := range p.AllowedPorts {

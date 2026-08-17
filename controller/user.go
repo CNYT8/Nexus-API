@@ -1257,6 +1257,10 @@ func UpdateUserSetting(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgSettingWebhookInvalid)
 			return
 		}
+		if err := service.ValidateUntrustedOutboundURL(req.WebhookUrl); err != nil {
+			common.ApiErrorI18n(c, i18n.MsgSettingWebhookInvalid)
+			return
+		}
 	}
 
 	// 如果是邮件类型，验证邮箱地址
@@ -1284,6 +1288,10 @@ func UpdateUserSetting(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgSettingUrlMustHttp)
 			return
 		}
+		if err := service.ValidateUntrustedOutboundURL(req.BarkUrl); err != nil {
+			common.ApiErrorI18n(c, i18n.MsgSettingBarkUrlInvalid)
+			return
+		}
 	}
 
 	// 如果是Gotify类型，验证Gotify URL和Token
@@ -1304,6 +1312,10 @@ func UpdateUserSetting(c *gin.Context) {
 		// 检查是否是HTTP或HTTPS
 		if !strings.HasPrefix(req.GotifyUrl, "https://") && !strings.HasPrefix(req.GotifyUrl, "http://") {
 			common.ApiErrorI18n(c, i18n.MsgSettingUrlMustHttp)
+			return
+		}
+		if err := service.ValidateUntrustedOutboundURL(req.GotifyUrl); err != nil {
+			common.ApiErrorI18n(c, i18n.MsgSettingGotifyUrlInvalid)
 			return
 		}
 	}

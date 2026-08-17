@@ -18,9 +18,10 @@ import (
 )
 
 var (
-	httpClient              *http.Client
-	ssrfProtectedHTTPClient *http.Client
-	proxyClients            = proxyHTTPClientCache{
+	httpClient                       *http.Client
+	ssrfProtectedHTTPClient          *http.Client
+	mandatorySSRFProtectedHTTPClient *http.Client
+	proxyClients                     = proxyHTTPClientCache{
 		clients: make(map[string]*http.Client),
 		aliases: make(map[string]string),
 	}
@@ -49,17 +50,6 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
-func checkProtectedFetchRedirect(req *http.Request, via []*http.Request) error {
-	urlStr := req.URL.String()
-	if err := ValidateSSRFProtectedFetchURL(urlStr); err != nil {
-		return fmt.Errorf("redirect to %s blocked: %v", urlStr, err)
-	}
-	if len(via) >= 10 {
-		return fmt.Errorf("stopped after 10 redirects")
-	}
-	return nil
-}
-
 func validateURLWithCurrentFetchSetting(urlStr string, applyDomainIPFilter bool) error {
 	fetchSetting := system_setting.GetFetchSetting()
 	return common.ValidateURLWithFetchSetting(urlStr, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, applyDomainIPFilter && fetchSetting.ApplyIPFilterForDomain)
@@ -67,6 +57,24 @@ func validateURLWithCurrentFetchSetting(urlStr string, applyDomainIPFilter bool)
 
 func ValidateSSRFProtectedFetchURL(urlStr string) error {
 	return validateURLWithCurrentFetchSetting(urlStr, true)
+}
+
+// ValidateUntrustedOutboundURL enforces SSRF protection even when the global
+// switch is disabled. It is used at privilege boundaries where a delegated
+// administrator or regular user controls the destination.
+func ValidateUntrustedOutboundURL(urlStr string) error {
+	fetchSetting := system_setting.GetFetchSetting()
+	return common.ValidateURLWithFetchSetting(
+		urlStr,
+		true,
+		false,
+		fetchSetting.DomainFilterMode,
+		fetchSetting.IpFilterMode,
+		fetchSetting.DomainList,
+		fetchSetting.IpList,
+		fetchSetting.AllowedPorts,
+		true,
+	)
 }
 
 func newRelayHTTPTransport() *http.Transport {
@@ -112,6 +120,7 @@ func InitHttpClient() {
 	transport.Proxy = http.ProxyFromEnvironment
 	httpClient = newRelayHTTPClient(transport)
 	ssrfProtectedHTTPClient = newProtectedFetchHTTPClient()
+	mandatorySSRFProtectedHTTPClient = newMandatoryProtectedFetchHTTPClient()
 }
 
 func GetHttpClient() *http.Client {
@@ -124,6 +133,12 @@ func GetSSRFProtectedHTTPClient() *http.Client {
 		return GetHttpClient()
 	}
 	return ssrfProtectedHTTPClient
+}
+
+// GetMandatorySSRFProtectedHTTPClient is reserved for destinations controlled
+// by non-root users. It always blocks private targets and pins DNS at dial time.
+func GetMandatorySSRFProtectedHTTPClient() *http.Client {
+	return mandatorySSRFProtectedHTTPClient
 }
 
 func newProxyURLConfig(parsedURL *url.URL) *proxyURLConfig {

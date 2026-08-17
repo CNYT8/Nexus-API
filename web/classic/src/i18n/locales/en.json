@@ -2782,7 +2782,7 @@
     "站点所有额度将按汇率换算为自定义货币显示": "All site quotas will be converted to custom currency using the exchange rate",
     "站点额度展示类型及汇率": "Site quota display type and exchange rate",
     "端口号必须在1-65535之间": "Port number must be between 1-65535",
-    "端口配置详细说明": "Restrict external requests to specific ports. Use single ports (80, 443) or ranges (8000-8999). Empty list allows all ports. Default includes common web ports.",
+    "端口配置详细说明": "Restrict external requests to specific ports. Use single ports (80, 443) or ranges (8000-8999). An empty list blocks all ports. The secure default allows only ports 80 and 443.",
     "端点": "Endpoint",
     "端点 URL 必须以 http:// 或 https:// 开头：": "Endpoint URL must start with http:// or https://: ",
     "端点 URL 必须是完整地址（以 http:// 或 https:// 开头）": "Endpoint URL must be a full address (starting with http:// or https://)",

@@ -152,8 +152,8 @@ func sendBarkNotify(barkURL string, data dto.Notify) error {
 			return fmt.Errorf("bark request failed with status code: %d", resp.StatusCode)
 		}
 	} else {
-		// SSRF防护：验证Bark URL（非Worker模式）
-		if err := ValidateSSRFProtectedFetchURL(finalURL); err != nil {
+		// 用户可控Bark目标始终启用强制防护。
+		if err := ValidateUntrustedOutboundURL(finalURL); err != nil {
 			return fmt.Errorf("request reject: %v", err)
 		}
 
@@ -167,7 +167,7 @@ func sendBarkNotify(barkURL string, data dto.Notify) error {
 		req.Header.Set("User-Agent", "OneAPI-Bark-Notify/1.0")
 
 		// 发送请求
-		client := GetSSRFProtectedHTTPClient()
+		client := GetMandatorySSRFProtectedHTTPClient()
 		resp, err = client.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to send bark request: %v", err)
@@ -245,8 +245,8 @@ func sendGotifyNotify(gotifyUrl string, gotifyToken string, priority int, data d
 			return fmt.Errorf("gotify request failed with status code: %d", resp.StatusCode)
 		}
 	} else {
-		// SSRF防护：验证Gotify URL（非Worker模式）
-		if err := ValidateSSRFProtectedFetchURL(finalURL); err != nil {
+		// 用户可控Gotify目标始终启用强制防护。
+		if err := ValidateUntrustedOutboundURL(finalURL); err != nil {
 			return fmt.Errorf("request reject: %v", err)
 		}
 
@@ -261,7 +261,7 @@ func sendGotifyNotify(gotifyUrl string, gotifyToken string, priority int, data d
 		req.Header.Set("User-Agent", "NewAPI-Gotify-Notify/1.0")
 
 		// 发送请求
-		client := GetSSRFProtectedHTTPClient()
+		client := GetMandatorySSRFProtectedHTTPClient()
 		resp, err = client.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to send gotify request: %v", err)

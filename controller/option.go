@@ -219,6 +219,16 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "fetch_setting.allowed_ports":
+		var ports []string
+		if err := common.Unmarshal([]byte(option.Value.(string)), &ports); err != nil {
+			common.ApiErrorMsg(c, "允许端口必须是字符串数组")
+			return
+		}
+		if _, err := common.NewSSRFProtectionFromFetchSetting(false, false, false, nil, nil, ports, true); err != nil {
+			common.ApiErrorMsg(c, err.Error())
+			return
+		}
 	case "theme.frontend":
 		if option.Value != "default" && option.Value != "classic" {
 			c.JSON(http.StatusOK, gin.H{

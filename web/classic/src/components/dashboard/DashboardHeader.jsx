@@ -29,6 +29,7 @@ const DashboardHeader = ({
 }) => {
   const ICON_BUTTON_CLASS = 'text-white hover:bg-opacity-80 !rounded-full';
   const [typedGreeting, setTypedGreeting] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
 
   useEffect(() => {
     const characters = Array.from(getGreeting || '');
@@ -36,21 +37,25 @@ const DashboardHeader = ({
 
     if (characters.length === 0) {
       setTypedGreeting('');
+      setIsTyping(false);
       return undefined;
     }
 
     setTypedGreeting(characters[0]);
+    setIsTyping(characters.length > 1);
     if (characters.length === 1) {
       return undefined;
     }
 
     let index = 1;
-    const interval = 3000 / (characters.length - 1);
+    const interval = 2000 / (characters.length - 1);
     const typeNextCharacter = () => {
       setTypedGreeting(characters.slice(0, index + 1).join(''));
       index += 1;
       if (index < characters.length) {
         timer = setTimeout(typeNextCharacter, interval);
+      } else {
+        setIsTyping(false);
       }
     };
 
@@ -62,7 +67,9 @@ const DashboardHeader = ({
     <div className='flex items-center justify-between mb-4'>
       <h2 className='dashboard-greeting-title text-2xl font-semibold'>
         <span aria-label={getGreeting}>{typedGreeting}</span>
-        <span className='dashboard-greeting-cursor' aria-hidden='true' />
+        {isTyping && (
+          <span className='dashboard-greeting-cursor' aria-hidden='true' />
+        )}
       </h2>
       <div className='flex gap-3'>
         <Button

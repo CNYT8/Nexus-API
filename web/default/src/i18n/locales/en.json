@@ -869,7 +869,7 @@
     "Comfortable": "Comfortable",
     "Coming Soon!": "Coming Soon!",
     "Comma-separated exact model names. Prefix with regex: to ignore by regular expression.": "Comma-separated exact model names. Prefix with regex: to ignore by regular expression.",
-    "Comma-separated list of allowed ports (empty = all ports)": "Comma-separated list of allowed ports (empty = all ports)",
+    "Comma-separated list of allowed ports (empty = block all ports)": "Comma-separated list of allowed ports (empty = block all ports)",
     "Comma-separated model names (leave empty to keep current)": "Comma-separated model names (leave empty to keep current)",
     "Comma-separated model names, e.g., gpt-4,gpt-3.5-turbo": "Comma-separated model names, e.g., gpt-4,gpt-3.5-turbo",
     "Command": "Command",

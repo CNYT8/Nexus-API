@@ -2990,7 +2990,7 @@
     "站点设置": "Cài đặt trang web",
     "站点额度展示类型及汇率": "Loại hiển thị hạn ngạch trang web và tỷ giá hối đoái",
     "端口号必须在1-65535之间": "Port number must be between 1-65535",
-    "端口配置详细说明": "Hạn chế các yêu cầu bên ngoài đến các cổng cụ thể. Sử dụng cổng đơn (80, 443) hoặc phạm vi (8000-8999). Danh sách trống cho phép tất cả các cổng. Mặc định bao gồm các cổng web phổ biến.",
+    "端口配置详细说明": "Giới hạn yêu cầu bên ngoài tới các cổng cụ thể. Hỗ trợ cổng đơn (80, 443) hoặc phạm vi (8000-8999). Danh sách trống sẽ chặn tất cả các cổng. Mặc định an toàn chỉ cho phép cổng 80 và 443.",
     "端点": "Điểm cuối",
     "端点 URL 必须是完整地址（以 http:// 或 https:// 开头）": "URL endpoint phải là địa chỉ đầy đủ (bắt đầu bằng http:// hoặc https://)",
     "端点映射": "Ánh xạ điểm cuối",

@@ -866,7 +866,7 @@
     "Comfortable": "Confortable",
     "Coming Soon!": "Bientôt disponible !",
     "Comma-separated exact model names. Prefix with regex: to ignore by regular expression.": "Noms exacts de modèles séparés par des virgules. Préfixez avec regex: pour ignorer par expression régulière.",
-    "Comma-separated list of allowed ports (empty = all ports)": "Liste des ports autorisés séparés par des virgules (vide = tous les ports)",
+    "Comma-separated list of allowed ports (empty = block all ports)": "Liste des ports autorisés séparés par des virgules (vide = tous les ports sont bloqués)",
     "Comma-separated model names (leave empty to keep current)": "Noms de modèles séparés par des virgules (laissez vide pour conserver l'actuel)",
     "Comma-separated model names, e.g., gpt-4,gpt-3.5-turbo": "Noms de modèles séparés par des virgules, p. ex., gpt-4,gpt-3.5-turbo",
     "Command": "Commande",
