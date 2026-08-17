@@ -34,7 +34,6 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
   // ========== 基础状态 ==========
   const [loading, setLoading] = useState(false);
-  const [greetingVisible, setGreetingVisible] = useState(false);
   const [searchModalVisible, setSearchModalVisible] = useState(false);
   const showLoading = useMinimumLoadingTime(loading);
 
@@ -273,13 +272,6 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
   // ========== Effects ==========
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setGreetingVisible(true);
-    }, 100);
-    return () => clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
     if (!initialized.current) {
       getUserData();
       initialized.current = true;
@@ -289,7 +281,6 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   return {
     // 基础状态
     loading: showLoading,
-    greetingVisible,
     searchModalVisible,
 
     // 输入状态
@@ -329,7 +320,6 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     timeOptions,
     performanceMetrics,
     getGreeting,
-    greetingParts,
     isAdminUser,
     hasApiInfoPanel,
     hasInfoPanels,

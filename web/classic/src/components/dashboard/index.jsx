@@ -158,12 +158,9 @@ const Dashboard = () => {
     <div className='h-full'>
       <DashboardHeader
         getGreeting={dashboardData.getGreeting}
-        greetingParts={dashboardData.greetingParts}
-        greetingVisible={dashboardData.greetingVisible}
         showSearchModal={dashboardData.showSearchModal}
         refresh={handleRefresh}
         loading={dashboardData.loading}
-        t={dashboardData.t}
       />
 
       <SearchModal
