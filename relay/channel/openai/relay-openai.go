@@ -14,6 +14,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 
 	"github.com/QuantumNous/new-api/types"
 
@@ -26,6 +27,19 @@ import (
 func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat bool, thinkToContent bool) error {
 	if data == "" {
 		return nil
+	}
+
+	if info != nil && info.ThinkingProcessStrip {
+		var response dto.ChatCompletionsStreamResponse
+		if err := common.UnmarshalJsonStr(data, &response); err != nil {
+			return err
+		}
+		relaycommon.StripChatCompletionsThinking(&response)
+		relaycommon.FilterChatCompletionsThinkingTags(&response, info.ThinkingTagFilter)
+		if !relaycommon.ChatCompletionsHasVisibleData(&response) {
+			return nil
+		}
+		return helper.ObjectData(c, response)
 	}
 
 	if !forceFormat && !thinkToContent {
@@ -184,6 +198,10 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		}
 	})
 
+	if outputErr := helper.OutputSensitiveStreamError(info); outputErr != nil {
+		return nil, outputErr
+	}
+
 	// 对音频模型，从倒数第二个stream data中提取usage信息
 	if isAudioModel && secondLastStreamData != "" {
 		var streamResp struct {
@@ -236,6 +254,20 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
 	logger.LogDebug(c, "upstream response body: %s", responseBody)
+	if setting.ShouldCheckOutputSensitive() {
+		matcher := relaycommon.NewOutputSensitiveMatcher(setting.OutputSensitiveWords, setting.OutputSensitiveMatchRatio())
+		cleaned, matched, word, scanErr := relaycommon.SanitizeOutputSensitiveJSON(responseBody, matcher)
+		if scanErr != nil {
+			return nil, types.NewOpenAIError(scanErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		}
+		if matched {
+			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "output_sensitive")
+			if setting.OutputSensitiveAction == "error" {
+				return nil, types.NewError(relaycommon.OutputSensitiveError(word), types.ErrorCodeSensitiveWordsDetected)
+			}
+			responseBody = cleaned
+		}
+	}
 	// Unmarshal to simpleResponse
 	if info.ChannelType == constant.ChannelTypeOpenRouter && info.ChannelOtherSettings.IsOpenRouterEnterprise() {
 		// 尝试解析为 openrouter enterprise

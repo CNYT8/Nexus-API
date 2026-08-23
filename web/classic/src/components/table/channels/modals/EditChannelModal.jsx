@@ -491,6 +491,7 @@ const EditChannelModal = (props) => {
     // 渠道额外设置的默认值
     force_format: false,
     thinking_to_content: false,
+    thinking_process_strip: false,
     proxy: '',
     pass_through_body_enabled: false,
     system_prompt: '',
@@ -820,6 +821,7 @@ const EditChannelModal = (props) => {
   const [channelSettings, setChannelSettings] = useState({
     force_format: false,
     thinking_to_content: false,
+    thinking_process_strip: false,
     proxy: '',
     pass_through_body_enabled: false,
     system_prompt: '',
@@ -1198,6 +1200,8 @@ const EditChannelModal = (props) => {
           data.force_format = parsedSettings.force_format || false;
           data.thinking_to_content =
             parsedSettings.thinking_to_content || false;
+          data.thinking_process_strip =
+            parsedSettings.thinking_process_strip || false;
           data.proxy = parsedSettings.proxy || '';
           data.pass_through_body_enabled =
             parsedSettings.pass_through_body_enabled || false;
@@ -1308,6 +1312,7 @@ const EditChannelModal = (props) => {
       const loadedChannelSettings = {
         force_format: data.force_format,
         thinking_to_content: data.thinking_to_content,
+        thinking_process_strip: data.thinking_process_strip || false,
         proxy: data.proxy,
         pass_through_body_enabled: data.pass_through_body_enabled,
         system_prompt: data.system_prompt,
@@ -1354,6 +1359,7 @@ const EditChannelModal = (props) => {
         (data.proxy && data.proxy.trim()) ||
         (data.system_prompt && data.system_prompt.trim()) ||
         data.thinking_to_content ||
+        data.thinking_process_strip ||
         data.pass_through_body_enabled ||
         data.force_format ||
         data.claude_beta_query ||
@@ -1730,6 +1736,7 @@ const EditChannelModal = (props) => {
     const emptyChannelSettings = {
       force_format: false,
       thinking_to_content: false,
+      thinking_process_strip: false,
       proxy: '',
       pass_through_body_enabled: false,
       system_prompt: '',
@@ -2158,6 +2165,7 @@ const EditChannelModal = (props) => {
     const channelExtraSettings = {
       force_format: localInputs.force_format || false,
       thinking_to_content: localInputs.thinking_to_content || false,
+      thinking_process_strip: localInputs.thinking_process_strip || false,
       proxy: localInputs.proxy || '',
       pass_through_body_enabled: localInputs.pass_through_body_enabled || false,
       system_prompt: localInputs.system_prompt || '',
@@ -2248,6 +2256,7 @@ const EditChannelModal = (props) => {
     // 清理不需要发送到后端的字段
     delete localInputs.force_format;
     delete localInputs.thinking_to_content;
+    delete localInputs.thinking_process_strip;
     delete localInputs.proxy;
     delete localInputs.pass_through_body_enabled;
     delete localInputs.system_prompt;
@@ -2989,6 +2998,7 @@ const EditChannelModal = (props) => {
                   )}
 
                   <Form.Switch field='thinking_to_content' label={t('思考内容转换')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('thinking_to_content', value)} extraText={t('将 reasoning_content 转换为 <think> 标签拼接到内容中')} />
+                  <Form.Switch field='thinking_process_strip' label={t('思考过程剥离')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('thinking_process_strip', value)} extraText={t('保留上游完整思考和用量统计，仅向下游显示正文')} />
                   <Form.Switch field='pass_through_body_enabled' label={t('透传请求体')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('pass_through_body_enabled', value)} extraText={t('启用请求体透传功能')} />
 
                   <Form.Input field='proxy' label={t('代理地址')} placeholder={t('例如: socks5://user:pass@host:port')} onChange={(value) => handleChannelSettingsChange('proxy', value)} showClear extraText={t('用于配置网络代理，支持 socks5 协议')} />

@@ -795,7 +795,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       ),
       cell: ({ row }) => {
         const client = row.original.client
-        if (!client) {
+        if (row.original.type !== 2 || !client) {
           return <span className='text-muted-foreground text-xs'>-</span>
         }
 

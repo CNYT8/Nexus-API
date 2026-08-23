@@ -5,9 +5,37 @@ import "strings"
 var CheckSensitiveEnabled = true
 var CheckSensitiveOnPromptEnabled = true
 
-//var CheckSensitiveOnCompletionEnabled = true
+// CheckSensitiveOnCompletionEnabled controls scanning of upstream output. It is
+// intentionally off by default: when disabled, relay streaming has no output
+// matching overhead at all.
+var CheckSensitiveOnCompletionEnabled = false
 
-// StopOnSensitiveEnabled 如果检测到敏感词，是否立刻停止生成，否则替换敏感词
+// OutputSensitiveEnabled enables the optional upstream-output scanner.
+var OutputSensitiveEnabled = false
+
+// OutputSensitiveAction is either "truncate" or "error".
+var OutputSensitiveAction = "truncate"
+
+// OutputSensitiveMatchPercent is the minimum contiguous percentage of a
+// configured pattern that triggers. It is stored and edited as a percentage,
+// not a fraction. Short patterns are still checked as exact patterns when the
+// configured threshold would otherwise be too small.
+var OutputSensitiveMatchPercent = 20
+var OutputSensitiveWords = []string{}
+
+func OutputSensitiveMatchRatio() float64 {
+	percent := OutputSensitiveMatchPercent
+	if percent < 1 {
+		percent = 1
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	return float64(percent) / 100
+}
+
+// StopOnSensitiveEnabled controls the prompt replacement action: true stops
+// the request with an error, false replaces the matched text.
 var StopOnSensitiveEnabled = true
 
 // StreamCacheQueueLength 流模式缓存队列长度，0表示无缓存
@@ -24,20 +52,28 @@ func SensitiveWordsToString() string {
 }
 
 func SensitiveWordsFromString(s string) {
-	SensitiveWords = []string{}
-	sw := strings.Split(s, "\n")
-	for _, w := range sw {
+	SensitiveWords = ParseSensitiveWords(s)
+}
+
+func ParseSensitiveWords(s string) []string {
+	words := make([]string, 0)
+	for _, w := range strings.Split(s, "\n") {
 		w = strings.TrimSpace(w)
 		if w != "" {
-			SensitiveWords = append(SensitiveWords, w)
+			words = append(words, w)
 		}
 	}
+	return words
 }
 
 func ShouldCheckPromptSensitive() bool {
-	return CheckSensitiveEnabled && CheckSensitiveOnPromptEnabled
+	return CheckSensitiveEnabled && CheckSensitiveOnPromptEnabled && len(SensitiveWords) > 0
 }
 
-//func ShouldCheckCompletionSensitive() bool {
-//	return CheckSensitiveEnabled && CheckSensitiveOnCompletionEnabled
-//}
+func ShouldCheckCompletionSensitive() bool {
+	return CheckSensitiveEnabled && CheckSensitiveOnCompletionEnabled && len(SensitiveWords) > 0
+}
+
+func ShouldCheckOutputSensitive() bool {
+	return OutputSensitiveEnabled && len(OutputSensitiveWords) > 0
+}

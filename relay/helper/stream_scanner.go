@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -69,15 +70,32 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
 
 	var (
-		stopChan    = make(chan bool, 3) // 增加缓冲区避免阻塞
-		scanner     = NewStreamScanner(resp.Body)
-		ticker      = time.NewTicker(streamingTimeout)
-		pingTicker  *time.Ticker
-		writeMutex  sync.Mutex     // Mutex to protect concurrent writes
-		wg          sync.WaitGroup // 用于等待所有 goroutine 退出
+		stopChan     = make(chan bool, 3) // 增加缓冲区避免阻塞
+		scanner      = NewStreamScanner(resp.Body)
+		ticker       = time.NewTimer(streamingTimeout)
+		pingTicker   *time.Ticker
+		writeMutex   sync.Mutex // Mutex to protect concurrent writes
+		timeoutMutex sync.Mutex
+		wg           sync.WaitGroup // 用于等待所有 goroutine 退出
+		resetTimeout = func() {
+			timeoutMutex.Lock()
+			defer timeoutMutex.Unlock()
+			if !ticker.Stop() {
+				select {
+				case <-ticker.C:
+				default:
+				}
+			}
+			ticker.Reset(streamingTimeout)
+		}
 		cleanupOnce sync.Once
 		stopOnce    sync.Once
 	)
+
+	var outputSensitiveMatcher *relaycommon.OutputSensitiveMatcher
+	if setting.ShouldCheckOutputSensitive() {
+		outputSensitiveMatcher = relaycommon.NewOutputSensitiveMatcher(setting.OutputSensitiveWords, setting.OutputSensitiveMatchRatio())
+	}
 
 	stop := func() {
 		stopOnce.Do(func() {
@@ -86,7 +104,11 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	}
 
 	generalSettings := operation_setting.GetGeneralSetting()
-	pingEnabled := generalSettings.PingIntervalEnabled && !info.DisablePing
+	// A hidden reasoning phase can last longer than the normal client idle
+	// window. Always allow comment heartbeats for this policy, even when the
+	// global optional ping switch is disabled.
+	thinkingStripPingEnabled := info != nil && info.ThinkingProcessStrip
+	pingEnabled := (generalSettings.PingIntervalEnabled || thinkingStripPingEnabled) && !info.DisablePing
 	pingInterval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
 	if pingInterval <= 0 {
 		pingInterval = DefaultPingInterval
@@ -154,6 +176,9 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 						defer writeMutex.Unlock()
 						ExtendWriteDeadline(c)
 						err = PingData(c)
+						if err == nil && thinkingStripPingEnabled {
+							resetTimeout()
+						}
 					}()
 					if err != nil {
 						logger.LogError(c, "ping data error: "+err.Error())
@@ -227,7 +252,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			default:
 			}
 
-			ticker.Reset(streamingTimeout)
+			resetTimeout()
 			data := scanner.Text()
 			logger.LogDebug(c, "stream scanner data: %s", data)
 
@@ -241,6 +266,16 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			data = strings.TrimSpace(data)
 			if data == "" {
 				continue
+			}
+			if outputSensitiveMatcher != nil {
+				if hit, word := outputSensitiveMatcher.Scan(data); hit {
+					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonOutputSensitive, fmt.Errorf("output sensitive pattern matched: %q", word))
+					if setting.OutputSensitiveAction == "error" {
+						info.StreamStatus.RecordError("output sensitive pattern matched")
+					}
+					logger.LogWarn(c, fmt.Sprintf("output sensitive pattern matched, action=%s", setting.OutputSensitiveAction))
+					return
+				}
 			}
 			if !strings.HasPrefix(data, "[DONE]") {
 				info.SetFirstResponseTime()

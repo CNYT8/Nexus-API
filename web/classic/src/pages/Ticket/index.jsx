@@ -43,9 +43,9 @@ const TICKET_TYPES = [
 ];
 
 const TICKET_PRIORITIES = [
-  { value: 'low', label: '低优先级' },
-  { value: 'medium', label: '中优先级' },
-  { value: 'high', label: '高优先级' },
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
 ];
 
 const STATUS_COLORS = {

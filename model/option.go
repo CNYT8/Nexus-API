@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -181,6 +182,11 @@ func InitOptionMap() {
 	common.OptionMap["SelfUseModeEnabled"] = strconv.FormatBool(operation_setting.SelfUseModeEnabled)
 	common.OptionMap["ModelRequestRateLimitEnabled"] = strconv.FormatBool(setting.ModelRequestRateLimitEnabled)
 	common.OptionMap["CheckSensitiveOnPromptEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnPromptEnabled)
+	common.OptionMap["CheckSensitiveOnCompletionEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnCompletionEnabled)
+	common.OptionMap["OutputSensitiveEnabled"] = strconv.FormatBool(setting.OutputSensitiveEnabled)
+	common.OptionMap["OutputSensitiveAction"] = setting.OutputSensitiveAction
+	common.OptionMap["OutputSensitiveMatchPercent"] = strconv.Itoa(setting.OutputSensitiveMatchPercent)
+	common.OptionMap["OutputSensitiveWords"] = strings.Join(setting.OutputSensitiveWords, "\n")
 	common.OptionMap["StopOnSensitiveEnabled"] = strconv.FormatBool(setting.StopOnSensitiveEnabled)
 	common.OptionMap["SensitiveWords"] = setting.SensitiveWordsToString()
 	common.OptionMap["StreamCacheQueueLength"] = strconv.Itoa(setting.StreamCacheQueueLength)
@@ -525,6 +531,10 @@ func updateOptionMap(key string, value string) (err error) {
 			operation_setting.SelfUseModeEnabled = boolValue
 		case "CheckSensitiveOnPromptEnabled":
 			setting.CheckSensitiveOnPromptEnabled = boolValue
+		case "CheckSensitiveOnCompletionEnabled":
+			setting.CheckSensitiveOnCompletionEnabled = boolValue
+		case "OutputSensitiveEnabled":
+			setting.OutputSensitiveEnabled = boolValue
 		case "ModelRequestRateLimitEnabled":
 			setting.ModelRequestRateLimitEnabled = boolValue
 		case "StopOnSensitiveEnabled":
@@ -548,6 +558,18 @@ func updateOptionMap(key string, value string) (err error) {
 		}
 	}
 	switch key {
+	case "OutputSensitiveAction":
+		if value == "error" || value == "truncate" {
+			setting.OutputSensitiveAction = value
+		}
+	case "OutputSensitiveMatchPercent":
+		if percent, parseErr := strconv.Atoi(value); parseErr == nil && percent >= 1 && percent <= 100 {
+			setting.OutputSensitiveMatchPercent = percent
+		} else {
+			return fmt.Errorf("OutputSensitiveMatchPercent must be between 1 and 100")
+		}
+	case "OutputSensitiveWords":
+		setting.OutputSensitiveWords = setting.ParseSensitiveWords(value)
 	case "EmailDomainWhitelist":
 		common.EmailDomainWhitelist = strings.Split(value, ",")
 	case "SMTPServer":

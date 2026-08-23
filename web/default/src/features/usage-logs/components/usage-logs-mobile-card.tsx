@@ -228,11 +228,13 @@ function CommonLogsCard<TData>({
           cell={cells.get('prompt_tokens')}
           primaryOnly
         />
-        <SummaryField
-          label={t('Client')}
-          cell={cells.get('client')}
-          primaryOnly
-        />
+        {Number(rowData?.type) === 2 && (
+          <SummaryField
+            label={t('Client')}
+            cell={cells.get('client')}
+            primaryOnly
+          />
+        )}
         <SummaryField
           label={t('Details')}
           cell={cells.get('content')}

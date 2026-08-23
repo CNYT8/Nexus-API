@@ -325,6 +325,9 @@ export type SecuritySettings = {
   ModelRequestRateLimitGroup: string
   CheckSensitiveEnabled: boolean
   CheckSensitiveOnPromptEnabled: boolean
+  OutputSensitiveEnabled: boolean
+  OutputSensitiveAction: 'truncate' | 'error'
+  OutputSensitiveWords: string
   SensitiveWords: string
   'fetch_setting.enable_ssrf_protection': boolean
   'fetch_setting.allow_private_ip': boolean

@@ -164,7 +164,10 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			if chunk.Message != nil && len(chunk.Message.ToolCalls) > 0 {
 				delta.Choices[0].Delta.ToolCalls, toolCallIndex = ollamaToolCallsToOpenAI(chunk.Message.ToolCalls, toolCallIndex, true)
 			}
-			if data, err := common.Marshal(delta); err == nil {
+			if info.ThinkingProcessStrip {
+				relaycommon.StripChatCompletionsThinking(&delta)
+			}
+			if data, err := common.Marshal(delta); err == nil && (!info.ThinkingProcessStrip || relaycommon.ChatCompletionsHasVisibleData(&delta)) {
 				_ = helper.StringData(c, string(data))
 			}
 			continue
@@ -315,7 +318,7 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 			msg.ToolCalls = rawToolCalls
 		}
 	}
-	if rc := reasoningBuilder.String(); rc != "" {
+	if rc := reasoningBuilder.String(); rc != "" && !info.ThinkingProcessStrip {
 		msg.ReasoningContent = &rc
 	}
 	full := dto.OpenAITextResponse{

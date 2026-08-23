@@ -898,7 +898,7 @@ export const getLogsColumns = ({
       title: t('客户端'),
       dataIndex: 'client',
       render: (text, record, index) => {
-        if (!text) {
+        if (record.type !== 2 || !text) {
           return <></>;
         }
         return (

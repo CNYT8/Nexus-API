@@ -25,6 +25,7 @@ import SettingsAnnouncements from '../../pages/Setting/Dashboard/SettingsAnnounc
 import SettingsFAQ from '../../pages/Setting/Dashboard/SettingsFAQ';
 import SettingsUptimeKuma from '../../pages/Setting/Dashboard/SettingsUptimeKuma';
 import SettingsDataDashboard from '../../pages/Setting/Dashboard/SettingsDataDashboard';
+import SettingsOutputSensitiveWords from '../../pages/Setting/Operation/SettingsOutputSensitiveWords';
 
 const DashboardSetting = () => {
   let [inputs, setInputs] = useState({
@@ -48,6 +49,10 @@ const DashboardSetting = () => {
     DataExportEnabled: false,
     DataExportDefaultTime: 'hour',
     DataExportInterval: 5,
+    OutputSensitiveEnabled: false,
+    OutputSensitiveAction: 'truncate',
+    OutputSensitiveMatchPercent: 20,
+    OutputSensitiveWords: '',
   });
 
   let [loading, setLoading] = useState(false);
@@ -144,6 +149,10 @@ const DashboardSetting = () => {
         {/* 数据看板设置 */}
         <Card style={{ marginTop: '10px' }}>
           <SettingsDataDashboard options={inputs} refresh={onRefresh} />
+        </Card>
+
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsOutputSensitiveWords options={inputs} refresh={onRefresh} />
         </Card>
 
         {/* 系统公告管理 */}

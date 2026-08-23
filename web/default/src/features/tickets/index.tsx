@@ -231,10 +231,10 @@ export function TicketCenter() {
                         <SelectItem key={ticketPriority} value={ticketPriority}>
                           {t(
                             ticketPriority === 'low'
-                              ? 'Low Priority'
+                              ? 'Low'
                               : ticketPriority === 'high'
-                                ? 'High Priority'
-                                : 'Medium Priority'
+                                ? 'High'
+                                : 'Medium'
                           )}
                         </SelectItem>
                       ))}

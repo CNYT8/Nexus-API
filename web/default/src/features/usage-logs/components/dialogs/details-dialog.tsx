@@ -604,7 +604,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 />
               )}
 
-              {props.log.client && (
+              {props.log.type === 2 && props.log.client && (
                 <DetailRow
                   label={t('Client')}
                   value={

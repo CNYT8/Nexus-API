@@ -180,6 +180,12 @@ type RelayInfo struct {
 
 	StreamStatus *StreamStatus
 
+	// ThinkingProcessStrip is a request-scoped copy of the channel policy. When
+	// enabled, reasoning is still parsed for usage/logging but never written to
+	// the downstream response.
+	ThinkingProcessStrip bool
+	ThinkingTagFilter    *ThinkingTagFilter
+
 	ThinkingContentInfo
 	TokenCountMeta
 	*ClaudeConvertInfo
@@ -250,7 +256,20 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 
 	channelSetting, ok := common.GetContextKeyType[dto.ChannelSettings](c, constant.ContextKeyChannelSetting)
 	if ok {
+		// Stripping takes precedence over conversion, including when a caller
+		// submits both flags through a custom client.
+		if channelSetting.ThinkingProcessStrip {
+			channelSetting.ThinkingToContent = false
+			if info.ThinkingTagFilter == nil {
+				info.ThinkingTagFilter = &ThinkingTagFilter{}
+			} else {
+				info.ThinkingTagFilter.Reset()
+			}
+		} else {
+			info.ThinkingTagFilter = nil
+		}
 		channelMeta.ChannelSetting = channelSetting
+		info.ThinkingProcessStrip = channelSetting.ThinkingProcessStrip
 	}
 
 	channelOtherSettings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting)

@@ -23,6 +23,9 @@
     "Low Priority": "Ưu tiên thấp",
     "Medium Priority": "Ưu tiên trung bình",
     "High Priority": "Ưu tiên cao",
+    "Low": "Thấp",
+    "Medium": "Trung bình",
+    "High": "Cao",
     "Select ticket priority": "Chọn mức độ ưu tiên",
     "Replied": "Đã phản hồi",
     "Closed": "Đã đóng",
@@ -4770,5 +4773,22 @@
     "OpenAI Models route is required to enable upstream model checks": "Cần có tuyến Mô hình OpenAI để bật kiểm tra mô hình thượng nguồn",
     "OpenAI Models route must use native forwarding": "Tuyến Mô hình OpenAI phải dùng chuyển tiếp nguyên bản",
     "OpenAI Models upstream path must not contain {model}": "Đường dẫn thượng nguồn của Mô hình OpenAI không được chứa {model}"
-  }
+  },
+  "输出敏感词设置": "Output sensitive word settings",
+  "启用输出敏感词": "Enable output sensitive filtering",
+  "命中后的处理": "Action on match",
+  "立即截断": "Truncate immediately",
+  "报错并停止": "Return an error and stop",
+  "输出敏感词列表": "Output sensitive patterns",
+  "支持几千字长文本；一行一个规则，可跨流式分片匹配。未开启时不会扫描输出。": "Supports multi-thousand-character patterns; one rule per line and matching across stream chunks. Output is not scanned when disabled.",
+  "粘贴输出敏感词或整段文本，一行一个规则": "Paste output patterns or a complete text, one rule per line",
+  "保存输出敏感词设置": "Save output sensitive word settings",
+  "Enable output sensitive filtering": "Enable output sensitive filtering",
+  "Scan upstream output only when enabled; matched output is truncated or stopped.": "Scan upstream output only when enabled; matched output is truncated or stopped.",
+  "Output sensitive action": "Output sensitive action",
+  "Truncate output": "Truncate output",
+  "Stop with an error": "Stop with an error",
+  "Output sensitive patterns": "Output sensitive patterns",
+  "Enter one pattern per line": "Enter one pattern per line",
+  "Long pasted patterns are supported. A matching fraction can trigger across stream chunks. Blank or disabled means no output scan.": "Long pasted patterns are supported. A matching fraction can trigger across stream chunks. Blank or disabled means no output scan."
 }

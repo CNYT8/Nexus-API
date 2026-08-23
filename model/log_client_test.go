@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -47,4 +48,45 @@ func TestResolveLogClientTruncatesLongUserAgent(t *testing.T) {
 	})
 
 	require.Len(t, []rune(ResolveLogClient(c)), maxLogClientLength)
+}
+
+func TestStripNonConsumeLogClientsKeepsOnlyConsumeClient(t *testing.T) {
+	logs := []*Log{
+		{Type: LogTypeConsume, Client: "Cherry Studio"},
+		{Type: LogTypeManage, Client: "browser"},
+		{Type: LogTypeLogin, Client: "browser"},
+		{Type: LogTypeError, Client: "OpenAI SDK"},
+		nil,
+	}
+
+	stripNonConsumeLogClients(logs)
+
+	require.Equal(t, "Cherry Studio", logs[0].Client)
+	require.Empty(t, logs[1].Client)
+	require.Empty(t, logs[2].Client)
+	require.Empty(t, logs[3].Client)
+}
+
+func TestFormatUserLogsStripsChannelPromptAndNonConsumeClient(t *testing.T) {
+	logs := []*Log{
+		{
+			Type:   LogTypeManage,
+			Client: "browser",
+			Other: common.MapToJsonStr(map[string]interface{}{
+				"is_system_prompt_overwritten": true,
+				"user_agent":                   "browser-agent",
+				"safe":                         "visible",
+			}),
+		},
+	}
+
+	formatUserLogs(logs, 10)
+
+	require.Empty(t, logs[0].Client)
+	require.Equal(t, 11, logs[0].Id)
+	other, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	require.NotContains(t, other, "is_system_prompt_overwritten")
+	require.NotContains(t, other, "user_agent")
+	require.Equal(t, "visible", other["safe"])
 }

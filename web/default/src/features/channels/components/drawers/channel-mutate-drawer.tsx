@@ -3334,6 +3334,27 @@ export function ChannelMutateDrawer({
 
                         <FormField
                           control={form.control}
+                          name='thinking_process_strip'
+                          render={({ field }) => (
+                            <FormItem className='flex items-center justify-between px-4 py-3'>
+                              <div className='space-y-0.5'>
+                                <FormLabel>{t('Thinking Process Strip')}</FormLabel>
+                                <FormDescription>
+                                  {t('Keep upstream reasoning and usage, show only final content downstream')}
+                                </FormDescription>
+                              </div>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
                           name='pass_through_body_enabled'
                           render={({ field }) => (
                             <FormItem className='flex items-center justify-between px-4 py-3'>
@@ -3344,10 +3365,7 @@ export function ChannelMutateDrawer({
                                 </FormDescription>
                               </div>
                               <FormControl>
-                                <Switch
-                                  checked={field.value}
-                                  onCheckedChange={field.onChange}
-                                />
+                                <Switch checked={field.value} onCheckedChange={field.onChange} />
                               </FormControl>
                             </FormItem>
                           )}

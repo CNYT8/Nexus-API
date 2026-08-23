@@ -20,12 +20,17 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useEffect, useState } from 'react';
 import { Card, Spin } from '@douyinfe/semi-ui';
 import SettingsChats from '../../pages/Setting/Chat/SettingsChats';
+import SettingsOutputSensitiveWords from '../../pages/Setting/Operation/SettingsOutputSensitiveWords';
 import { API, showError, toBoolean } from '../../helpers';
 
 const ChatsSetting = () => {
   let [inputs, setInputs] = useState({
     /* 聊天设置 */
     Chats: '[]',
+    OutputSensitiveEnabled: false,
+    OutputSensitiveAction: 'truncate',
+    OutputSensitiveMatchPercent: 20,
+    OutputSensitiveWords: '',
   });
 
   let [loading, setLoading] = useState(false);
@@ -73,6 +78,9 @@ const ChatsSetting = () => {
         {/* 聊天设置 */}
         <Card style={{ marginTop: '10px' }}>
           <SettingsChats options={inputs} refresh={onRefresh} />
+        </Card>
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsOutputSensitiveWords options={inputs} refresh={onRefresh} />
         </Card>
       </Spin>
     </>

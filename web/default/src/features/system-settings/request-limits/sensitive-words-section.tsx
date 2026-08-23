@@ -44,7 +44,11 @@ import { useUpdateOption } from '../hooks/use-update-option'
 const sensitiveSchema = z.object({
   CheckSensitiveEnabled: z.boolean(),
   CheckSensitiveOnPromptEnabled: z.boolean(),
-  SensitiveWords: z.string().optional(),
+  OutputSensitiveEnabled: z.boolean(),
+  OutputSensitiveAction: z.enum(['truncate', 'error']),
+  OutputSensitiveMatchPercent: z.number().int().min(1).max(100),
+  OutputSensitiveWords: z.string().optional(),
+  SensitiveWords: z.string().optional()
 })
 
 type SensitiveFormValues = z.infer<typeof sensitiveSchema>
@@ -134,6 +138,71 @@ export function SensitiveWordsSection({
               )}
             />
           </div>
+
+          <FormField
+            control={form.control}
+            name='OutputSensitiveEnabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Enable output sensitive filtering')}</FormLabel>
+                  <FormDescription>
+                    {t('Scan upstream output only when enabled; matched output is truncated or stopped.')}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch checked={field.value} onCheckedChange={field.onChange} />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='OutputSensitiveMatchPercent'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Match threshold percentage')}</FormLabel>
+                <FormControl>
+                  <input className='border-input bg-background h-9 w-32 rounded-md border px-3 text-sm' type='number' min={1} max={100} value={field.value} onChange={(event) => field.onChange(Number(event.target.value))} />
+                </FormControl>
+                <FormDescription>{t('Stop when a contiguous part reaches this percentage of a configured pattern.')}</FormDescription>
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='OutputSensitiveAction'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Output sensitive action')}</FormLabel>
+                <FormControl>
+                  <select className='border-input bg-background h-9 rounded-md border px-3 text-sm' value={field.value} onChange={field.onChange}>
+                    <option value='truncate'>{t('Truncate output')}</option>
+                    <option value='error'>{t('Stop with an error')}</option>
+                  </select>
+                </FormControl>
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='OutputSensitiveWords'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Output sensitive patterns')}</FormLabel>
+                <FormControl>
+                  <Textarea rows={12} placeholder={t('Enter one pattern per line')} {...field} />
+                </FormControl>
+                <FormDescription>
+                  {t('Long pasted patterns are supported. The percentage threshold can trigger across stream chunks. Blank or disabled means no output scan.')}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
 
           <FormField
             control={form.control}

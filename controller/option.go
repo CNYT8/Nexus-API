@@ -86,6 +86,10 @@ func GetOptions(c *gin.Context) {
 			strings.HasSuffix(k, "Key") ||
 			strings.HasSuffix(k, "secret") ||
 			strings.HasSuffix(k, "api_key")
+		// This route is protected by RootAuth. Keep the existing root-only
+		// settings editor functional by returning the rule text to root; regular
+		// users never reach this endpoint. Output rules are still never included
+		// in model logs, relay errors, or user-facing response payloads.
 		if isSensitiveKey {
 			continue
 		}

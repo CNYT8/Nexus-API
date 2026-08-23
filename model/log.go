@@ -94,7 +94,26 @@ const (
 	LogTypeLogin   = 7
 )
 
+func stripNonConsumeLogClients(logs []*Log) {
+	for _, log := range logs {
+		if log == nil || log.Type == LogTypeConsume {
+			continue
+		}
+		log.Client = ""
+		if strings.TrimSpace(log.Other) == "" {
+			continue
+		}
+		otherMap, err := common.StrToMap(log.Other)
+		if err != nil || otherMap == nil {
+			continue
+		}
+		delete(otherMap, "user_agent")
+		log.Other = common.MapToJsonStr(otherMap)
+	}
+}
+
 func formatUserLogs(logs []*Log, startIdx int) {
+	stripNonConsumeLogClients(logs)
 	for i := range logs {
 		logs[i].ChannelName = ""
 		var otherMap map[string]interface{}
@@ -106,6 +125,7 @@ func formatUserLogs(logs []*Log, startIdx int) {
 			// delete(otherMap, "reject_reason")
 			delete(otherMap, "stream_status")
 			delete(otherMap, "is_model_mapped")
+			delete(otherMap, "is_system_prompt_overwritten")
 			delete(otherMap, "upstream_model_name")
 			delete(otherMap, "original_model")
 			delete(otherMap, "original_model_name")
@@ -148,6 +168,7 @@ func stripChannelRestrictedLogMap(otherMap map[string]interface{}) {
 	delete(otherMap, "channel_type")
 	delete(otherMap, "channel_affinity")
 	delete(otherMap, "is_model_mapped")
+	delete(otherMap, "is_system_prompt_overwritten")
 	delete(otherMap, "upstream_model_name")
 	delete(otherMap, "original_model")
 	delete(otherMap, "original_model_name")
@@ -161,6 +182,7 @@ func stripChannelRestrictedAdminInfo(adminInfo map[string]interface{}) {
 	delete(adminInfo, "channel_name")
 	delete(adminInfo, "channel_type")
 	delete(adminInfo, "is_model_mapped")
+	delete(adminInfo, "is_system_prompt_overwritten")
 	delete(adminInfo, "upstream_model_name")
 	delete(adminInfo, "original_model")
 	delete(adminInfo, "original_model_name")
@@ -283,9 +305,10 @@ func buildOpField(action string, params map[string]interface{}) map[string]inter
 
 // RecordLoginLog 记录用户登录成功的审计日志（type=LogTypeLogin）。
 // username 由调用方传入（登录流程已持有用户对象），避免额外的数据库查询。
+// 客户端字段只属于实际调用产生的消费日志，登录日志不写入 Client。
 // content 为英文兜底文本（用于导出/经典前端）；action+params 供前端本地化渲染。
-// extra 可携带 login_method、user_agent 等附加信息（普通用户可见）。
-func RecordLoginLog(userId int, username string, content string, ip string, client string, action string, params map[string]interface{}, extra map[string]interface{}) {
+// extra 可携带 login_method 等非客户端附加信息（普通用户可见）。
+func RecordLoginLog(userId int, username string, content string, ip string, action string, params map[string]interface{}, extra map[string]interface{}) {
 	other := map[string]interface{}{}
 	for k, v := range extra {
 		other[k] = v
@@ -298,7 +321,6 @@ func RecordLoginLog(userId int, username string, content string, ip string, clie
 		Type:      LogTypeLogin,
 		Content:   content,
 		Ip:        ip,
-		Client:    sanitizeLogClient(client),
 		Other:     common.MapToJsonStr(other),
 	}
 	if err := LOG_DB.Create(log).Error; err != nil {
@@ -312,7 +334,8 @@ func RecordLoginLog(userId int, username string, content string, ip string, clie
 // action+params 写入 Other.op，供前端本地化渲染（普通用户可见，不含敏感信息）。
 // adminInfo 存放操作者身份（写入 Other.admin_info，普通用户查询时剥离）；
 // auditInfo 存放路由/方法/结果等中间件兜底信息（写入 Other.audit_info，普通用户查询时剥离）。
-func RecordOperationAuditLog(logUserId int, content string, ip string, client string, action string, params map[string]interface{}, adminInfo map[string]interface{}, auditInfo map[string]interface{}) {
+// 管理日志不写入 Client；该字段仅用于实际调用产生的消费日志。
+func RecordOperationAuditLog(logUserId int, content string, ip string, action string, params map[string]interface{}, adminInfo map[string]interface{}, auditInfo map[string]interface{}) {
 	username, _ := GetUsernameById(logUserId, false)
 	other := map[string]interface{}{
 		"op": buildOpField(action, params),
@@ -330,7 +353,6 @@ func RecordOperationAuditLog(logUserId int, content string, ip string, client st
 		Type:      LogTypeManage,
 		Content:   content,
 		Ip:        ip,
-		Client:    sanitizeLogClient(client),
 		Other:     common.MapToJsonStr(other),
 	}
 	if err := LOG_DB.Create(log).Error; err != nil {
@@ -408,7 +430,6 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		UseTime:          useTimeSeconds,
 		IsStream:         isStream,
 		Group:            group,
-		Client:           ResolveLogClient(c),
 		Ip: func() string {
 			if needRecordIp {
 				return c.ClientIP()
@@ -574,6 +595,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if err != nil {
 		return nil, 0, err
 	}
+	stripNonConsumeLogClients(logs)
 
 	channelIds := types.NewSet[int]()
 	for _, log := range logs {
