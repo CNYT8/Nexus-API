@@ -12,7 +12,6 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -27,17 +26,16 @@ func GeminiTextGenerationHandler(c *gin.Context, info *relaycommon.RelayInfo, re
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
-	logger.LogDebug(c, "Gemini native response body: %s", responseBody)
-	if setting.ShouldCheckOutputSensitive() {
-		matcher := relaycommon.NewOutputSensitiveMatcher(setting.OutputSensitiveWords, setting.OutputSensitiveMatchRatio())
-		cleaned, matched, word, scanErr := relaycommon.SanitizeOutputSensitiveJSON(responseBody, matcher)
+	logger.LogDebug(c, "Gemini native response body received: bytes=%d", len(responseBody))
+	if matcher := relaycommon.NewOutputSensitiveMatcherForConfig(info.OutputSensitiveConfig); matcher != nil {
+		cleaned, matched, _, scanErr := relaycommon.SanitizeOutputSensitiveJSONWithThinkingPolicy(responseBody, matcher, info.ThinkingProcessStrip)
 		if scanErr != nil {
 			return nil, types.NewOpenAIError(scanErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
 		if matched {
 			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "output_sensitive")
-			if setting.OutputSensitiveAction == "error" {
-				return nil, types.NewError(relaycommon.OutputSensitiveError(word), types.ErrorCodeSensitiveWordsDetected)
+			if info.OutputSensitiveConfig.Action == "error" {
+				return nil, types.NewError(relaycommon.OutputSensitiveError(), types.ErrorCodeSensitiveWordsDetected, types.ErrOptionWithSkipRetry())
 			}
 			responseBody = cleaned
 		}

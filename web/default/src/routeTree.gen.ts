@@ -40,19 +40,19 @@ import { Route as PricingModelIdIndexRouteImport } from './routes/pricing/$model
 import { Route as AuthenticatedWalletIndexRouteImport } from './routes/_authenticated/wallet/index'
 import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authenticated/users/index'
 import { Route as AuthenticatedUsageLogsIndexRouteImport } from './routes/_authenticated/usage-logs/index'
+import { Route as AuthenticatedTicketsIndexRouteImport } from './routes/_authenticated/tickets/index'
 import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_authenticated/system-settings/index'
 import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_authenticated/subscriptions/index'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
-import { Route as AuthenticatedModelMonitorIndexRouteImport } from './routes/_authenticated/model-monitor/index'
-import { Route as AuthenticatedTicketsIndexRouteImport } from './routes/_authenticated/tickets/index'
-import { Route as AuthenticatedTicketsManageRouteImport } from './routes/_authenticated/tickets/manage'
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
+import { Route as AuthenticatedModelMonitorIndexRouteImport } from './routes/_authenticated/model-monitor/index'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
+import { Route as AuthenticatedTicketsManageRouteImport } from './routes/_authenticated/tickets/manage'
 import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authenticated/models/$section'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 import { Route as AuthenticatedDashboardSectionRouteImport } from './routes/_authenticated/dashboard/$section'
@@ -127,14 +127,14 @@ const ConsoleTopupRoute = ConsoleTopupRouteImport.update({
   path: '/console/topup',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ConsoleLogRoute = ConsoleLogRouteImport.update({
-  id: '/console/log',
-  path: '/console/log',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ConsoleModelMonitorRoute = ConsoleModelMonitorRouteImport.update({
   id: '/console/model-monitor',
   path: '/console/model-monitor',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConsoleLogRoute = ConsoleLogRouteImport.update({
+  id: '/console/log',
+  path: '/console/log',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedChat2linkRoute = AuthenticatedChat2linkRouteImport.update({
@@ -230,6 +230,12 @@ const AuthenticatedUsageLogsIndexRoute =
     path: '/usage-logs/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedTicketsIndexRoute =
+  AuthenticatedTicketsIndexRouteImport.update({
+    id: '/tickets/',
+    path: '/tickets/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedSystemSettingsIndexRoute =
   AuthenticatedSystemSettingsIndexRouteImport.update({
     id: '/',
@@ -272,17 +278,6 @@ const AuthenticatedModelMonitorIndexRoute =
     path: '/model-monitor/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedTicketsIndexRoute = AuthenticatedTicketsIndexRouteImport.update({
-  id: '/tickets/',
-  path: '/tickets',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedTicketsManageRoute =
-  AuthenticatedTicketsManageRouteImport.update({
-    id: '/tickets/manage',
-    path: '/tickets/manage',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
 const AuthenticatedKeysIndexRoute = AuthenticatedKeysIndexRouteImport.update({
   id: '/keys/',
   path: '/keys/',
@@ -304,6 +299,12 @@ const AuthenticatedUsageLogsSectionRoute =
   AuthenticatedUsageLogsSectionRouteImport.update({
     id: '/usage-logs/$section',
     path: '/usage-logs/$section',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedTicketsManageRoute =
+  AuthenticatedTicketsManageRouteImport.update({
+    id: '/tickets/manage',
+    path: '/tickets/manage',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedModelsSectionRoute =
@@ -456,19 +457,19 @@ export interface FileRoutesByFullPath {
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/tickets/manage': typeof AuthenticatedTicketsManageRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
   '/model-monitor/': typeof AuthenticatedModelMonitorIndexRoute
-  '/tickets/': typeof AuthenticatedTicketsIndexRoute
-  '/tickets/manage': typeof AuthenticatedTicketsManageRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
   '/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
+  '/tickets/': typeof AuthenticatedTicketsIndexRoute
   '/usage-logs/': typeof AuthenticatedUsageLogsIndexRoute
   '/users/': typeof AuthenticatedUsersIndexRoute
   '/wallet/': typeof AuthenticatedWalletIndexRoute
@@ -480,6 +481,7 @@ export interface FileRoutesByFullPath {
   '/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
   '/system-settings/security/$section': typeof AuthenticatedSystemSettingsSecuritySectionRoute
   '/system-settings/site/$section': typeof AuthenticatedSystemSettingsSiteSectionRoute
+  '/system-settings/admin-permissions/': typeof AuthenticatedSystemSettingsAdminPermissionsIndexRoute
   '/system-settings/auth/': typeof AuthenticatedSystemSettingsAuthIndexRoute
   '/system-settings/billing/': typeof AuthenticatedSystemSettingsBillingIndexRoute
   '/system-settings/content/': typeof AuthenticatedSystemSettingsContentIndexRoute
@@ -487,7 +489,6 @@ export interface FileRoutesByFullPath {
   '/system-settings/operations/': typeof AuthenticatedSystemSettingsOperationsIndexRoute
   '/system-settings/security/': typeof AuthenticatedSystemSettingsSecurityIndexRoute
   '/system-settings/site/': typeof AuthenticatedSystemSettingsSiteIndexRoute
-  '/system-settings/admin-permissions/': typeof AuthenticatedSystemSettingsAdminPermissionsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -519,19 +520,19 @@ export interface FileRoutesByTo {
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/tickets/manage': typeof AuthenticatedTicketsManageRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
   '/model-monitor': typeof AuthenticatedModelMonitorIndexRoute
-  '/tickets': typeof AuthenticatedTicketsIndexRoute
-  '/tickets/manage': typeof AuthenticatedTicketsManageRoute
   '/models': typeof AuthenticatedModelsIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
   '/redemption-codes': typeof AuthenticatedRedemptionCodesIndexRoute
   '/subscriptions': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-settings': typeof AuthenticatedSystemSettingsIndexRoute
+  '/tickets': typeof AuthenticatedTicketsIndexRoute
   '/usage-logs': typeof AuthenticatedUsageLogsIndexRoute
   '/users': typeof AuthenticatedUsersIndexRoute
   '/wallet': typeof AuthenticatedWalletIndexRoute
@@ -543,6 +544,7 @@ export interface FileRoutesByTo {
   '/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
   '/system-settings/security/$section': typeof AuthenticatedSystemSettingsSecuritySectionRoute
   '/system-settings/site/$section': typeof AuthenticatedSystemSettingsSiteSectionRoute
+  '/system-settings/admin-permissions': typeof AuthenticatedSystemSettingsAdminPermissionsIndexRoute
   '/system-settings/auth': typeof AuthenticatedSystemSettingsAuthIndexRoute
   '/system-settings/billing': typeof AuthenticatedSystemSettingsBillingIndexRoute
   '/system-settings/content': typeof AuthenticatedSystemSettingsContentIndexRoute
@@ -550,7 +552,6 @@ export interface FileRoutesByTo {
   '/system-settings/operations': typeof AuthenticatedSystemSettingsOperationsIndexRoute
   '/system-settings/security': typeof AuthenticatedSystemSettingsSecurityIndexRoute
   '/system-settings/site': typeof AuthenticatedSystemSettingsSiteIndexRoute
-  '/system-settings/admin-permissions': typeof AuthenticatedSystemSettingsAdminPermissionsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -586,19 +587,19 @@ export interface FileRoutesById {
   '/_authenticated/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/_authenticated/tickets/manage': typeof AuthenticatedTicketsManageRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
   '/_authenticated/model-monitor/': typeof AuthenticatedModelMonitorIndexRoute
-  '/_authenticated/tickets/': typeof AuthenticatedTicketsIndexRoute
-  '/_authenticated/tickets/manage': typeof AuthenticatedTicketsManageRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
   '/_authenticated/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/_authenticated/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/_authenticated/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
+  '/_authenticated/tickets/': typeof AuthenticatedTicketsIndexRoute
   '/_authenticated/usage-logs/': typeof AuthenticatedUsageLogsIndexRoute
   '/_authenticated/users/': typeof AuthenticatedUsersIndexRoute
   '/_authenticated/wallet/': typeof AuthenticatedWalletIndexRoute
@@ -610,6 +611,7 @@ export interface FileRoutesById {
   '/_authenticated/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
   '/_authenticated/system-settings/security/$section': typeof AuthenticatedSystemSettingsSecuritySectionRoute
   '/_authenticated/system-settings/site/$section': typeof AuthenticatedSystemSettingsSiteSectionRoute
+  '/_authenticated/system-settings/admin-permissions/': typeof AuthenticatedSystemSettingsAdminPermissionsIndexRoute
   '/_authenticated/system-settings/auth/': typeof AuthenticatedSystemSettingsAuthIndexRoute
   '/_authenticated/system-settings/billing/': typeof AuthenticatedSystemSettingsBillingIndexRoute
   '/_authenticated/system-settings/content/': typeof AuthenticatedSystemSettingsContentIndexRoute
@@ -617,7 +619,6 @@ export interface FileRoutesById {
   '/_authenticated/system-settings/operations/': typeof AuthenticatedSystemSettingsOperationsIndexRoute
   '/_authenticated/system-settings/security/': typeof AuthenticatedSystemSettingsSecurityIndexRoute
   '/_authenticated/system-settings/site/': typeof AuthenticatedSystemSettingsSiteIndexRoute
-  '/_authenticated/system-settings/admin-permissions/': typeof AuthenticatedSystemSettingsAdminPermissionsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -652,19 +653,19 @@ export interface FileRouteTypes {
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
+    | '/tickets/manage'
     | '/usage-logs/$section'
     | '/channels/'
     | '/dashboard/'
     | '/keys/'
     | '/model-monitor/'
-    | '/tickets/'
-    | '/tickets/manage'
     | '/models/'
     | '/playground/'
     | '/profile/'
     | '/redemption-codes/'
     | '/subscriptions/'
     | '/system-settings/'
+    | '/tickets/'
     | '/usage-logs/'
     | '/users/'
     | '/wallet/'
@@ -676,6 +677,7 @@ export interface FileRouteTypes {
     | '/system-settings/operations/$section'
     | '/system-settings/security/$section'
     | '/system-settings/site/$section'
+    | '/system-settings/admin-permissions/'
     | '/system-settings/auth/'
     | '/system-settings/billing/'
     | '/system-settings/content/'
@@ -683,7 +685,6 @@ export interface FileRouteTypes {
     | '/system-settings/operations/'
     | '/system-settings/security/'
     | '/system-settings/site/'
-    | '/system-settings/admin-permissions/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -715,19 +716,19 @@ export interface FileRouteTypes {
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
+    | '/tickets/manage'
     | '/usage-logs/$section'
     | '/channels'
     | '/dashboard'
     | '/keys'
     | '/model-monitor'
-    | '/tickets'
-    | '/tickets/manage'
     | '/models'
     | '/playground'
     | '/profile'
     | '/redemption-codes'
     | '/subscriptions'
     | '/system-settings'
+    | '/tickets'
     | '/usage-logs'
     | '/users'
     | '/wallet'
@@ -739,6 +740,7 @@ export interface FileRouteTypes {
     | '/system-settings/operations/$section'
     | '/system-settings/security/$section'
     | '/system-settings/site/$section'
+    | '/system-settings/admin-permissions'
     | '/system-settings/auth'
     | '/system-settings/billing'
     | '/system-settings/content'
@@ -746,7 +748,6 @@ export interface FileRouteTypes {
     | '/system-settings/operations'
     | '/system-settings/security'
     | '/system-settings/site'
-    | '/system-settings/admin-permissions'
   id:
     | '__root__'
     | '/'
@@ -781,19 +782,19 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard/$section'
     | '/_authenticated/errors/$error'
     | '/_authenticated/models/$section'
+    | '/_authenticated/tickets/manage'
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/keys/'
     | '/_authenticated/model-monitor/'
-    | '/_authenticated/tickets/'
-    | '/_authenticated/tickets/manage'
     | '/_authenticated/models/'
     | '/_authenticated/playground/'
     | '/_authenticated/profile/'
     | '/_authenticated/redemption-codes/'
     | '/_authenticated/subscriptions/'
     | '/_authenticated/system-settings/'
+    | '/_authenticated/tickets/'
     | '/_authenticated/usage-logs/'
     | '/_authenticated/users/'
     | '/_authenticated/wallet/'
@@ -805,6 +806,7 @@ export interface FileRouteTypes {
     | '/_authenticated/system-settings/operations/$section'
     | '/_authenticated/system-settings/security/$section'
     | '/_authenticated/system-settings/site/$section'
+    | '/_authenticated/system-settings/admin-permissions/'
     | '/_authenticated/system-settings/auth/'
     | '/_authenticated/system-settings/billing/'
     | '/_authenticated/system-settings/content/'
@@ -812,7 +814,6 @@ export interface FileRouteTypes {
     | '/_authenticated/system-settings/operations/'
     | '/_authenticated/system-settings/security/'
     | '/_authenticated/system-settings/site/'
-    | '/_authenticated/system-settings/admin-permissions/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -916,18 +917,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConsoleTopupRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/console/log': {
-      id: '/console/log'
-      path: '/console/log'
-      fullPath: '/console/log'
-      preLoaderRoute: typeof ConsoleLogRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/console/model-monitor': {
       id: '/console/model-monitor'
       path: '/console/model-monitor'
       fullPath: '/console/model-monitor'
       preLoaderRoute: typeof ConsoleModelMonitorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/console/log': {
+      id: '/console/log'
+      path: '/console/log'
+      fullPath: '/console/log'
+      preLoaderRoute: typeof ConsoleLogRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/chat2link': {
@@ -1056,6 +1057,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedUsageLogsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/tickets/': {
+      id: '/_authenticated/tickets/'
+      path: '/tickets'
+      fullPath: '/tickets/'
+      preLoaderRoute: typeof AuthenticatedTicketsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/system-settings/': {
       id: '/_authenticated/system-settings/'
       path: '/'
@@ -1105,20 +1113,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedModelMonitorIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/tickets/': {
-      id: '/_authenticated/tickets/'
-      path: '/tickets'
-      fullPath: '/tickets/'
-      preLoaderRoute: typeof AuthenticatedTicketsIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/tickets/manage': {
-      id: '/_authenticated/tickets/manage'
-      path: '/tickets/manage'
-      fullPath: '/tickets/manage'
-      preLoaderRoute: typeof AuthenticatedTicketsManageRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/keys/': {
       id: '/_authenticated/keys/'
       path: '/keys'
@@ -1145,6 +1139,13 @@ declare module '@tanstack/react-router' {
       path: '/usage-logs/$section'
       fullPath: '/usage-logs/$section'
       preLoaderRoute: typeof AuthenticatedUsageLogsSectionRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/tickets/manage': {
+      id: '/_authenticated/tickets/manage'
+      path: '/tickets/manage'
+      fullPath: '/tickets/manage'
+      preLoaderRoute: typeof AuthenticatedTicketsManageRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/models/$section': {
@@ -1325,6 +1326,7 @@ interface AuthenticatedSystemSettingsRouteRouteChildren {
   AuthenticatedSystemSettingsOperationsSectionRoute: typeof AuthenticatedSystemSettingsOperationsSectionRoute
   AuthenticatedSystemSettingsSecuritySectionRoute: typeof AuthenticatedSystemSettingsSecuritySectionRoute
   AuthenticatedSystemSettingsSiteSectionRoute: typeof AuthenticatedSystemSettingsSiteSectionRoute
+  AuthenticatedSystemSettingsAdminPermissionsIndexRoute: typeof AuthenticatedSystemSettingsAdminPermissionsIndexRoute
   AuthenticatedSystemSettingsAuthIndexRoute: typeof AuthenticatedSystemSettingsAuthIndexRoute
   AuthenticatedSystemSettingsBillingIndexRoute: typeof AuthenticatedSystemSettingsBillingIndexRoute
   AuthenticatedSystemSettingsContentIndexRoute: typeof AuthenticatedSystemSettingsContentIndexRoute
@@ -1332,7 +1334,6 @@ interface AuthenticatedSystemSettingsRouteRouteChildren {
   AuthenticatedSystemSettingsOperationsIndexRoute: typeof AuthenticatedSystemSettingsOperationsIndexRoute
   AuthenticatedSystemSettingsSecurityIndexRoute: typeof AuthenticatedSystemSettingsSecurityIndexRoute
   AuthenticatedSystemSettingsSiteIndexRoute: typeof AuthenticatedSystemSettingsSiteIndexRoute
-  AuthenticatedSystemSettingsAdminPermissionsIndexRoute: typeof AuthenticatedSystemSettingsAdminPermissionsIndexRoute
 }
 
 const AuthenticatedSystemSettingsRouteRouteChildren: AuthenticatedSystemSettingsRouteRouteChildren =
@@ -1353,6 +1354,8 @@ const AuthenticatedSystemSettingsRouteRouteChildren: AuthenticatedSystemSettings
       AuthenticatedSystemSettingsSecuritySectionRoute,
     AuthenticatedSystemSettingsSiteSectionRoute:
       AuthenticatedSystemSettingsSiteSectionRoute,
+    AuthenticatedSystemSettingsAdminPermissionsIndexRoute:
+      AuthenticatedSystemSettingsAdminPermissionsIndexRoute,
     AuthenticatedSystemSettingsAuthIndexRoute:
       AuthenticatedSystemSettingsAuthIndexRoute,
     AuthenticatedSystemSettingsBillingIndexRoute:
@@ -1367,8 +1370,6 @@ const AuthenticatedSystemSettingsRouteRouteChildren: AuthenticatedSystemSettings
       AuthenticatedSystemSettingsSecurityIndexRoute,
     AuthenticatedSystemSettingsSiteIndexRoute:
       AuthenticatedSystemSettingsSiteIndexRoute,
-    AuthenticatedSystemSettingsAdminPermissionsIndexRoute:
-      AuthenticatedSystemSettingsAdminPermissionsIndexRoute,
   }
 
 const AuthenticatedSystemSettingsRouteRouteWithChildren =
@@ -1383,18 +1384,18 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardSectionRoute: typeof AuthenticatedDashboardSectionRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
+  AuthenticatedTicketsManageRoute: typeof AuthenticatedTicketsManageRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
   AuthenticatedModelMonitorIndexRoute: typeof AuthenticatedModelMonitorIndexRoute
-  AuthenticatedTicketsIndexRoute: typeof AuthenticatedTicketsIndexRoute
-  AuthenticatedTicketsManageRoute: typeof AuthenticatedTicketsManageRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
   AuthenticatedRedemptionCodesIndexRoute: typeof AuthenticatedRedemptionCodesIndexRoute
   AuthenticatedSubscriptionsIndexRoute: typeof AuthenticatedSubscriptionsIndexRoute
+  AuthenticatedTicketsIndexRoute: typeof AuthenticatedTicketsIndexRoute
   AuthenticatedUsageLogsIndexRoute: typeof AuthenticatedUsageLogsIndexRoute
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
   AuthenticatedWalletIndexRoute: typeof AuthenticatedWalletIndexRoute
@@ -1408,19 +1409,19 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardSectionRoute: AuthenticatedDashboardSectionRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
+  AuthenticatedTicketsManageRoute: AuthenticatedTicketsManageRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
   AuthenticatedModelMonitorIndexRoute: AuthenticatedModelMonitorIndexRoute,
-  AuthenticatedTicketsIndexRoute: AuthenticatedTicketsIndexRoute,
-  AuthenticatedTicketsManageRoute: AuthenticatedTicketsManageRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
   AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
   AuthenticatedRedemptionCodesIndexRoute:
     AuthenticatedRedemptionCodesIndexRoute,
   AuthenticatedSubscriptionsIndexRoute: AuthenticatedSubscriptionsIndexRoute,
+  AuthenticatedTicketsIndexRoute: AuthenticatedTicketsIndexRoute,
   AuthenticatedUsageLogsIndexRoute: AuthenticatedUsageLogsIndexRoute,
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,
   AuthenticatedWalletIndexRoute: AuthenticatedWalletIndexRoute,

@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -185,6 +186,8 @@ type RelayInfo struct {
 	// the downstream response.
 	ThinkingProcessStrip bool
 	ThinkingTagFilter    *ThinkingTagFilter
+
+	OutputSensitiveConfig setting.OutputSensitiveConfig
 
 	ThinkingContentInfo
 	TokenCountMeta
@@ -532,6 +535,8 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		RequestURLPath:  c.Request.URL.String(),
 		RequestHeaders:  cloneRequestHeaders(c),
 		IsStream:        isStream,
+
+		OutputSensitiveConfig: setting.GetOutputSensitiveConfig(),
 
 		StartTime:         startTime,
 		FirstResponseTime: startTime.Add(-time.Second),

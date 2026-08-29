@@ -93,6 +93,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
+			if helper.OutputSensitiveStreamBlocked(c) {
+				return
+			}
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			if relayInfo != nil && !c.GetBool(relayErrorLogRecordedKey) {
 				recordRelayErrorLog(c, relayInfo, nil, newAPIError)

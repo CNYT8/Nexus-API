@@ -1,11 +1,7 @@
 package helper
 
 import (
-	"errors"
-
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/setting"
-	"github.com/QuantumNous/new-api/types"
 )
 
 // StreamResult is passed to each dataHandler invocation, providing methods
@@ -53,16 +49,4 @@ func (r *StreamResult) IsStopped() bool {
 // reset clears the per-chunk stopped flag so the object can be reused.
 func (r *StreamResult) reset() {
 	r.stopped = false
-}
-
-// OutputSensitiveStreamError converts the scanner terminal state into a
-// protocol-level error only when the administrator selected the error action.
-// Truncation deliberately remains a successful, terminated response.
-func OutputSensitiveStreamError(info *relaycommon.RelayInfo) *types.NewAPIError {
-	if info == nil || info.StreamStatus == nil ||
-		info.StreamStatus.EndReason != relaycommon.StreamEndReasonOutputSensitive ||
-		setting.OutputSensitiveAction != "error" {
-		return nil
-	}
-	return types.NewError(errors.New("output sensitive pattern matched"), types.ErrorCodeSensitiveWordsDetected, types.ErrOptionWithSkipRetry())
 }

@@ -105,6 +105,10 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	var responseId = common.GetUUID()
 	var created = time.Now().Unix()
 	var toolCallIndex int
+	var outputSensitiveMatchers map[string]*relaycommon.OutputSensitiveMatcher
+	if info.OutputSensitiveConfig.Enabled && len(info.OutputSensitiveConfig.Patterns) > 0 {
+		outputSensitiveMatchers = make(map[string]*relaycommon.OutputSensitiveMatcher)
+	}
 	start := helper.GenerateStartEmptyResponse(responseId, created, model, nil)
 	if data, err := common.Marshal(start); err == nil {
 		_ = helper.StringData(c, string(data))
@@ -118,8 +122,33 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		}
 		var chunk ollamaChatStreamChunk
 		if err := common.Unmarshal([]byte(line), &chunk); err != nil {
-			logger.LogError(c, "ollama stream json decode error: "+err.Error()+" line="+line)
+			logger.LogError(c, fmt.Sprintf("ollama stream json decode error: %v bytes=%d", err, len(line)))
 			return usage, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		}
+		if outputSensitiveMatchers != nil && !chunk.Done {
+			matched := false
+			for _, fragment := range relaycommon.OutputSensitiveTextFragments(line) {
+				if info.ThinkingProcessStrip && fragment.HiddenThinking {
+					continue
+				}
+				matcher := outputSensitiveMatchers[fragment.Path]
+				if matcher == nil {
+					matcher = relaycommon.NewOutputSensitiveMatcherForConfig(info.OutputSensitiveConfig)
+					outputSensitiveMatchers[fragment.Path] = matcher
+				}
+				if hit, _ := matcher.Scan(fragment.Text); hit {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonOutputSensitive, relaycommon.OutputSensitiveError())
+				if info.OutputSensitiveConfig.Action == "error" {
+					info.StreamStatus.RecordError("output sensitive pattern matched")
+				}
+				helper.EmitOutputSensitiveStreamTerminal(c, info)
+				return usage, nil
+			}
 		}
 		if chunk.Model != "" {
 			model = chunk.Model
@@ -215,7 +244,7 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	service.CloseResponseBodyGracefully(resp)
 	raw := string(body)
 	if common.DebugEnabled {
-		println("ollama non-stream raw resp:", raw)
+		logger.LogDebug(c, fmt.Sprintf("ollama non-stream response bytes=%d", len(body)))
 	}
 
 	lines := strings.Split(raw, "\n")
@@ -333,7 +362,22 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 		}},
 		Usage: *usage,
 	}
-	out, _ := common.Marshal(full)
+	out, err := common.Marshal(full)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError)
+	}
+	if matcher := relaycommon.NewOutputSensitiveMatcherForConfig(info.OutputSensitiveConfig); matcher != nil {
+		cleaned, matched, _, scanErr := relaycommon.SanitizeOutputSensitiveJSONWithThinkingPolicy(out, matcher, info.ThinkingProcessStrip)
+		if scanErr != nil {
+			return nil, types.NewOpenAIError(scanErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		}
+		if matched {
+			if info.OutputSensitiveConfig.Action == "error" {
+				return nil, types.NewOpenAIError(relaycommon.OutputSensitiveError(), types.ErrorCodeSensitiveWordsDetected, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+			}
+			out = cleaned
+		}
+	}
 	service.IOCopyBytesGracefully(c, resp, out)
 	return usage, nil
 }

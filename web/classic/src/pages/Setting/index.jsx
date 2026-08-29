@@ -49,6 +49,7 @@ import ModelSetting from '../../components/settings/ModelSetting';
 import DashboardSetting from '../../components/settings/DashboardSetting';
 import RatioSetting from '../../components/settings/RatioSetting';
 import ChatsSetting from '../../components/settings/ChatsSetting';
+import OutputSensitiveSetting from '../../components/settings/OutputSensitiveSetting';
 import DrawingSetting from '../../components/settings/DrawingSetting';
 import PaymentSetting from '../../components/settings/PaymentSetting';
 import MembershipSetting from '../../components/settings/MembershipSetting';
@@ -95,6 +96,16 @@ const Setting = () => {
       ),
       content: <DashboardSetting />,
       itemKey: 'dashboard',
+    });
+    panes.push({
+      tab: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <ShieldAlert size={18} />
+          {t('输出敏感词设置')}
+        </span>
+      ),
+      content: <OutputSensitiveSetting />,
+      itemKey: 'output-sensitive',
     });
     panes.push({
       tab: (

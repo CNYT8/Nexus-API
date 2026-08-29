@@ -1,18 +1,97 @@
 package helper
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+type outputSensitiveStreamBlockContextKey struct{}
+
+type outputSensitiveStreamBlockState struct {
+	blocked atomic.Bool
+}
+
+var outputSensitiveStreamBlockKey outputSensitiveStreamBlockContextKey
+
+func ensureOutputSensitiveStreamBlockState(c *gin.Context) *outputSensitiveStreamBlockState {
+	if c == nil || c.Request == nil {
+		return nil
+	}
+	if state, ok := c.Request.Context().Value(outputSensitiveStreamBlockKey).(*outputSensitiveStreamBlockState); ok {
+		return state
+	}
+	state := &outputSensitiveStreamBlockState{}
+	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), outputSensitiveStreamBlockKey, state))
+	return state
+}
+
+func outputSensitiveStreamBlockStateFor(c *gin.Context) *outputSensitiveStreamBlockState {
+	if c == nil || c.Request == nil {
+		return nil
+	}
+	state, _ := c.Request.Context().Value(outputSensitiveStreamBlockKey).(*outputSensitiveStreamBlockState)
+	return state
+}
+
+func outputSensitiveStreamBlocked(c *gin.Context) bool {
+	state := outputSensitiveStreamBlockStateFor(c)
+	return state != nil && state.blocked.Load()
+}
+
+// OutputSensitiveStreamBlocked reports whether this request already emitted a
+// policy terminal. Callers must not append another response body afterward.
+func OutputSensitiveStreamBlocked(c *gin.Context) bool {
+	return outputSensitiveStreamBlocked(c)
+}
+
+func EmitOutputSensitiveStreamTerminal(c *gin.Context, info *relaycommon.RelayInfo) {
+	if c == nil || info == nil {
+		return
+	}
+	state := ensureOutputSensitiveStreamBlockState(c)
+	if state != nil && state.blocked.Swap(true) {
+		return
+	}
+
+	var payload string
+	if info.OutputSensitiveConfig.Action == "error" {
+		switch info.RelayFormat {
+		case types.RelayFormatClaude:
+			payload = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Output blocked by policy.\"}}\n\n"
+		case types.RelayFormatOpenAIResponses:
+			payload = "event: error\ndata: {\"type\":\"error\",\"code\":\"sensitive_words_detected\",\"message\":\"Output blocked by policy.\",\"param\":null}\n\n"
+		case types.RelayFormatGemini:
+			payload = "data: {\"error\":{\"code\":403,\"message\":\"Output blocked by policy.\",\"status\":\"PERMISSION_DENIED\"}}\n\n"
+		default:
+			payload = "data: {\"error\":{\"message\":\"Output blocked by policy.\",\"type\":\"invalid_request_error\",\"code\":\"sensitive_words_detected\"}}\n\n"
+		}
+	} else {
+		switch info.RelayFormat {
+		case types.RelayFormatClaude:
+			payload = "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+		case types.RelayFormatOpenAI:
+			payload = "data: [DONE]\n\n"
+		}
+	}
+	if payload == "" || requestContextDone(c) {
+		return
+	}
+	ExtendWriteDeadline(c)
+	_, _ = c.Writer.Write([]byte(payload))
+	_ = FlushWriter(c)
+}
 
 func FlushWriter(c *gin.Context) (err error) {
 	defer func() {
@@ -59,6 +138,9 @@ func SetEventStreamHeaders(c *gin.Context) {
 }
 
 func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
+	if outputSensitiveStreamBlocked(c) {
+		return nil
+	}
 	if requestContextDone(c) {
 		return nil
 	}
@@ -75,6 +157,9 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 }
 
 func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
+	if outputSensitiveStreamBlocked(c) {
+		return
+	}
 	if requestContextDone(c) {
 		return
 	}
@@ -85,6 +170,9 @@ func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
 }
 
 func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data string) error {
+	if outputSensitiveStreamBlocked(c) {
+		return nil
+	}
 	if requestContextDone(c) {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
@@ -95,6 +183,9 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 }
 
 func StringData(c *gin.Context, str string) error {
+	if outputSensitiveStreamBlocked(c) {
+		return nil
+	}
 	if c == nil || c.Writer == nil {
 		return errors.New("context or writer is nil")
 	}

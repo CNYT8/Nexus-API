@@ -2,10 +2,10 @@ package model
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -24,6 +24,27 @@ import (
 
 const ticketEncryptionSecretOptionKey = "TicketEncryptionSecret"
 const webRiskFingerprintSecretOptionKey = "WebRiskFingerprintSecret"
+
+const (
+	outputSensitiveEnabledOptionKey      = "OutputSensitiveEnabled"
+	outputSensitiveActionOptionKey       = "OutputSensitiveAction"
+	outputSensitiveMatchPercentOptionKey = "OutputSensitiveMatchPercent"
+	outputSensitiveWordsOptionKey        = "OutputSensitiveWords"
+)
+
+var outputSensitiveUpdateMutex sync.Mutex
+
+func IsOutputSensitiveOptionKey(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case strings.ToLower(outputSensitiveEnabledOptionKey),
+		strings.ToLower(outputSensitiveActionOptionKey),
+		strings.ToLower(outputSensitiveMatchPercentOptionKey),
+		strings.ToLower(outputSensitiveWordsOptionKey):
+		return true
+	default:
+		return false
+	}
+}
 
 type Option struct {
 	Key   string `json:"key" gorm:"primaryKey"`
@@ -183,10 +204,12 @@ func InitOptionMap() {
 	common.OptionMap["ModelRequestRateLimitEnabled"] = strconv.FormatBool(setting.ModelRequestRateLimitEnabled)
 	common.OptionMap["CheckSensitiveOnPromptEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnPromptEnabled)
 	common.OptionMap["CheckSensitiveOnCompletionEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnCompletionEnabled)
-	common.OptionMap["OutputSensitiveEnabled"] = strconv.FormatBool(setting.OutputSensitiveEnabled)
-	common.OptionMap["OutputSensitiveAction"] = setting.OutputSensitiveAction
-	common.OptionMap["OutputSensitiveMatchPercent"] = strconv.Itoa(setting.OutputSensitiveMatchPercent)
-	common.OptionMap["OutputSensitiveWords"] = strings.Join(setting.OutputSensitiveWords, "\n")
+	outputSensitiveConfig := setting.GetOutputSensitiveConfig()
+	outputSensitiveWordsJSON, _ := setting.OutputSensitivePatternsJSONString(outputSensitiveConfig.Patterns)
+	common.OptionMap["OutputSensitiveEnabled"] = strconv.FormatBool(outputSensitiveConfig.Enabled)
+	common.OptionMap["OutputSensitiveAction"] = outputSensitiveConfig.Action
+	common.OptionMap["OutputSensitiveMatchPercent"] = strconv.Itoa(outputSensitiveConfig.MatchPercent)
+	common.OptionMap["OutputSensitiveWords"] = outputSensitiveWordsJSON
 	common.OptionMap["StopOnSensitiveEnabled"] = strconv.FormatBool(setting.StopOnSensitiveEnabled)
 	common.OptionMap["SensitiveWords"] = setting.SensitiveWordsToString()
 	common.OptionMap["StreamCacheQueueLength"] = strconv.Itoa(setting.StreamCacheQueueLength)
@@ -310,11 +333,53 @@ func hasLegacyEncryptedTicketRows() (bool, error) {
 }
 
 func loadOptionsFromDatabase() {
-	options, _ := AllOption()
+	outputSensitiveUpdateMutex.Lock()
+	defer outputSensitiveUpdateMutex.Unlock()
+
+	options, err := AllOption()
+	if err != nil {
+		common.SysLog("failed to load options from database: " + err.Error())
+		return
+	}
+
+	outputConfig := setting.GetOutputSensitiveConfig()
+	outputConfigFound := false
+	outputConfigValid := true
 	for _, option := range options {
-		err := updateOptionMap(option.Key, option.Value)
-		if err != nil {
+		if IsOutputSensitiveOptionKey(option.Key) {
+			outputConfigFound = true
+			common.OptionMapRWMutex.Lock()
+			if common.OptionMap == nil {
+				common.OptionMap = make(map[string]string)
+			}
+			common.OptionMap[option.Key] = option.Value
+			common.OptionMapRWMutex.Unlock()
+
+			var parseErr error
+			switch option.Key {
+			case outputSensitiveEnabledOptionKey:
+				outputConfig.Enabled, parseErr = strconv.ParseBool(option.Value)
+			case outputSensitiveActionOptionKey:
+				outputConfig.Action = option.Value
+			case outputSensitiveMatchPercentOptionKey:
+				outputConfig.MatchPercent, parseErr = strconv.Atoi(option.Value)
+			case outputSensitiveWordsOptionKey:
+				outputConfig.Patterns, parseErr = setting.ParseOutputSensitivePatterns(option.Value)
+			}
+			if parseErr != nil {
+				outputConfigValid = false
+				common.SysLog("failed to parse output sensitive option " + option.Key + ": " + parseErr.Error())
+			}
+			continue
+		}
+
+		if err := updateOptionMap(option.Key, option.Value); err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
+		}
+	}
+	if outputConfigFound && outputConfigValid {
+		if err := setting.SetOutputSensitiveConfig(outputConfig); err != nil {
+			common.SysLog("failed to apply output sensitive config: " + err.Error())
 		}
 	}
 }
@@ -325,6 +390,54 @@ func SyncOptions(frequency int) {
 		common.SysLog("syncing options from database")
 		loadOptionsFromDatabase()
 	}
+}
+
+func UpdateOutputSensitiveConfig(configValue setting.OutputSensitiveConfig) error {
+	normalized, err := setting.ValidateOutputSensitiveConfig(configValue)
+	if err != nil {
+		return err
+	}
+	patternsJSON, err := setting.OutputSensitivePatternsJSONString(normalized.Patterns)
+	if err != nil {
+		return err
+	}
+	values := map[string]string{
+		outputSensitiveEnabledOptionKey:      strconv.FormatBool(normalized.Enabled),
+		outputSensitiveActionOptionKey:       normalized.Action,
+		outputSensitiveMatchPercentOptionKey: strconv.Itoa(normalized.MatchPercent),
+		outputSensitiveWordsOptionKey:        patternsJSON,
+	}
+
+	outputSensitiveUpdateMutex.Lock()
+	defer outputSensitiveUpdateMutex.Unlock()
+
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		for key, value := range values {
+			option := Option{Key: key, Value: value}
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "key"}},
+				DoUpdates: clause.AssignmentColumns([]string{"value"}),
+			}).Create(&option).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err := setting.SetOutputSensitiveConfig(normalized); err != nil {
+		return err
+	}
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	for key, value := range values {
+		common.OptionMap[key] = value
+	}
+	common.OptionMapRWMutex.Unlock()
+	return nil
 }
 
 func UpdateOption(key string, value string) error {
@@ -351,6 +464,9 @@ func UpdateOption(key string, value string) error {
 }
 
 func validateOptionBeforeSave(key string, value string) error {
+	if IsOutputSensitiveOptionKey(key) {
+		return errors.New("output sensitive settings must be changed through the dedicated API")
+	}
 	if strings.EqualFold(strings.TrimSpace(key), ticketEncryptionSecretOptionKey) {
 		return errors.New("ticket encryption secret cannot be changed through the option API")
 	}
@@ -534,7 +650,7 @@ func updateOptionMap(key string, value string) (err error) {
 		case "CheckSensitiveOnCompletionEnabled":
 			setting.CheckSensitiveOnCompletionEnabled = boolValue
 		case "OutputSensitiveEnabled":
-			setting.OutputSensitiveEnabled = boolValue
+			setting.SetOutputSensitiveEnabled(boolValue)
 		case "ModelRequestRateLimitEnabled":
 			setting.ModelRequestRateLimitEnabled = boolValue
 		case "StopOnSensitiveEnabled":
@@ -559,17 +675,19 @@ func updateOptionMap(key string, value string) (err error) {
 	}
 	switch key {
 	case "OutputSensitiveAction":
-		if value == "error" || value == "truncate" {
-			setting.OutputSensitiveAction = value
-		}
+		err = setting.SetOutputSensitiveAction(value)
 	case "OutputSensitiveMatchPercent":
-		if percent, parseErr := strconv.Atoi(value); parseErr == nil && percent >= 1 && percent <= 100 {
-			setting.OutputSensitiveMatchPercent = percent
-		} else {
-			return fmt.Errorf("OutputSensitiveMatchPercent must be between 1 and 100")
+		var percent int
+		percent, err = strconv.Atoi(value)
+		if err == nil {
+			err = setting.SetOutputSensitiveMatchPercent(percent)
 		}
 	case "OutputSensitiveWords":
-		setting.OutputSensitiveWords = setting.ParseSensitiveWords(value)
+		var patterns []string
+		patterns, err = setting.ParseOutputSensitivePatterns(value)
+		if err == nil {
+			err = setting.SetOutputSensitivePatterns(patterns)
+		}
 	case "EmailDomainWhitelist":
 		common.EmailDomainWhitelist = strings.Split(value, ",")
 	case "SMTPServer":

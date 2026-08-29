@@ -75,6 +75,12 @@ func buildCompletionRatioMetaValue(optionValues map[string]string) string {
 	return string(jsonBytes)
 }
 
+const maxOutputSensitiveConfigRequestBytes int64 = 8 << 20
+
+func isOutputSensitiveOptionKey(key string) bool {
+	return model.IsOutputSensitiveOptionKey(key)
+}
+
 func GetOptions(c *gin.Context) {
 	var options []*model.Option
 	optionValues := make(map[string]string)
@@ -85,11 +91,8 @@ func GetOptions(c *gin.Context) {
 			strings.HasSuffix(k, "Secret") ||
 			strings.HasSuffix(k, "Key") ||
 			strings.HasSuffix(k, "secret") ||
-			strings.HasSuffix(k, "api_key")
-		// This route is protected by RootAuth. Keep the existing root-only
-		// settings editor functional by returning the rule text to root; regular
-		// users never reach this endpoint. Output rules are still never included
-		// in model logs, relay errors, or user-facing response payloads.
+			strings.HasSuffix(k, "api_key") ||
+			isOutputSensitiveOptionKey(k)
 		if isSensitiveKey {
 			continue
 		}
@@ -116,6 +119,51 @@ func GetOptions(c *gin.Context) {
 	})
 }
 
+type OutputSensitiveConfigRequest struct {
+	Enabled      bool     `json:"enabled"`
+	Action       string   `json:"action"`
+	MatchPercent int      `json:"match_percent"`
+	Patterns     []string `json:"patterns"`
+}
+
+func GetOutputSensitiveConfig(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    setting.GetOutputSensitiveConfig(),
+	})
+}
+
+func UpdateOutputSensitiveConfig(c *gin.Context) {
+	if c.Request.Body == nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxOutputSensitiveConfigRequestBytes)
+	var request OutputSensitiveConfigRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	configValue := setting.OutputSensitiveConfig{
+		Enabled:      request.Enabled,
+		Action:       request.Action,
+		MatchPercent: request.MatchPercent,
+		Patterns:     request.Patterns,
+	}
+	if err := model.UpdateOutputSensitiveConfig(configValue); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	recordManageAudit(c, "option.update", map[string]interface{}{
+		"key": "OutputSensitiveConfig",
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+	})
+}
+
 type OptionUpdateRequest struct {
 	Key   string `json:"key"`
 	Value any    `json:"value"`
@@ -129,6 +177,10 @@ func UpdateOption(c *gin.Context) {
 			"success": false,
 			"message": "无效的参数",
 		})
+		return
+	}
+	if isOutputSensitiveOptionKey(option.Key) {
+		common.ApiErrorMsg(c, "输出敏感词设置只能通过独立设置页修改")
 		return
 	}
 	if strings.EqualFold(strings.TrimSpace(option.Key), "TicketEncryptionSecret") {

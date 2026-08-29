@@ -214,6 +214,8 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			optionRoute.GET("/", controller.GetOptions)
 			optionRoute.PUT("/", controller.UpdateOption)
+			optionRoute.GET("/output-sensitive", middleware.DisableCache(), controller.GetOutputSensitiveConfig)
+			optionRoute.PUT("/output-sensitive", controller.UpdateOutputSensitiveConfig)
 			optionRoute.POST("/payment_compliance", controller.ConfirmPaymentCompliance)
 			optionRoute.GET("/channel_affinity_cache", controller.GetChannelAffinityCacheStats)
 			optionRoute.DELETE("/channel_affinity_cache", controller.ClearChannelAffinityCache)

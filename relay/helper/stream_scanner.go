@@ -14,7 +14,6 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -61,6 +60,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	if resp == nil || dataHandler == nil {
 		return
 	}
+	ensureOutputSensitiveStreamBlockState(c)
 
 	// 无条件新建 StreamStatus
 	info.StreamStatus = relaycommon.NewStreamStatus()
@@ -92,9 +92,10 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		stopOnce    sync.Once
 	)
 
-	var outputSensitiveMatcher *relaycommon.OutputSensitiveMatcher
-	if setting.ShouldCheckOutputSensitive() {
-		outputSensitiveMatcher = relaycommon.NewOutputSensitiveMatcher(setting.OutputSensitiveWords, setting.OutputSensitiveMatchRatio())
+	var outputSensitiveMatchers map[string]*relaycommon.OutputSensitiveMatcher
+	outputSensitiveConfig := info.OutputSensitiveConfig
+	if outputSensitiveConfig.Enabled && len(outputSensitiveConfig.Patterns) > 0 {
+		outputSensitiveMatchers = make(map[string]*relaycommon.OutputSensitiveMatcher)
 	}
 
 	stop := func() {
@@ -243,7 +244,6 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		}()
 
 		for scanner.Scan() {
-			// 检查是否需要停止
 			select {
 			case <-stopChan:
 				return
@@ -253,44 +253,62 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			}
 
 			resetTimeout()
-			data := scanner.Text()
-			logger.LogDebug(c, "stream scanner data: %s", data)
-
-			if len(data) < 6 {
+			rawData := strings.TrimSpace(scanner.Text())
+			logger.LogDebug(c, "stream scanner frame received: bytes=%d", len(rawData))
+			if rawData == "[DONE]" {
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
+				logger.LogDebug(c, "received [DONE], stopping scanner")
+				return
+			}
+			if !strings.HasPrefix(rawData, "data:") {
 				continue
 			}
-			if data[:5] != "data:" && data[:6] != "[DONE]" {
-				continue
-			}
-			data = data[5:]
-			data = strings.TrimSpace(data)
+			data := strings.TrimSpace(strings.TrimPrefix(rawData, "data:"))
 			if data == "" {
 				continue
 			}
-			if outputSensitiveMatcher != nil {
-				if hit, word := outputSensitiveMatcher.Scan(data); hit {
-					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonOutputSensitive, fmt.Errorf("output sensitive pattern matched: %q", word))
-					if setting.OutputSensitiveAction == "error" {
+			if data == "[DONE]" {
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
+				logger.LogDebug(c, "received [DONE], stopping scanner")
+				return
+			}
+			if outputSensitiveMatchers != nil {
+				matched := false
+				for _, fragment := range relaycommon.OutputSensitiveTextFragments(data) {
+					if info.ThinkingProcessStrip && fragment.HiddenThinking {
+						continue
+					}
+					matcher := outputSensitiveMatchers[fragment.Path]
+					if matcher == nil {
+						matcher = relaycommon.NewOutputSensitiveMatcherForConfig(outputSensitiveConfig)
+						outputSensitiveMatchers[fragment.Path] = matcher
+					}
+					if hit, _ := matcher.Scan(fragment.Text); hit {
+						matched = true
+						break
+					}
+				}
+				if matched {
+					common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "output_sensitive")
+					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonOutputSensitive, relaycommon.OutputSensitiveError())
+					if outputSensitiveConfig.Action == "error" {
 						info.StreamStatus.RecordError("output sensitive pattern matched")
 					}
-					logger.LogWarn(c, fmt.Sprintf("output sensitive pattern matched, action=%s", setting.OutputSensitiveAction))
+					logger.LogWarn(c, fmt.Sprintf("output sensitive pattern matched, action=%s", outputSensitiveConfig.Action))
+					writeMutex.Lock()
+					EmitOutputSensitiveStreamTerminal(c, info)
+					writeMutex.Unlock()
 					return
 				}
 			}
-			if !strings.HasPrefix(data, "[DONE]") {
-				info.SetFirstResponseTime()
-				info.ReceivedResponseCount++
+			info.SetFirstResponseTime()
+			info.ReceivedResponseCount++
 
-				select {
-				case dataChan <- data:
-				case <-ctx.Done():
-					return
-				case <-stopChan:
-					return
-				}
-			} else {
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
-				logger.LogDebug(c, "received [DONE], stopping scanner")
+			select {
+			case dataChan <- data:
+			case <-ctx.Done():
+				return
+			case <-stopChan:
 				return
 			}
 		}

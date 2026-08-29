@@ -17,7 +17,6 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relay/reasonmap"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/reasoning"
 	"github.com/QuantumNous/new-api/types"
@@ -932,9 +931,6 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 			sr.Stop(err)
 		}
 	})
-	if outputErr := helper.OutputSensitiveStreamError(info); outputErr != nil {
-		return nil, outputErr
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -1001,17 +997,16 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
-	logger.LogDebug(c, "responseBody: %s", responseBody)
-	if setting.ShouldCheckOutputSensitive() {
-		matcher := relaycommon.NewOutputSensitiveMatcher(setting.OutputSensitiveWords, setting.OutputSensitiveMatchRatio())
-		cleaned, matched, word, scanErr := relaycommon.SanitizeOutputSensitiveJSON(responseBody, matcher)
+	logger.LogDebug(c, "Claude response body received: bytes=%d", len(responseBody))
+	if matcher := relaycommon.NewOutputSensitiveMatcherForConfig(info.OutputSensitiveConfig); matcher != nil {
+		cleaned, matched, _, scanErr := relaycommon.SanitizeOutputSensitiveJSONWithThinkingPolicy(responseBody, matcher, info.ThinkingProcessStrip)
 		if scanErr != nil {
 			return nil, types.NewError(scanErr, types.ErrorCodeBadResponseBody)
 		}
 		if matched {
 			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "output_sensitive")
-			if setting.OutputSensitiveAction == "error" {
-				return nil, types.NewError(relaycommon.OutputSensitiveError(word), types.ErrorCodeSensitiveWordsDetected)
+			if info.OutputSensitiveConfig.Action == "error" {
+				return nil, types.NewError(relaycommon.OutputSensitiveError(), types.ErrorCodeSensitiveWordsDetected, types.ErrOptionWithSkipRetry())
 			}
 			responseBody = cleaned
 		}

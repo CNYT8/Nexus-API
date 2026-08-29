@@ -34,10 +34,6 @@ export default function SettingsSensitiveWords(props) {
   const [inputs, setInputs] = useState({
     CheckSensitiveEnabled: false,
     CheckSensitiveOnPromptEnabled: false,
-    OutputSensitiveEnabled: false,
-    OutputSensitiveAction: 'truncate',
-    OutputSensitiveMatchPercent: 20,
-    OutputSensitiveWords: '',
     SensitiveWords: '',
   });
   const refForm = useRef();
@@ -116,16 +112,6 @@ export default function SettingsSensitiveWords(props) {
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.Switch
-                  field={'OutputSensitiveEnabled'}
-                  label={t('启用输出敏感词')}
-                  size='default'
-                  checkedText='｜'
-                  uncheckedText='〇'
-                  onChange={(value) => setInputs({ ...inputs, OutputSensitiveEnabled: value })}
-                />
-              </Col>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.Switch
                   field={'CheckSensitiveOnPromptEnabled'}
                   label={t('启用 Prompt 检查')}
                   size='default'
@@ -141,35 +127,6 @@ export default function SettingsSensitiveWords(props) {
               </Col>
             </Row>
             <Row>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.InputNumber
-                  field='OutputSensitiveMatchPercent'
-                  label={t('命中阈值百分比')}
-                  min={1}
-                  max={100}
-                  suffix='%'
-                  onChange={(value) => setInputs({ ...inputs, OutputSensitiveMatchPercent: value })}
-                />
-              </Col>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.Select
-                  field='OutputSensitiveAction'
-                  label={t('命中后的处理')}
-                  optionList={[{ value: 'truncate', label: t('立即截断') }, { value: 'error', label: t('报错并停止') }]}
-                  onChange={(value) => setInputs({ ...inputs, OutputSensitiveAction: value })}
-                />
-              </Col>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.TextArea
-                  label={t('输出敏感词列表')}
-                  extraText={t('支持几千字长文本；一行一个规则，可跨流式分片匹配')}
-                  placeholder={t('粘贴输出敏感词或整段文本，一行一个规则')}
-                  field='OutputSensitiveWords'
-                  onChange={(value) => setInputs({ ...inputs, OutputSensitiveWords: value })}
-                  style={{ fontFamily: 'JetBrains Mono, Consolas' }}
-                  autosize={{ minRows: 6, maxRows: 12 }}
-                />
-              </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.TextArea
                   label={t('屏蔽词列表')}

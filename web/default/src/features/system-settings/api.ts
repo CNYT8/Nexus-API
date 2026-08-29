@@ -21,6 +21,8 @@ import type {
   ConfirmPaymentComplianceResponse,
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
+  OutputSensitiveConfig,
+  OutputSensitiveConfigResponse,
   SystemOptionsResponse,
   UpdateOptionRequest,
   UpdateOptionResponse,
@@ -35,6 +37,23 @@ export async function getSystemOptions() {
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function getOutputSensitiveConfig() {
+  const res = await api.get<OutputSensitiveConfigResponse>(
+    '/api/option/output-sensitive'
+  )
+  return res.data
+}
+
+export async function updateOutputSensitiveConfig(
+  request: OutputSensitiveConfig
+) {
+  const res = await api.put<UpdateOptionResponse>(
+    '/api/option/output-sensitive',
+    request
+  )
   return res.data
 }
 

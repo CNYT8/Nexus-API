@@ -20,7 +20,6 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/reasoning"
 	"github.com/QuantumNous/new-api/types"
@@ -1381,10 +1380,6 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		}
 	})
 
-	if outputErr := helper.OutputSensitiveStreamError(info); outputErr != nil {
-		return nil, outputErr
-	}
-
 	if imageCount != 0 {
 		if usage.CompletionTokens == 0 {
 			usage.CompletionTokens = imageCount * 1400
@@ -1512,17 +1507,16 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 	service.CloseResponseBodyGracefully(resp)
-	logger.LogDebug(c, "Gemini response body: %s", responseBody)
-	if setting.ShouldCheckOutputSensitive() {
-		matcher := relaycommon.NewOutputSensitiveMatcher(setting.OutputSensitiveWords, setting.OutputSensitiveMatchRatio())
-		cleaned, matched, word, scanErr := relaycommon.SanitizeOutputSensitiveJSON(responseBody, matcher)
+	logger.LogDebug(c, "Gemini response body received: bytes=%d", len(responseBody))
+	if matcher := relaycommon.NewOutputSensitiveMatcherForConfig(info.OutputSensitiveConfig); matcher != nil {
+		cleaned, matched, _, scanErr := relaycommon.SanitizeOutputSensitiveJSONWithThinkingPolicy(responseBody, matcher, info.ThinkingProcessStrip)
 		if scanErr != nil {
 			return nil, types.NewOpenAIError(scanErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
 		if matched {
 			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "output_sensitive")
-			if setting.OutputSensitiveAction == "error" {
-				return nil, types.NewError(relaycommon.OutputSensitiveError(word), types.ErrorCodeSensitiveWordsDetected)
+			if info.OutputSensitiveConfig.Action == "error" {
+				return nil, types.NewError(relaycommon.OutputSensitiveError(), types.ErrorCodeSensitiveWordsDetected, types.ErrOptionWithSkipRetry())
 			}
 			responseBody = cleaned
 		}
