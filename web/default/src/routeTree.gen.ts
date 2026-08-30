@@ -49,6 +49,7 @@ import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_auth
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
 import { Route as AuthenticatedModelMonitorIndexRouteImport } from './routes/_authenticated/model-monitor/index'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
+import { Route as AuthenticatedEmptyResponseIndexRouteImport } from './routes/_authenticated/empty-response/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
@@ -283,6 +284,12 @@ const AuthenticatedKeysIndexRoute = AuthenticatedKeysIndexRouteImport.update({
   path: '/keys/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedEmptyResponseIndexRoute =
+  AuthenticatedEmptyResponseIndexRouteImport.update({
+    id: '/empty-response/',
+    path: '/empty-response/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedDashboardIndexRoute =
   AuthenticatedDashboardIndexRouteImport.update({
     id: '/dashboard/',
@@ -461,6 +468,7 @@ export interface FileRoutesByFullPath {
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
+  '/empty-response/': typeof AuthenticatedEmptyResponseIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
   '/model-monitor/': typeof AuthenticatedModelMonitorIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
@@ -524,6 +532,7 @@ export interface FileRoutesByTo {
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
+  '/empty-response': typeof AuthenticatedEmptyResponseIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
   '/model-monitor': typeof AuthenticatedModelMonitorIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
@@ -591,6 +600,7 @@ export interface FileRoutesById {
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
+  '/_authenticated/empty-response/': typeof AuthenticatedEmptyResponseIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
   '/_authenticated/model-monitor/': typeof AuthenticatedModelMonitorIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
@@ -657,6 +667,7 @@ export interface FileRouteTypes {
     | '/usage-logs/$section'
     | '/channels/'
     | '/dashboard/'
+    | '/empty-response/'
     | '/keys/'
     | '/model-monitor/'
     | '/models/'
@@ -720,6 +731,7 @@ export interface FileRouteTypes {
     | '/usage-logs/$section'
     | '/channels'
     | '/dashboard'
+    | '/empty-response'
     | '/keys'
     | '/model-monitor'
     | '/models'
@@ -786,6 +798,7 @@ export interface FileRouteTypes {
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
+    | '/_authenticated/empty-response/'
     | '/_authenticated/keys/'
     | '/_authenticated/model-monitor/'
     | '/_authenticated/models/'
@@ -1120,6 +1133,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedKeysIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/empty-response/': {
+      id: '/_authenticated/empty-response/'
+      path: '/empty-response'
+      fullPath: '/empty-response/'
+      preLoaderRoute: typeof AuthenticatedEmptyResponseIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard/': {
       id: '/_authenticated/dashboard/'
       path: '/dashboard'
@@ -1388,6 +1408,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
+  AuthenticatedEmptyResponseIndexRoute: typeof AuthenticatedEmptyResponseIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
   AuthenticatedModelMonitorIndexRoute: typeof AuthenticatedModelMonitorIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
@@ -1413,6 +1434,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
+  AuthenticatedEmptyResponseIndexRoute: AuthenticatedEmptyResponseIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
   AuthenticatedModelMonitorIndexRoute: AuthenticatedModelMonitorIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,

@@ -97,6 +97,7 @@ func GetStatus(c *gin.Context) {
 		"default_use_auto_group":        setting.DefaultUseAutoGroup,
 		"membership_enabled":            membership_setting.IsEnabled(),
 		"ticket_enabled":                ticket_setting.IsEnabled(),
+		"empty_response_enabled":        operation_setting.GetEmptyResponseSetting().Enabled,
 		"ticket_admin_manage_enabled":   ticket_setting.IsAdminManageEnabled(),
 
 		"usd_exchange_rate": operation_setting.USDExchangeRate,

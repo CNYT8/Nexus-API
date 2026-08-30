@@ -34,6 +34,8 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/pricing", middleware.HeaderNavModuleAuth("pricing"), controller.GetPricing)
 		apiRouter.GET("/model_monitor", middleware.UserAuth(), controller.GetModelMonitor)
 		apiRouter.GET("/membership/self", middleware.UserAuth(), controller.GetMembershipSelf)
+		apiRouter.GET("/empty-responses/settings", middleware.RootAuth(), controller.GetEmptyResponseSettings)
+		apiRouter.PUT("/empty-responses/settings", middleware.RootAuth(), controller.UpdateEmptyResponseSettings)
 		apiRouter.GET("/membership/admin/tiers", middleware.AdminAuth(), controller.AdminGetMembershipTiers)
 		apiRouter.PUT("/tickets/settings", middleware.RootAuth(), controller.UpdateTicketSettings)
 		ticketRoute := apiRouter.Group("/tickets")
@@ -59,6 +61,10 @@ func SetApiRouter(router *gin.Engine) {
 			perfMetricsRoute.GET("/summary", controller.GetPerfMetricsSummary)
 			perfMetricsRoute.GET("", controller.GetPerfMetrics)
 		}
+		apiRouter.GET("/empty-responses/self", middleware.UserAuth(), controller.GetEmptyResponseStatus)
+		apiRouter.GET("/empty-responses", middleware.UserAuth(), controller.ListEmptyResponses)
+		apiRouter.POST("/empty-responses/claim", middleware.UserAuth(), middleware.CriticalRateLimit(), controller.ClaimEmptyResponses)
+
 		apiRouter.GET("/rankings", middleware.HeaderNavModuleAuth("rankings"), controller.GetRankings)
 		apiRouter.GET("/verification", middleware.EmailVerificationRateLimit(), middleware.TurnstileCheck(), controller.SendEmailVerification)
 		apiRouter.GET("/reset_password", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.SendPasswordResetEmail)

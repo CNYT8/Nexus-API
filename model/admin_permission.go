@@ -140,7 +140,7 @@ func SetAdminPermissionConfig(user *User, config AdminPermissionConfig) error {
 	setting := user.GetSetting()
 	setting.AdminPermissions = serializeAdminPermissionConfig(config)
 	user.SetSetting(setting)
-	return user.Update(false)
+	return UpdateUserSetting(user.Id, user.Setting)
 }
 
 func IsAdminPermissionAllowed(userId int, module string) (bool, error) {

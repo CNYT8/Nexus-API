@@ -62,6 +62,7 @@ export function SidebarModulesSection({
   const { status } = useStatus()
   const updateOption = useUpdateOption()
   const ticketEnabled = status?.ticket_enabled !== false
+  const emptyResponseEnabled = status?.empty_response_enabled === true
 
   const sectionMeta: Record<string, { title: string; description: string }> = {
     chat: {
@@ -112,6 +113,10 @@ export function SidebarModulesSection({
       tickets: {
         title: t('Ticket Center'),
         description: t('Submit issues and track their progress.'),
+      },
+      empty_response: {
+        title: t('Empty Response Detection'),
+        description: t('Detect paid requests with input but no output.'),
       },
       midjourney: {
         title: t('Drawing logs'),
@@ -230,6 +235,13 @@ export function SidebarModulesSection({
                                       {t('Only configurable in Ticket Settings')}
                                     </span>
                                   )}
+                                {sectionKey === 'console' &&
+                                  moduleKey === 'empty_response' &&
+                                  !emptyResponseEnabled && (
+                                    <span className='ml-1'>
+                                      {t('Only configurable in Empty Response Compensation')}
+                                    </span>
+                                  )}
                               </FormDescription>
                             </SettingsSwitchContent>
                           <FormControl>
@@ -247,7 +259,10 @@ export function SidebarModulesSection({
                                   !form.watch(`${sectionKey}.enabled` as any) ||
                                   (sectionKey === 'console' &&
                                     moduleKey === 'tickets' &&
-                                    !ticketEnabled)
+                                    !ticketEnabled) ||
+                                  (sectionKey === 'console' &&
+                                    moduleKey === 'empty_response' &&
+                                    !emptyResponseEnabled)
                                 }
                               />
                             </FormControl>

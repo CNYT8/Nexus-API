@@ -55,6 +55,7 @@ export function SidebarModulesCard() {
   const setUser = useAuthStore((s) => s.auth.setUser)
   const { status } = useStatus()
   const ticketEnabled = status?.ticket_enabled !== false
+  const emptyResponseEnabled = status?.empty_response_enabled === true
 
   const sectionDefs: SectionDef[] = [
     {
@@ -103,6 +104,11 @@ export function SidebarModulesCard() {
           key: 'tickets',
           title: t('Ticket Center'),
           description: t('Submit issues and track their progress.'),
+        },
+        {
+          key: 'empty_response',
+          title: t('Empty Response Detection'),
+          description: t('Detect paid requests with input but no output.'),
         },
         {
           key: 'midjourney',
@@ -280,7 +286,10 @@ export function SidebarModulesCard() {
                         !sectionEnabled ||
                         (section.key === 'console' &&
                           mod.key === 'tickets' &&
-                          !ticketEnabled)
+                          !ticketEnabled) ||
+                        (section.key === 'console' &&
+                          mod.key === 'empty_response' &&
+                          !emptyResponseEnabled)
                       }
                     />
                   </div>

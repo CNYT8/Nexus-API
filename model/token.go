@@ -11,6 +11,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var ErrTokenQuotaChanged = errors.New("token quota changed during update")
+
 type Token struct {
 	Id                 int            `json:"id"`
 	UserId             int            `json:"user_id" gorm:"index"`
@@ -249,26 +251,12 @@ func GetTokenById(id int) (*Token, error) {
 	token := Token{Id: id}
 	var err error = nil
 	err = DB.First(&token, "id = ?", id).Error
-	if shouldUpdateRedis(true, err) {
-		gopool.Go(func() {
-			if err := cacheSetToken(token); err != nil {
-				common.SysLog("failed to update user status cache: " + err.Error())
-			}
-		})
-	}
 	return &token, err
 }
 
 func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 	defer func() {
 		// Update Redis cache asynchronously on successful DB read
-		if shouldUpdateRedis(fromDB, err) && token != nil {
-			gopool.Go(func() {
-				if err := cacheSetToken(*token); err != nil {
-					common.SysLog("failed to update user status cache: " + err.Error())
-				}
-			})
-		}
 	}()
 	if !fromDB && common.RedisEnabled {
 		// Try Redis first
@@ -289,36 +277,62 @@ func (token *Token) Insert() error {
 	return err
 }
 
-// Update Make sure your token's fields is completed, because this will update non-zero values
-func (token *Token) Update() (err error) {
-	defer func() {
-		if shouldUpdateRedis(true, err) {
-			gopool.Go(func() {
-				err := cacheSetToken(*token)
-				if err != nil {
-					common.SysLog("failed to update token cache: " + err.Error())
-				}
-			})
+// Update persists token settings without writing accounting columns.
+func (token *Token) Update() error {
+	return token.updateSettings(nil)
+}
+
+// UpdateWithQuotaSnapshot permits an intentional remaining-quota edit only if
+// no usage was recorded after the caller read the token.
+func (token *Token) UpdateWithQuotaSnapshot(expectedUsedQuota int) error {
+	return token.updateSettings(&expectedUsedQuota)
+}
+
+func (token *Token) updateSettings(expectedUsedQuota *int) error {
+	updates := map[string]interface{}{
+		"name":                 token.Name,
+		"status":               token.Status,
+		"expired_time":         token.ExpiredTime,
+		"unlimited_quota":      token.UnlimitedQuota,
+		"model_limits_enabled": token.ModelLimitsEnabled,
+		"model_limits":         token.ModelLimits,
+		"allow_ips":            token.AllowIps,
+		"group":                token.Group,
+		"cross_group_retry":    token.CrossGroupRetry,
+	}
+	query := DB.Model(&Token{}).Where("id = ?", token.Id)
+	if expectedUsedQuota != nil {
+		updates["remain_quota"] = token.RemainQuota
+		query = query.Where("used_quota = ?", *expectedUsedQuota)
+	}
+	result := query.Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		if expectedUsedQuota != nil {
+			return ErrTokenQuotaChanged
 		}
-	}()
-	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry").Updates(token).Error
-	return err
+		return gorm.ErrRecordNotFound
+	}
+	if redisAvailable() {
+		// Invalidate the whole cached token. The next read reloads the current
+		// accounting fields from DB instead of merging a stale snapshot.
+		return cacheDeleteToken(token.Key)
+	}
+	return nil
 }
 
 func (token *Token) SelectUpdate() (err error) {
-	defer func() {
-		if shouldUpdateRedis(true, err) {
-			gopool.Go(func() {
-				err := cacheSetToken(*token)
-				if err != nil {
-					common.SysLog("failed to update token cache: " + err.Error())
-				}
-			})
-		}
-	}()
-	// This can update zero values
-	return DB.Model(token).Select("accessed_time", "status").Updates(token).Error
+	// This can update zero values, but only refresh non-accounting cache fields.
+	err = DB.Model(token).Select("accessed_time", "status").Updates(token).Error
+	if err != nil || !redisAvailable() {
+		return err
+	}
+	if cacheErr := cacheSetTokenRuntimeFields(*token); cacheErr != nil {
+		return cacheErr
+	}
+	return nil
 }
 
 func (token *Token) Delete() (err error) {

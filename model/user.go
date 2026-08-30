@@ -162,6 +162,23 @@ func UpdateUserAccessToken(id int, token string) error {
 	return nil
 }
 
+// UpdateUserSetting updates only the serialized user setting column. It must
+// be used instead of User.Update for settings-only changes so a stale user
+// snapshot cannot overwrite accounting or other concurrently updated fields.
+func UpdateUserSetting(id int, setting string) error {
+	if id == 0 {
+		return errors.New("id 为空！")
+	}
+	result := DB.Model(&User{}).Where("id = ?", id).Update("setting", setting)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return updateUserSettingCache(id, setting)
+}
+
 func (user *User) GetSetting() dto.UserSetting {
 	setting := dto.UserSetting{}
 	if user.Setting != "" {
@@ -489,7 +506,9 @@ func (user *User) Insert(inviterId int) error {
 			currentSetting := createdUser.GetSetting()
 			currentSetting.SidebarModules = defaultSidebarConfig
 			createdUser.SetSetting(currentSetting)
-			createdUser.Update(false)
+			if err := UpdateUserSetting(createdUser.Id, createdUser.Setting); err != nil {
+				common.SysLog("failed to initialize user sidebar setting: " + err.Error())
+			}
 			common.SysLog(fmt.Sprintf("为新用户 %s (角色: %d) 初始化边栏配置", createdUser.Username, createdUser.Role))
 		}
 	}
@@ -554,7 +573,9 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 			currentSetting := createdUser.GetSetting()
 			currentSetting.SidebarModules = defaultSidebarConfig
 			createdUser.SetSetting(currentSetting)
-			createdUser.Update(false)
+			if err := UpdateUserSetting(createdUser.Id, createdUser.Setting); err != nil {
+				common.SysLog("failed to initialize user sidebar setting: " + err.Error())
+			}
 			common.SysLog(fmt.Sprintf("为新用户 %s (角色: %d) 初始化边栏配置", createdUser.Username, createdUser.Role))
 		}
 	}

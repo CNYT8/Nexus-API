@@ -40,6 +40,7 @@ import Log from './pages/Log';
 import ModelMonitor from './pages/ModelMonitor';
 import TicketCenter from './pages/Ticket';
 import TicketManagement from './pages/TicketManagement';
+import EmptyResponse from './pages/EmptyResponse';
 import Chat from './pages/Chat';
 import Chat2Link from './pages/Chat2Link';
 import Midjourney from './pages/Midjourney';
@@ -314,6 +315,14 @@ function App() {
           element={
             <PrivateRoute>
               <TicketCenter />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/empty-response'
+          element={
+            <PrivateRoute>
+              <EmptyResponse />
             </PrivateRoute>
           }
         />

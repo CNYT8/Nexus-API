@@ -50,6 +50,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     log: true,
     model_monitor: true,
     tickets: true,
+    empty_response: true,
     midjourney: true,
     task: true,
   },
@@ -99,6 +100,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/usage-logs/common': { section: 'console', module: 'log' },
   '/model-monitor': { section: 'console', module: 'model_monitor' },
   '/tickets': { section: 'console', module: 'tickets' },
+  '/empty-response': { section: 'console', module: 'empty_response' },
   '/usage-logs/drawing': { section: 'console', module: 'midjourney' },
   '/usage-logs/task': { section: 'console', module: 'task' },
   '/wallet': { section: 'personal', module: 'topup' },
@@ -169,9 +171,11 @@ function isModuleEnabled(
   userConfig: SidebarModulesUserConfig,
   userRole: UserRole,
   ticketEnabled = true,
-  ticketAdminManageEnabled = true
+  ticketAdminManageEnabled = true,
+  emptyResponseEnabled = true
 ): boolean {
   if (url === '/tickets' && !ticketEnabled) return false
+  if (url === '/empty-response' && !emptyResponseEnabled) return false
   if (
     url === '/tickets/manage' &&
     (!ticketEnabled ||
@@ -224,7 +228,8 @@ function isNavItemVisible(
   userConfig: SidebarModulesUserConfig,
   userRole: UserRole,
   ticketEnabled: boolean,
-  ticketAdminManageEnabled: boolean
+  ticketAdminManageEnabled: boolean,
+  emptyResponseEnabled: boolean
 ): boolean {
   // Handle dynamic chat presets type — also runs the admin × user AND gate
   if ('type' in item && item.type === 'chat-presets') {
@@ -248,7 +253,8 @@ function isNavItemVisible(
         userConfig,
         userRole,
         ticketEnabled,
-        ticketAdminManageEnabled
+        ticketAdminManageEnabled,
+        emptyResponseEnabled
       )
     )
   }
@@ -263,7 +269,8 @@ function isNavItemVisible(
         userConfig,
         userRole,
         ticketEnabled,
-        ticketAdminManageEnabled
+        ticketAdminManageEnabled,
+        emptyResponseEnabled
       )
     )
   }
@@ -280,7 +287,8 @@ function filterNavItems(
   userConfig: SidebarModulesUserConfig,
   userRole: UserRole,
   ticketEnabled: boolean,
-  ticketAdminManageEnabled: boolean
+  ticketAdminManageEnabled: boolean,
+  emptyResponseEnabled: boolean
 ): NavItem[] {
   return items
     .map((item) => {
@@ -293,7 +301,8 @@ function filterNavItems(
             userConfig,
             userRole,
             ticketEnabled,
-            ticketAdminManageEnabled
+            ticketAdminManageEnabled,
+            emptyResponseEnabled
           )
         )
 
@@ -311,7 +320,8 @@ function filterNavItems(
         userConfig,
         userRole,
         ticketEnabled,
-        ticketAdminManageEnabled
+        ticketAdminManageEnabled,
+        emptyResponseEnabled
       )
     )
 }
@@ -367,7 +377,8 @@ export function useSidebarConfig(navGroups: NavGroup[]): NavGroup[] {
             userConfig,
             auth?.user?.role,
             status?.ticket_enabled !== false,
-            status?.ticket_admin_manage_enabled !== false
+            status?.ticket_admin_manage_enabled !== false,
+            status?.empty_response_enabled !== false
           ),
         }))
         .filter((group) => group.items.length > 0), // Only show navigation groups with visible items
@@ -378,6 +389,7 @@ export function useSidebarConfig(navGroups: NavGroup[]): NavGroup[] {
       auth?.user?.role,
       status?.ticket_enabled,
       status?.ticket_admin_manage_enabled,
+      status?.empty_response_enabled,
     ]
   )
 

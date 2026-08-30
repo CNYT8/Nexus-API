@@ -352,6 +352,11 @@ export default function SettingsSidebarModulesUser() {
           description: t('提交问题并查看处理进度'),
         },
         {
+          key: 'empty_response',
+          title: t('空回检测'),
+          description: t('检测有输入但无输出的消费记录并按配置赔付'),
+        },
+        {
           key: 'midjourney',
           title: t('绘图日志'),
           description: t('绘图任务记录'),

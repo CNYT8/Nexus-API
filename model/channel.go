@@ -343,14 +343,14 @@ func (channel *Channel) GetAutoBan() bool {
 }
 
 func (channel *Channel) Save() error {
-	return DB.Save(channel).Error
+	return channel.updateConfigColumns(false)
 }
 
 func (channel *Channel) SaveWithoutKey() error {
 	if channel.Id == 0 {
 		return errors.New("channel ID is 0")
 	}
-	return DB.Omit("key").Save(channel).Error
+	return channel.updateConfigColumns(true)
 }
 
 func GetAllChannels(startIdx int, num int, selectAll bool, idSort bool, sortOptions ...ChannelSortOptions) ([]*Channel, error) {
@@ -570,14 +570,36 @@ func (channel *Channel) Update() error {
 			}
 		}
 	}
-	var err error
-	err = DB.Model(channel).Updates(channel).Error
-	if err != nil {
+	if err := channel.updateConfigColumns(false); err != nil {
 		return err
 	}
-	DB.Model(channel).First(channel, "id = ?", channel.Id)
-	err = channel.UpdateAbilities(nil)
-	return err
+	if err := DB.First(channel, "id = ?", channel.Id).Error; err != nil {
+		return err
+	}
+	return channel.UpdateAbilities(nil)
+}
+
+// updateConfigColumns persists channel configuration without overwriting
+// runtime accounting, balance, latency, or health counters from a stale read.
+func (channel *Channel) updateConfigColumns(omitKey bool) error {
+	if channel == nil || channel.Id == 0 {
+		return errors.New("channel ID is 0")
+	}
+	query := DB.Model(channel).Omit(
+		"id", "created_time", "test_time", "response_time", "balance",
+		"balance_updated_time", "used_quota",
+	)
+	if omitKey {
+		query = query.Omit("key")
+	}
+	result := query.Updates(channel)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (channel *Channel) UpdateResponseTime(responseTime int64) {

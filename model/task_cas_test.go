@@ -62,6 +62,7 @@ func TestMain(m *testing.M) {
 		&TicketMessage{},
 		&WebRiskState{},
 		&Redemption{},
+		&EmptyResponseRecord{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}

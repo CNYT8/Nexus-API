@@ -52,6 +52,7 @@ import ChatsSetting from '../../components/settings/ChatsSetting';
 import OutputSensitiveSetting from '../../components/settings/OutputSensitiveSetting';
 import DrawingSetting from '../../components/settings/DrawingSetting';
 import PaymentSetting from '../../components/settings/PaymentSetting';
+import EmptyResponseSetting from '../../components/settings/EmptyResponseSetting';
 import MembershipSetting from '../../components/settings/MembershipSetting';
 import TicketSetting from '../../components/settings/TicketSetting';
 import ModelDeploymentSetting from '../../components/settings/ModelDeploymentSetting';
@@ -136,6 +137,16 @@ const Setting = () => {
       ),
       content: <PaymentSetting />,
       itemKey: 'payment',
+    });
+    panes.push({
+      tab: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <ShieldCheck size={18} />
+          {t('空回赔付设置')}
+        </span>
+      ),
+      content: <EmptyResponseSetting />,
+      itemKey: 'empty-response',
     });
     panes.push({
       tab: (

@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -14,6 +15,49 @@ func cacheSetToken(token Token) error {
 	err := common.RedisHSetObj(fmt.Sprintf("token:%s", key), &token, time.Duration(common.RedisKeyCacheSeconds())*time.Second)
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+// cacheSetTokenSettings updates only non-accounting token fields. It preserves
+// RemainQuota and UsedQuota maintained by atomic billing operations.
+func cacheSetTokenRuntimeFields(token Token) error {
+	if !redisAvailable() {
+		return nil
+	}
+	key := common.GenerateHMAC(token.Key)
+	cacheKey := fmt.Sprintf("token:%s", key)
+	if err := common.RedisHSetField(cacheKey, "Status", strconv.Itoa(token.Status)); err != nil {
+		return err
+	}
+	return common.RedisHSetField(cacheKey, "AccessedTime", strconv.FormatInt(token.AccessedTime, 10))
+}
+
+func cacheSetTokenSettings(token Token) error {
+	if !redisAvailable() {
+		return nil
+	}
+	key := common.GenerateHMAC(token.Key)
+	cacheKey := fmt.Sprintf("token:%s", key)
+	fields := map[string]string{
+		"Name":               token.Name,
+		"Status":             strconv.Itoa(token.Status),
+		"ExpiredTime":        strconv.FormatInt(token.ExpiredTime, 10),
+		"UnlimitedQuota":     strconv.FormatBool(token.UnlimitedQuota),
+		"ModelLimitsEnabled": strconv.FormatBool(token.ModelLimitsEnabled),
+		"ModelLimits":        token.ModelLimits,
+		"Group":              token.Group,
+		"CrossGroupRetry":    strconv.FormatBool(token.CrossGroupRetry),
+	}
+	if token.AllowIps != nil {
+		fields["AllowIps"] = *token.AllowIps
+	} else {
+		fields["AllowIps"] = ""
+	}
+	for field, value := range fields {
+		if err := common.RedisHSetField(cacheKey, field, value); err != nil {
+			return err
+		}
 	}
 	return nil
 }

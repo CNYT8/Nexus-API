@@ -26,6 +26,7 @@ import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useSidebar } from '../../hooks/common/useSidebar';
 import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
 import { isAdmin, isRoot, showError } from '../../helpers';
+import { StatusContext } from '../../context/Status';
 import SkeletonWrapper from './components/SkeletonWrapper';
 
 import { Nav, Divider, Button } from '@douyinfe/semi-ui';
@@ -41,6 +42,7 @@ const routerMap = {
   log: '/console/log',
   model_monitor: '/console/model-monitor',
   tickets: '/console/tickets',
+  empty_response: '/console/empty-response',
   ticket_admin: '/console/ticket-admin',
   midjourney: '/console/midjourney',
   setting: '/console/setting',
@@ -65,6 +67,9 @@ const SiderBar = ({ onNavigate = () => {} }) => {
   } = useSidebar();
 
   const showSkeleton = useMinimumLoadingTime(sidebarLoading, 200);
+  const [statusState] = useContext(StatusContext);
+  const emptyResponseEnabled =
+    statusState?.status?.empty_response_enabled === true;
 
   const [selectedKeys, setSelectedKeys] = useState(['home']);
   const [chatItems, setChatItems] = useState([]);
@@ -104,6 +109,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: '/tickets',
       },
       {
+        text: t('空回检测'),
+        itemKey: 'empty_response',
+        to: '/empty-response',
+        className: emptyResponseEnabled ? '' : 'tableHiddle',
+      },
+      {
         text: t('绘图日志'),
         itemKey: 'midjourney',
         to: '/midjourney',
@@ -132,6 +143,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
     localStorage.getItem('enable_data_export'),
     localStorage.getItem('enable_drawing'),
     localStorage.getItem('enable_task'),
+    emptyResponseEnabled,
     t,
     isModuleVisible,
   ]);

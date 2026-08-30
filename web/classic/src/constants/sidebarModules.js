@@ -30,6 +30,7 @@ export const GLOBAL_SIDEBAR_DEFAULT_CONFIG = {
     log: true,
     model_monitor: true,
     tickets: true,
+    empty_response: true,
     midjourney: true,
     task: true,
   },
@@ -88,6 +89,11 @@ export const GLOBAL_SIDEBAR_SECTION_CONFIGS = [
         key: 'tickets',
         title: '工单中心',
         description: '提交问题并查看处理进度',
+      },
+      {
+        key: 'empty_response',
+        title: '空回检测',
+        description: '检测有输入但无输出的消费记录并按配置赔付',
       },
       {
         key: 'midjourney',
@@ -154,6 +160,7 @@ export const applyTicketSidebarGate = (config, ticketEnabled) => {
     log: true,
     model_monitor: true,
     tickets: ticketEnabled !== false,
+    empty_response: ticketEnabled !== false,
     midjourney: true,
     task: true,
     ...(nextConfig.console || {}),

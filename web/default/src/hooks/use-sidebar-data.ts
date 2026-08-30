@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Activity,
+  AlertCircle,
   Box,
   CreditCard,
   FileText,
@@ -97,6 +98,11 @@ export function useSidebarData(): SidebarData {
             title: t('Ticket Center'),
             url: '/tickets',
             icon: Ticket,
+          },
+          {
+            title: t('Empty Response Detection'),
+            url: '/empty-response',
+            icon: AlertCircle,
           },
           {
             title: t('Task Logs'),

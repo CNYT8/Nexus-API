@@ -289,7 +289,8 @@ func UpdateToken(c *gin.Context) {
 	if statusOnly != "" {
 		cleanToken.Status = token.Status
 	} else {
-		// If you add more fields, please also update token.Update()
+		// If you add more fields, please also update token.Update().
+		// Remaining quota is protected by a used_quota compare-and-swap.
 		cleanToken.Name = token.Name
 		cleanToken.ExpiredTime = token.ExpiredTime
 		cleanToken.RemainQuota = token.RemainQuota
@@ -300,7 +301,11 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
 	}
-	err = cleanToken.Update()
+	if statusOnly != "" {
+		err = cleanToken.Update()
+	} else {
+		err = cleanToken.UpdateWithQuotaSnapshot(cleanToken.UsedQuota)
+	}
 	if err != nil {
 		common.ApiError(c, err)
 		return

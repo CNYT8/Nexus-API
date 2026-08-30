@@ -23,6 +23,7 @@ import { QuotaSettingsSection } from '../general/quota-settings-section'
 import { PaymentSettingsSection } from '../integrations/payment-settings-section'
 import { RatioSettingsCard } from '../models/ratio-settings-card'
 import { TicketSettingsSection } from './ticket-settings-section'
+import { EmptyResponseSettingsSection } from './empty-response-section'
 import type { BillingSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 
@@ -187,6 +188,11 @@ const BILLING_SECTIONS = [
         }}
       />
     ),
+  },
+  {
+    id: 'empty-response',
+    titleKey: 'Empty Response Compensation',
+    build: () => <EmptyResponseSettingsSection />,
   },
   {
     id: 'tickets',
