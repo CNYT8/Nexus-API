@@ -34,7 +34,7 @@ import {
 import {
   IconCheckCircleStroked,
   IconRefresh,
-  IconTimeCircle,
+  IconClock,
 } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import {
@@ -190,7 +190,7 @@ export default function EmptyResponsePage() {
           {!enabled && (
             <Banner
               type='info'
-              icon={<IconTimeCircle />}
+              icon={<IconClock />}
               description={t('空回赔付功能当前未开启，请联系管理员。')}
             />
           )}
