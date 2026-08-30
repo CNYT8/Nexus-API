@@ -1,3 +1,4 @@
+import fs from 'fs'
 import path from 'path'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
@@ -6,8 +7,14 @@ import { pluginReact } from '@rsbuild/plugin-react'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
-const resolvePackageDir = (pkg: string, paths?: string[]) =>
-  path.dirname(require.resolve(`${pkg}/package.json`, { paths }))
+const resolvePackageDir = (pkg: string, paths?: string[]) => {
+  let current = path.dirname(require.resolve(pkg, { paths }))
+  while (current !== path.dirname(current)) {
+    if (fs.existsSync(path.join(current, 'package.json'))) return current
+    current = path.dirname(current)
+  }
+  throw new Error(`Unable to locate package directory for ${pkg}`)
+}
 
 const semiUiDir = resolvePackageDir('@douyinfe/semi-ui')
 const semiFoundationDir = resolvePackageDir('@douyinfe/semi-foundation', [
