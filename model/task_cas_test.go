@@ -87,6 +87,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM nexus_ticket_messages")
 		DB.Exec("DELETE FROM nexus_tickets")
 		DB.Exec("DELETE FROM nexus_web_risk_states")
+		DB.Exec("DELETE FROM empty_response_records")
 		DB.Exec("DELETE FROM users")
 		DB.Exec("DELETE FROM logs")
 		DB.Exec("DELETE FROM channels")

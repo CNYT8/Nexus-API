@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -81,7 +82,9 @@ func TestEmptyResponseCycleExpiresOldRecords(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, created)
 	require.Equal(t, 70, refundQuota)
-	require.NoError(t, DB.Model(&EmptyResponseRecord{}).Where("request_id = ?", "old-empty-request").Update("created_at", oldTime).Error)
+	var firstRecord EmptyResponseRecord
+	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&firstRecord).Error)
+	require.NoError(t, DB.Model(&EmptyResponseRecord{}).Where("id = ?", firstRecord.Id).Update("log_created_at", oldTime).Error)
 
 	created, refundQuota, err = ClaimEmptyResponseCompensation(user.Id, now)
 	require.NoError(t, err)
@@ -93,7 +96,7 @@ func TestEmptyResponseCycleExpiresOldRecords(t *testing.T) {
 	assert.Equal(t, int64(1), count)
 
 	var record EmptyResponseRecord
-	require.NoError(t, DB.First(&record, "request_id = ?", "old-empty-request").Error)
+	require.NoError(t, DB.First(&record, firstRecord.Id).Error)
 	assert.Equal(t, "refunded", record.Status)
 	assert.Equal(t, 70, record.RefundQuota)
 
@@ -116,6 +119,33 @@ func TestEmptyResponseFeatureDisabled(t *testing.T) {
 	require.ErrorIs(t, err, ErrEmptyResponseFeatureDisabled)
 }
 
+func TestGetEmptyResponseStatusDiscoversEligibleLogs(t *testing.T) {
+	setupEmptyResponseTest(t)
+	user := User{Username: "empty-response-discovery", Password: "password", Status: common.UserStatusEnabled}
+	require.NoError(t, DB.Create(&user).Error)
+	now := time.Now().Unix()
+	// Historical logs can lack a request ID. Discovery must still use the server-side log ID safely.
+	createEmptyResponseLog(t, user.Id, "", now-60, 100)
+
+	pendingCount, pendingQuota, refundedCount, err := GetEmptyResponseStatus(user.Id, now)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), pendingCount)
+	assert.Equal(t, 70, pendingQuota)
+	assert.Equal(t, 0, refundedCount)
+
+	records, total, err := ListEmptyResponses(user.Id, "pending", nil)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, records, 1)
+	assert.NotEmpty(t, records[0].RequestId)
+	assert.Equal(t, "pending", records[0].Status)
+
+	created, refundQuota, err := ClaimEmptyResponseCompensation(user.Id, now)
+	require.NoError(t, err)
+	assert.Equal(t, 1, created)
+	assert.Equal(t, 70, refundQuota)
+}
+
 func TestEmptyResponseUsesLogQuotaSnapshot(t *testing.T) {
 	setupEmptyResponseTest(t)
 	user := User{Username: "empty-response-snapshot", Password: "password", Status: common.UserStatusEnabled, Quota: 0}
@@ -127,4 +157,86 @@ func TestEmptyResponseUsesLogQuotaSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, operation_setting.CalcEmptyResponseRefundQuota(137, 70), refundQuota)
 	assert.Equal(t, 96, refundQuota)
+}
+
+func TestEmptyResponseScanIncludesSameSecondAndExcludesNonTextLogs(t *testing.T) {
+	setupEmptyResponseTest(t)
+	user := User{Username: "empty-response-boundary", Password: "password", Status: common.UserStatusEnabled}
+	require.NoError(t, DB.Create(&user).Error)
+	now := time.Now().Unix()
+	createEmptyResponseLog(t, user.Id, "same-second-empty", now, 100)
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId:           user.Id,
+		CreatedAt:        now,
+		Type:             LogTypeConsume,
+		RequestId:        "image-response",
+		ModelName:        "gpt-image-1",
+		PromptTokens:     100,
+		CompletionTokens: 0,
+		Quota:            100,
+		Other:            common.MapToJsonStr(map[string]interface{}{"image": true}),
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId:           user.Id,
+		CreatedAt:        now,
+		Type:             LogTypeConsume,
+		RequestId:        "error-stream",
+		ModelName:        "gpt-4o",
+		PromptTokens:     100,
+		CompletionTokens: 0,
+		Quota:            100,
+		Other: common.MapToJsonStr(map[string]interface{}{"stream_status": map[string]interface{}{
+			"status": "error",
+		}}),
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId:           user.Id,
+		CreatedAt:        now,
+		Type:             LogTypeConsume,
+		RequestId:        "embedding-response",
+		ModelName:        "text-embedding-3-small",
+		PromptTokens:     100,
+		CompletionTokens: 0,
+		Quota:            100,
+		Other:            common.MapToJsonStr(map[string]interface{}{"request_path": "/v1/embeddings"}),
+	}).Error)
+
+	pendingCount, pendingQuota, _, err := GetEmptyResponseStatus(user.Id, now)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), pendingCount)
+	assert.Equal(t, 70, pendingQuota)
+}
+
+func TestEmptyResponseScanUsesOtherInputTokensAndContinuesPastExcludedBatch(t *testing.T) {
+	setupEmptyResponseTest(t)
+	user := User{Username: "empty-response-batch", Password: "password", Status: common.UserStatusEnabled}
+	require.NoError(t, DB.Create(&user).Error)
+	now := time.Now().Unix()
+	for i := 0; i < emptyResponseMaxBatchSize; i++ {
+		require.NoError(t, LOG_DB.Create(&Log{
+			UserId:           user.Id,
+			CreatedAt:        now,
+			Type:             LogTypeConsume,
+			RequestId:        fmt.Sprintf("embedding-%d", i),
+			ModelName:        "text-embedding-3-small",
+			CompletionTokens: 0,
+			Quota:            100,
+			Other:            common.MapToJsonStr(map[string]interface{}{"request_path": "/v1/embeddings"}),
+		}).Error)
+	}
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId:           user.Id,
+		CreatedAt:        now,
+		Type:             LogTypeConsume,
+		RequestId:        "other-input-token-empty",
+		ModelName:        "gpt-4o",
+		CompletionTokens: 0,
+		Quota:            100,
+		Other:            common.MapToJsonStr(map[string]interface{}{"input_tokens_total": 100}),
+	}).Error)
+
+	pendingCount, pendingQuota, _, err := GetEmptyResponseStatus(user.Id, now)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), pendingCount)
+	assert.Equal(t, 70, pendingQuota)
 }

@@ -60,19 +60,26 @@ export default function EmptyResponsePage() {
     async (nextPage = page) => {
       setLoading(true);
       try {
-        const [statusRes, listRes] = await Promise.all([
-          API.get('/api/empty-responses/self'),
-          API.get(`/api/empty-responses?p=${nextPage}&page_size=10`),
-        ]);
+        const statusRes = await API.get('/api/empty-responses/self');
         if (!statusRes.data?.success) {
           showError(statusRes.data?.message || t('加载空回检测失败'));
           return;
         }
+        setStatus(statusRes.data.data);
+        if (!statusRes.data.data?.enabled) {
+          setRecords([]);
+          setTotal(0);
+          setPage(nextPage);
+          return;
+        }
+
+        const listRes = await API.get(
+          `/api/empty-responses?p=${nextPage}&page_size=10`,
+        );
         if (!listRes.data?.success) {
           showError(listRes.data?.message || t('加载空回检测失败'));
           return;
         }
-        setStatus(statusRes.data.data);
         setRecords(listRes.data.data?.items || []);
         setTotal(listRes.data.data?.total || 0);
         setPage(nextPage);
@@ -112,7 +119,6 @@ export default function EmptyResponsePage() {
   }, []);
 
   const enabled = status?.enabled === true;
-  const pendingCount = status?.pending_count || 0;
 
   const columns = [
     {
@@ -158,83 +164,93 @@ export default function EmptyResponsePage() {
 
   return (
     <Spin spinning={loading} size='large'>
-      <div className='mx-auto max-w-7xl px-3 py-4'>
-        <Space vertical spacing='medium' style={{ width: '100%' }}>
-          <Row align='middle' justify='space-between' type='flex'>
-            <div>
-              <Title heading={3}>{t('空回检测')}</Title>
-              <Text type='tertiary'>
-                {t(
-                  '检测最近 {{days}} 天内有输入但没有生成输出的消费日志，赔付按日志当时的扣费金额计算。',
-                  { days: status?.period_days || 3 },
-                )}
-              </Text>
-            </div>
-            <Space>
-              <Button icon={<IconRefresh />} onClick={() => load(page)}>
-                {t('刷新')}
-              </Button>
-              <Button
-                theme='solid'
-                type='primary'
-                icon={<IconCheckCircleStroked />}
-                loading={claiming}
-                disabled={!enabled || pendingCount <= 0}
-                onClick={claim}
-              >
-                {t('立即检测并赔付')}
-              </Button>
-            </Space>
-          </Row>
+      <div className='h-full min-h-0 w-full min-w-0 overflow-y-auto pt-16'>
+        <div className='mx-auto w-full min-w-0 max-w-7xl px-3 py-4'>
+          <Space vertical spacing='medium' style={{ width: '100%' }}>
+            <Row
+              align='middle'
+              justify='space-between'
+              type='flex'
+              style={{ width: '100%', flexWrap: 'wrap', gap: 12 }}
+            >
+              <div style={{ minWidth: 0, flex: '1 1 320px' }}>
+                <Title heading={3}>{t('空回检测')}</Title>
+                <Text type='tertiary'>
+                  {t(
+                    '检测最近 {{days}} 天内有输入但没有生成输出的消费日志，赔付按日志当时的扣费金额计算。',
+                    { days: status?.period_days || 3 },
+                  )}
+                </Text>
+              </div>
+              <Space>
+                <Button icon={<IconRefresh />} onClick={() => load(page)}>
+                  {t('刷新')}
+                </Button>
+                <Button
+                  theme='solid'
+                  type='primary'
+                  icon={<IconCheckCircleStroked />}
+                  loading={claiming}
+                  disabled={!enabled || claiming}
+                  onClick={claim}
+                >
+                  {t('立即检测并赔付')}
+                </Button>
+              </Space>
+            </Row>
 
-          {!enabled && (
-            <Banner
-              type='info'
-              icon={<IconClock />}
-              description={t('空回赔付功能当前未开启，请联系管理员。')}
-            />
-          )}
+            {!enabled && (
+              <Banner
+                type='info'
+                icon={<IconClock />}
+                description={t('空回赔付功能当前未开启，请联系管理员。')}
+              />
+            )}
 
-          <Row gutter={16}>
-            <Col xs={24} md={8}>
-              <Card>
-                <Text type='tertiary'>{t('当前空回记录')}</Text>
-                <Title heading={2}>{status?.pending_count || 0}</Title>
-              </Card>
-            </Col>
-            <Col xs={24} md={8}>
-              <Card>
-                <Text type='tertiary'>{t('预计赔付额度')}</Text>
-                <Title heading={2}>
-                  {renderQuota(status?.pending_quota || 0)}
-                </Title>
-              </Card>
-            </Col>
-            <Col xs={24} md={8}>
-              <Card>
-                <Text type='tertiary'>{t('记录周期')}</Text>
-                <Title heading={2}>
-                  {t('{{days}} 天', { days: status?.period_days || 3 })}
-                </Title>
-              </Card>
-            </Col>
-          </Row>
+            <Row gutter={16}>
+              <Col xs={24} md={8}>
+                <Card>
+                  <Text type='tertiary'>{t('当前空回记录')}</Text>
+                  <Title heading={2}>{status?.pending_count || 0}</Title>
+                </Card>
+              </Col>
+              <Col xs={24} md={8}>
+                <Card>
+                  <Text type='tertiary'>{t('预计赔付额度')}</Text>
+                  <Title heading={2}>
+                    {renderQuota(status?.pending_quota || 0)}
+                  </Title>
+                </Card>
+              </Col>
+              <Col xs={24} md={8}>
+                <Card>
+                  <Text type='tertiary'>{t('记录周期')}</Text>
+                  <Title heading={2}>
+                    {t('{{days}} 天', { days: status?.period_days || 3 })}
+                  </Title>
+                </Card>
+              </Col>
+            </Row>
 
-          <Card>
-            <Table
-              columns={columns}
-              dataSource={records}
-              loading={loading}
-              empty={<Empty title={t('暂无空回记录')} />}
-              pagination={{
-                currentPage: page,
-                pageSize: 10,
-                total,
-                onPageChange: (nextPage) => load(nextPage),
-              }}
-            />
-          </Card>
-        </Space>
+            <Card style={{ minWidth: 0 }}>
+              <div className='w-full min-w-0 overflow-x-auto'>
+                <Table
+                  columns={columns}
+                  dataSource={records}
+                  loading={loading}
+                  empty={<Empty title={t('暂无空回记录')} />}
+                  scroll={{ x: 'max-content' }}
+                  pagination={{
+                    currentPage: page,
+                    pageSize: 10,
+                    total,
+                    onPageChange: (nextPage) => load(nextPage),
+                  }}
+                />
+              </div>
+            </Card>
+          </Space>
+        </div>
       </div>
     </Spin>
   );
