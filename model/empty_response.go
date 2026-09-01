@@ -275,8 +275,9 @@ func syncEmptyResponseRecords(userId int, now int64) error {
 		if err := lockForUpdate(tx).Where("id = ?", userId).First(&user).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("user_id = ? AND status = ? AND log_created_at < ?", userId, "pending", cycleStart).
-			Delete(&EmptyResponseRecord{}).Error; err != nil {
+		if err := tx.Model(&EmptyResponseRecord{}).
+			Where("user_id = ? AND status = ? AND log_created_at < ?", userId, "pending", cycleStart).
+			Updates(map[string]interface{}{"status": "expired"}).Error; err != nil {
 			return err
 		}
 
@@ -370,8 +371,9 @@ func ClaimEmptyResponseCompensation(userId int, now int64) (int, int, error) {
 			return err
 		}
 
-		if err := tx.Where("user_id = ? AND status = ? AND log_created_at < ?", userId, "pending", cycleStart).
-			Delete(&EmptyResponseRecord{}).Error; err != nil {
+		if err := tx.Model(&EmptyResponseRecord{}).
+			Where("user_id = ? AND status = ? AND log_created_at < ?", userId, "pending", cycleStart).
+			Updates(map[string]interface{}{"status": "expired"}).Error; err != nil {
 			return err
 		}
 
@@ -408,37 +410,43 @@ func ClaimEmptyResponseCompensation(userId int, now int64) (int, int, error) {
 	return refundedCount, refundTotal, nil
 }
 
-func GetEmptyResponseStatus(userId int, now int64) (int64, int, int, error) {
+func GetEmptyResponseStatus(userId int, now int64) (int64, int, int, int, error) {
 	setting := operation_setting.GetEmptyResponseSetting()
 	if userId <= 0 {
-		return 0, 0, 0, errors.New("invalid user id")
+		return 0, 0, 0, 0, errors.New("invalid user id")
 	}
 	if now <= 0 {
 		now = common.GetTimestamp()
 	}
 	if err := syncEmptyResponseRecords(userId, now); err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 	since := now - int64(setting.PeriodDays)*24*3600
 	var pendingCount int64
 	var pendingQuota int
 	var refundedCount int64
+	var expiredCount int64
 	if err := DB.Model(&EmptyResponseRecord{}).
 		Where("user_id = ? AND status = ? AND log_created_at >= ?", userId, "pending", since).
 		Count(&pendingCount).Error; err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 	if err := DB.Model(&EmptyResponseRecord{}).
 		Where("user_id = ? AND status = ? AND log_created_at >= ?", userId, "pending", since).
 		Select("COALESCE(SUM(refund_quota), 0)").Scan(&pendingQuota).Error; err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 	if err := DB.Model(&EmptyResponseRecord{}).
-		Where("user_id = ? AND status = ? AND log_created_at >= ?", userId, "refunded", since).
+		Where("user_id = ? AND status = ?", userId, "refunded").
 		Count(&refundedCount).Error; err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, err
 	}
-	return pendingCount, pendingQuota, int(refundedCount), nil
+	if err := DB.Model(&EmptyResponseRecord{}).
+		Where("user_id = ? AND status = ?", userId, "expired").
+		Count(&expiredCount).Error; err != nil {
+		return 0, 0, 0, 0, err
+	}
+	return pendingCount, pendingQuota, int(refundedCount), int(expiredCount), nil
 }
 
 func PruneEmptyResponseRecords(userId int, now int64) error {
@@ -450,8 +458,9 @@ func PruneEmptyResponseRecords(userId int, now int64) error {
 	if now <= 0 {
 		cutoff = common.GetTimestamp() - int64(setting.PeriodDays)*24*3600
 	}
-	return DB.Where("user_id = ? AND status = ? AND log_created_at < ?", userId, "pending", cutoff).
-		Delete(&EmptyResponseRecord{}).Error
+	return DB.Model(&EmptyResponseRecord{}).
+		Where("user_id = ? AND status = ? AND log_created_at < ?", userId, "pending", cutoff).
+		Updates(map[string]interface{}{"status": "expired"}).Error
 }
 
 func StartEmptyResponseCleanup(userId int) {

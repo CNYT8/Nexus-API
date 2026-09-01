@@ -32,9 +32,8 @@ import {
   Typography,
 } from '@douyinfe/semi-ui';
 import {
-  IconCheckCircleStroked,
-  IconRefresh,
   IconClock,
+  IconAlertTriangle,
 } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import {
@@ -73,15 +72,28 @@ export default function EmptyResponsePage() {
           return;
         }
 
-        const listRes = await API.get(
-          `/api/empty-responses?p=${nextPage}&page_size=10`,
+        const firstListRes = await API.get(
+          `/api/empty-responses?p=1&page_size=100`,
         );
-        if (!listRes.data?.success) {
-          showError(listRes.data?.message || t('加载空回检测失败'));
+        if (!firstListRes.data?.success) {
+          showError(firstListRes.data?.message || t('加载空回检测失败'));
           return;
         }
-        setRecords(listRes.data.data?.items || []);
-        setTotal(listRes.data.data?.total || 0);
+        const listData = firstListRes.data.data;
+        const allRecords = [...(listData?.items || [])];
+        const pageCount = Math.ceil((listData?.total || 0) / 100);
+        for (let listPage = 2; listPage <= pageCount; listPage += 1) {
+          const nextListRes = await API.get(
+            `/api/empty-responses?p=${listPage}&page_size=100`,
+          );
+          if (!nextListRes.data?.success) {
+            showError(nextListRes.data?.message || t('加载空回检测失败'));
+            return;
+          }
+          allRecords.push(...(nextListRes.data.data?.items || []));
+        }
+        setRecords(allRecords);
+        setTotal(listData?.total || 0);
         setPage(nextPage);
       } catch (error) {
         showError(t('加载空回检测失败'));
@@ -156,6 +168,8 @@ export default function EmptyResponsePage() {
       render: (value) =>
         value === 'refunded' ? (
           <Tag color='green'>{t('已赔付')}</Tag>
+        ) : value === 'expired' ? (
+          <Tag color='grey'>{t('已过期')}</Tag>
         ) : (
           <Tag color='orange'>{t('待赔付')}</Tag>
         ),
@@ -182,21 +196,16 @@ export default function EmptyResponsePage() {
                   )}
                 </Text>
               </div>
-              <Space>
-                <Button icon={<IconRefresh />} onClick={() => load(page)}>
-                  {t('刷新')}
-                </Button>
-                <Button
-                  theme='solid'
-                  type='primary'
-                  icon={<IconCheckCircleStroked />}
-                  loading={claiming}
-                  disabled={!enabled || claiming}
-                  onClick={claim}
-                >
-                  {t('立即检测并赔付')}
-                </Button>
-              </Space>
+              <Button
+                theme='solid'
+                type='primary'
+                icon={<IconAlertTriangle />}
+                loading={claiming}
+                disabled={!enabled || claiming}
+                onClick={claim}
+              >
+                {t('赔付')}
+              </Button>
             </Row>
 
             {!enabled && (
@@ -208,13 +217,13 @@ export default function EmptyResponsePage() {
             )}
 
             <Row gutter={16}>
-              <Col xs={24} md={8}>
+              <Col xs={24} sm={12} md={6}>
                 <Card>
                   <Text type='tertiary'>{t('当前空回记录')}</Text>
                   <Title heading={2}>{status?.pending_count || 0}</Title>
                 </Card>
               </Col>
-              <Col xs={24} md={8}>
+              <Col xs={24} sm={12} md={6}>
                 <Card>
                   <Text type='tertiary'>{t('预计赔付额度')}</Text>
                   <Title heading={2}>
@@ -222,7 +231,13 @@ export default function EmptyResponsePage() {
                   </Title>
                 </Card>
               </Col>
-              <Col xs={24} md={8}>
+              <Col xs={24} sm={12} md={6}>
+                <Card>
+                  <Text type='tertiary'>{t('已过期记录')}</Text>
+                  <Title heading={2}>{status?.expired_count || 0}</Title>
+                </Card>
+              </Col>
+              <Col xs={24} sm={12} md={6}>
                 <Card>
                   <Text type='tertiary'>{t('记录周期')}</Text>
                   <Title heading={2}>
@@ -232,21 +247,60 @@ export default function EmptyResponsePage() {
               </Col>
             </Row>
 
-            <Card style={{ minWidth: 0 }}>
-              <div className='w-full min-w-0 overflow-x-auto'>
+            <Card style={{ minWidth: 0, overflow: 'hidden' }}>
+              <div className='hidden w-full min-w-0 overflow-x-auto sm:block'>
                 <Table
                   columns={columns}
                   dataSource={records}
                   loading={loading}
                   empty={<Empty title={t('暂无空回记录')} />}
                   scroll={{ x: 'max-content' }}
-                  pagination={{
-                    currentPage: page,
-                    pageSize: 10,
-                    total,
-                    onPageChange: (nextPage) => load(nextPage),
-                  }}
                 />
+              </div>
+              <div className='divide-y sm:hidden'>
+                {records.length === 0 ? (
+                  <Empty title={t('暂无空回记录')} />
+                ) : (
+                  records.map((record) => (
+                    <div key={record.id} className='space-y-3 px-4 py-4'>
+                      <div className='flex items-start justify-between gap-3'>
+                        <div className='min-w-0'>
+                          <div className='truncate font-medium'>
+                            {record.model_name || '-'}
+                          </div>
+                          <Text type='tertiary'>
+                            {timestamp2string(record.log_created_at)}
+                          </Text>
+                        </div>
+                        {record.status === 'refunded' ? (
+                          <Tag color='green'>{t('已赔付')}</Tag>
+                        ) : record.status === 'expired' ? (
+                          <Tag color='grey'>{t('已过期')}</Tag>
+                        ) : (
+                          <Tag color='orange'>{t('待赔付')}</Tag>
+                        )}
+                      </div>
+                      <Row gutter={8}>
+                        <Col span={12}>
+                          <Text type='tertiary'>{t('输入 Tokens')}</Text>
+                          <div>{record.prompt_tokens}</div>
+                        </Col>
+                        <Col span={12}>
+                          <Text type='tertiary'>{t('当时扣费')}</Text>
+                          <div>{renderQuota(record.quota)}</div>
+                        </Col>
+                        <Col span={12}>
+                          <Text type='tertiary'>{t('预计赔付')}</Text>
+                          <div>{renderQuota(record.refund_quota)}</div>
+                        </Col>
+                        <Col span={12}>
+                          <Text type='tertiary'>{t('赔付比例')}</Text>
+                          <div>{record.refund_percent}%</div>
+                        </Col>
+                      </Row>
+                    </div>
+                  ))
+                )}
               </div>
             </Card>
           </Space>

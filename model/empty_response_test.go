@@ -84,7 +84,10 @@ func TestEmptyResponseCycleExpiresOldRecords(t *testing.T) {
 	require.Equal(t, 70, refundQuota)
 	var firstRecord EmptyResponseRecord
 	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&firstRecord).Error)
-	require.NoError(t, DB.Model(&EmptyResponseRecord{}).Where("id = ?", firstRecord.Id).Update("log_created_at", oldTime).Error)
+	require.NoError(t, DB.Model(&EmptyResponseRecord{}).Where("id = ?", firstRecord.Id).Updates(map[string]interface{}{
+		"log_created_at": oldTime,
+		"status":         "pending",
+	}).Error)
 
 	created, refundQuota, err = ClaimEmptyResponseCompensation(user.Id, now)
 	require.NoError(t, err)
@@ -97,8 +100,12 @@ func TestEmptyResponseCycleExpiresOldRecords(t *testing.T) {
 
 	var record EmptyResponseRecord
 	require.NoError(t, DB.First(&record, firstRecord.Id).Error)
-	assert.Equal(t, "refunded", record.Status)
+	assert.Equal(t, "expired", record.Status)
 	assert.Equal(t, 70, record.RefundQuota)
+
+	_, _, _, expiredCount, err := GetEmptyResponseStatus(user.Id, now)
+	require.NoError(t, err)
+	assert.Equal(t, 1, expiredCount)
 
 	var got User
 	require.NoError(t, DB.First(&got, user.Id).Error)
@@ -127,7 +134,7 @@ func TestGetEmptyResponseStatusDiscoversEligibleLogs(t *testing.T) {
 	// Historical logs can lack a request ID. Discovery must still use the server-side log ID safely.
 	createEmptyResponseLog(t, user.Id, "", now-60, 100)
 
-	pendingCount, pendingQuota, refundedCount, err := GetEmptyResponseStatus(user.Id, now)
+	pendingCount, pendingQuota, refundedCount, _, err := GetEmptyResponseStatus(user.Id, now)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), pendingCount)
 	assert.Equal(t, 70, pendingQuota)
@@ -201,7 +208,7 @@ func TestEmptyResponseScanIncludesSameSecondAndExcludesNonTextLogs(t *testing.T)
 		Other:            common.MapToJsonStr(map[string]interface{}{"request_path": "/v1/embeddings"}),
 	}).Error)
 
-	pendingCount, pendingQuota, _, err := GetEmptyResponseStatus(user.Id, now)
+	pendingCount, pendingQuota, _, _, err := GetEmptyResponseStatus(user.Id, now)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), pendingCount)
 	assert.Equal(t, 70, pendingQuota)
@@ -235,7 +242,7 @@ func TestEmptyResponseScanUsesOtherInputTokensAndContinuesPastExcludedBatch(t *t
 		Other:            common.MapToJsonStr(map[string]interface{}{"input_tokens_total": 100}),
 	}).Error)
 
-	pendingCount, pendingQuota, _, err := GetEmptyResponseStatus(user.Id, now)
+	pendingCount, pendingQuota, _, _, err := GetEmptyResponseStatus(user.Id, now)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), pendingCount)
 	assert.Equal(t, 70, pendingQuota)

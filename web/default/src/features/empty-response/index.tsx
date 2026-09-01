@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { RefreshCcw, ShieldCheck } from 'lucide-react'
+import { CircleDollarSign, FileWarning } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -31,6 +31,7 @@ type EmptyResponseStatus = {
   pending_count: number
   pending_quota: number
   refunded_count: number
+  expired_count: number
 }
 
 type EmptyResponseRecord = {
@@ -42,7 +43,7 @@ type EmptyResponseRecord = {
   quota: number
   refund_percent: number
   refund_quota: number
-  status: 'pending' | 'refunded'
+  status: 'pending' | 'refunded' | 'expired'
 }
 
 type EmptyResponseList = {
@@ -67,10 +68,33 @@ export function EmptyResponsePage() {
   const listQuery = useQuery({
     queryKey: ['empty-response-list'],
     enabled: statusQuery.data?.data.data?.enabled === true,
-    queryFn: async () =>
-      api.get<ApiResponse<EmptyResponseList>>('/api/empty-responses', {
-        params: { p: 1, page_size: 50 },
-      }),
+    queryFn: async () => {
+      const pageSize = 100
+      const first = await api.get<ApiResponse<EmptyResponseList>>(
+        '/api/empty-responses',
+        { params: { p: 1, page_size: pageSize } }
+      )
+      const firstData = first.data.data
+      if (!firstData || firstData.items.length >= firstData.total) {
+        return first
+      }
+      const items = [...firstData.items]
+      const pageCount = Math.ceil(firstData.total / pageSize)
+      for (let page = 2; page <= pageCount; page += 1) {
+        const next = await api.get<ApiResponse<EmptyResponseList>>(
+          '/api/empty-responses',
+          { params: { p: page, page_size: pageSize } }
+        )
+        items.push(...(next.data.data?.items ?? []))
+      }
+      return {
+        ...first,
+        data: {
+          ...first.data,
+          data: { items, total: firstData.total },
+        },
+      }
+    },
   })
 
   const claimMutation = useMutation({
@@ -109,30 +133,14 @@ export function EmptyResponsePage() {
         {t('Empty Response Detection')}
       </SectionPageLayout.Title>
       <SectionPageLayout.Actions>
-        <div className='flex flex-wrap justify-end gap-2'>
-          <Button
-            type='button'
-            variant='outline'
-            disabled={statusQuery.isFetching || listQuery.isFetching}
-            onClick={async () => {
-              const refreshedStatus = await statusQuery.refetch()
-              if (refreshedStatus.data?.data.data?.enabled === true) {
-                await listQuery.refetch()
-              }
-            }}
-          >
-            <RefreshCcw data-icon='inline-start' />
-            {t('Refresh')}
-          </Button>
-          <Button
-            type='button'
-            disabled={!enabled || claimMutation.isPending}
-            onClick={() => claimMutation.mutate()}
-          >
-            <ShieldCheck data-icon='inline-start' />
-            {t('Detect and claim compensation')}
-          </Button>
-        </div>
+        <Button
+          type='button'
+          disabled={!enabled || claimMutation.isPending}
+          onClick={() => claimMutation.mutate()}
+        >
+          <CircleDollarSign data-icon='inline-start' />
+          {t('Claim compensation')}
+        </Button>
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='min-w-0 space-y-4'>
@@ -146,7 +154,7 @@ export function EmptyResponsePage() {
             </Card>
           )}
 
-          <div className='grid gap-4 md:grid-cols-3'>
+          <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
             <Card>
               <CardHeader className='pb-2'>
                 <CardDescription>
@@ -163,6 +171,12 @@ export function EmptyResponsePage() {
             </Card>
             <Card>
               <CardHeader className='pb-2'>
+                <CardDescription>{t('Expired records')}</CardDescription>
+                <CardTitle>{status?.expired_count ?? 0}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card>
+              <CardHeader className='pb-2'>
                 <CardDescription>{t('Detection window')}</CardDescription>
                 <CardTitle>
                   {t('{{days}} days', { days: status?.period_days ?? 3 })}
@@ -171,16 +185,20 @@ export function EmptyResponsePage() {
             </Card>
           </div>
 
-          <Card>
+          <Card className='overflow-hidden'>
             <CardHeader>
-              <CardTitle>{t('Empty response records')}</CardTitle>
+              <CardTitle className='flex items-center gap-2'>
+                <FileWarning className='text-primary h-5 w-5' />
+                {t('Empty response records')}
+              </CardTitle>
               <CardDescription>
                 {t(
-                  'Compensation is calculated from the charged quota recorded at the time of each request.'
+                  'All detected records are kept here. Pending records can be claimed; older records remain visible as expired.'
                 )}
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className='p-0 sm:p-6'>
+              <div className='hidden overflow-x-auto sm:block'>
               <Table className='min-w-[720px]'>
                 <TableHeader>
                   <TableRow>
@@ -233,12 +251,16 @@ export function EmptyResponsePage() {
                             variant={
                               record.status === 'refunded'
                                 ? 'default'
-                                : 'secondary'
+                                : record.status === 'expired'
+                                  ? 'outline'
+                                  : 'secondary'
                             }
                           >
                             {record.status === 'refunded'
                               ? t('Claimed')
-                              : t('Pending')}
+                              : record.status === 'expired'
+                                ? t('Expired')
+                                : t('Pending')}
                           </Badge>
                         </TableCell>
                       </TableRow>
@@ -246,6 +268,60 @@ export function EmptyResponsePage() {
                   )}
                 </TableBody>
               </Table>
+              </div>
+              <div className='divide-border divide-y sm:hidden'>
+                {records.length === 0 ? (
+                  <div className='text-muted-foreground px-4 py-8 text-center text-sm'>
+                    {t('No empty response records')}
+                  </div>
+                ) : (
+                  records.map((record) => (
+                    <div key={record.id} className='space-y-3 px-4 py-4'>
+                      <div className='flex items-start justify-between gap-3'>
+                        <div className='min-w-0'>
+                          <p className='truncate font-medium'>{record.model_name || '-'}</p>
+                          <p className='text-muted-foreground text-xs'>
+                            {formatTimestamp(record.log_created_at)}
+                          </p>
+                        </div>
+                        <Badge
+                          variant={
+                            record.status === 'refunded'
+                              ? 'default'
+                              : record.status === 'expired'
+                                ? 'outline'
+                                : 'secondary'
+                          }
+                        >
+                          {record.status === 'refunded'
+                            ? t('Claimed')
+                            : record.status === 'expired'
+                              ? t('Expired')
+                              : t('Pending')}
+                        </Badge>
+                      </div>
+                      <div className='grid grid-cols-2 gap-3 text-sm'>
+                        <div>
+                          <p className='text-muted-foreground text-xs'>{t('Input Tokens')}</p>
+                          <p>{record.prompt_tokens}</p>
+                        </div>
+                        <div>
+                          <p className='text-muted-foreground text-xs'>{t('Original Charge')}</p>
+                          <p>{formatQuota(record.quota)}</p>
+                        </div>
+                        <div>
+                          <p className='text-muted-foreground text-xs'>{t('Compensation')}</p>
+                          <p>{formatQuota(record.refund_quota)}</p>
+                        </div>
+                        <div>
+                          <p className='text-muted-foreground text-xs'>{t('Rate')}</p>
+                          <p>{record.refund_percent}%</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>

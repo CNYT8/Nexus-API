@@ -34,7 +34,7 @@ func emptyResponseError(c *gin.Context, err error) {
 func GetEmptyResponseStatus(c *gin.Context) {
 	userId := c.GetInt("id")
 	setting := operation_setting.GetEmptyResponseSetting()
-	pendingCount, pendingQuota, refundedCount, err := model.GetEmptyResponseStatus(userId, common.GetTimestamp())
+	pendingCount, pendingQuota, refundedCount, expiredCount, err := model.GetEmptyResponseStatus(userId, common.GetTimestamp())
 	if err != nil {
 		emptyResponseError(c, err)
 		return
@@ -46,6 +46,7 @@ func GetEmptyResponseStatus(c *gin.Context) {
 		"pending_count":  pendingCount,
 		"pending_quota":  pendingQuota,
 		"refunded_count": refundedCount,
+		"expired_count":  expiredCount,
 	})
 }
 

@@ -36,6 +36,7 @@ import {
   Activity,
   ShieldAlert,
   ShieldCheck,
+  FileWarning,
   Crown,
   Ticket,
 } from 'lucide-react';
@@ -141,7 +142,7 @@ const Setting = () => {
     panes.push({
       tab: (
         <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <ShieldCheck size={18} />
+          <FileWarning size={18} />
           {t('空回赔付设置')}
         </span>
       ),
