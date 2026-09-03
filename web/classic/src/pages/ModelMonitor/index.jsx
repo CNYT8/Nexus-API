@@ -20,14 +20,11 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Avatar,
   Card,
   Collapsible,
   Empty,
-  Progress,
   Skeleton,
-  Space,
-  Tag,
+  Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
 import { IconChevronDown, IconChevronRight } from '@douyinfe/semi-icons';
@@ -35,234 +32,170 @@ import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
-import { API, getLobeHubIcon, showError } from '../../helpers';
+import { API, showError } from '../../helpers';
 import CardPro from '../../components/common/ui/CardPro';
 
 const { Text } = Typography;
 
-const STATUS_META = {
-  excellent: {
-    tagColor: 'green',
-    progressColor: 'var(--semi-color-success)',
-    panelColor: 'transparent',
-    panelBorderColor: 'var(--semi-color-border)',
-    fallbackText: '优秀',
-  },
-  good: {
-    tagColor: 'yellow',
-    progressColor: 'var(--semi-color-warning)',
-    panelColor: 'transparent',
-    panelBorderColor: 'var(--semi-color-border)',
-    fallbackText: '良好',
-  },
-  unstable: {
-    tagColor: 'pink',
-    progressColor: '#f43f5e',
-    panelColor: 'transparent',
-    panelBorderColor: 'var(--semi-color-border)',
-    fallbackText: '不稳定',
-  },
-  poor: {
-    tagColor: 'red',
-    progressColor: 'var(--semi-color-danger)',
-    panelColor: 'transparent',
-    panelBorderColor: 'var(--semi-color-border)',
-    fallbackText: '体验较差',
-  },
-  unknown: {
-    tagColor: 'grey',
-    progressColor: 'var(--semi-color-fill-2)',
-    panelColor: 'transparent',
-    panelBorderColor: 'var(--semi-color-border)',
-    fallbackText: '未知状态',
-  },
+// Three availability colors driven by the scheduling-score thresholds:
+// green >= 70, orange 45-70, red < 45, gray means no traffic at all.
+const STATUS_BAR_COLOR = {
+  excellent: 'var(--semi-color-success)',
+  good: 'var(--semi-color-success)',
+  unstable: 'var(--semi-color-warning)',
+  poor: 'var(--semi-color-danger)',
+  unknown: 'var(--semi-color-fill-1)',
 };
 
-const getStatusByScore = (score) => {
-  if (score >= 85) return 'excellent';
-  if (score >= 70) return 'good';
-  if (score >= 45) return 'unstable';
-  return 'poor';
+const STATUS_BAR_TEXT = {
+  excellent: '可用',
+  good: '可用',
+  unstable: '不稳定',
+  poor: '体验较差',
+  unknown: '无调用',
 };
 
-const getItemStatus = (item) => {
-  if (!item || item.has_data === false || item.status === 'unknown') {
-    return 'unknown';
-  }
-  return item.status || getStatusByScore(item.score || 0);
+const LEGEND_ITEMS = [
+  { color: STATUS_BAR_COLOR.excellent, label: '可用' },
+  { color: STATUS_BAR_COLOR.unstable, label: '不稳定' },
+  { color: STATUS_BAR_COLOR.poor, label: '体验较差' },
+  { color: STATUS_BAR_COLOR.unknown, label: '无调用' },
+];
+
+const padTimePart = (value) => String(value).padStart(2, '0');
+
+const formatBucketTime = (timestamp) => {
+  if (!timestamp) return '--';
+  const date = new Date(timestamp * 1000);
+  return `${padTimePart(date.getMonth() + 1)}-${padTimePart(date.getDate())} ${padTimePart(date.getHours())}:${padTimePart(date.getMinutes())}`;
 };
-
-const getStatusMeta = (status) => STATUS_META[status] || STATUS_META.unknown;
-
-const getStatusText = (status, t) => t(getStatusMeta(status).fallbackText);
-
-const clampScore = (score) => Math.min(100, Math.max(0, Number(score) || 0));
 
 const formatRefreshClock = (timestamp) => {
   if (!timestamp) {
     return '--:--';
   }
   const date = new Date(timestamp);
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${hours}:${minutes}`;
+  return `${padTimePart(date.getHours())}:${padTimePart(date.getMinutes())}`;
 };
 
-const renderVendorIcon = (vendor) => {
-  if (vendor.icon) {
-    return (
-      <div className='flex h-8 w-8 shrink-0 items-center justify-center'>
-        {getLobeHubIcon(vendor.icon, 24)}
-      </div>
-    );
-  }
-  return (
-    <Avatar size='small'>
-      {(vendor.name || '?').slice(0, 1).toUpperCase()}
-    </Avatar>
-  );
-};
+const getBarStatus = (bucket) =>
+  bucket?.has_data ? bucket.status || 'unknown' : 'unknown';
 
-const ModelScoreBar = ({ model }) => {
-  const hasData = model.has_data !== false && getItemStatus(model) !== 'unknown';
-  const meta = getStatusMeta(getItemStatus(model));
-  const score = hasData ? clampScore(model.score) : 0;
-
-  return (
-    <div className='flex min-w-[138px] items-center justify-end gap-2'>
-      <div className='w-[92px]'>
-        <Progress
-          percent={score}
-          stroke={meta.progressColor}
-          strokeWidth={8}
-          showInfo={false}
-          style={{ margin: 0 }}
-        />
-      </div>
-      <Text
-        type={hasData ? 'secondary' : 'tertiary'}
-        size='small'
-        className='inline-block w-8 text-right'
-      >
-        {hasData ? score : '-'}
-      </Text>
-    </div>
-  );
-};
-
-const ModelRow = ({ model, t }) => {
-  const status = getItemStatus(model);
-  const meta = getStatusMeta(status);
-  const group = model.group || 'default';
-
-  return (
-    <div
-      className='my-1 flex flex-col gap-2 rounded-md border py-2 pl-3 pr-2 md:flex-row md:items-center md:justify-between'
-      style={{
-        backgroundColor: meta.panelColor,
-        borderColor: meta.panelBorderColor,
-        borderLeftColor: meta.progressColor,
-        borderLeftWidth: status === 'unknown' ? 1 : 3,
-      }}
-    >
-      <div className='min-w-0 md:flex-1'>
-        <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
-          <Text className='block min-w-0 max-w-full truncate'>
-            {model.model_name}
-          </Text>
-          <Tag
-            color='grey'
-            size='small'
-            shape='circle'
-            className='max-w-full whitespace-normal break-words [&_.semi-tag-content]:whitespace-normal [&_.semi-tag-content]:break-words'
-            style={{ height: 'auto' }}
-          >
-            {group}
-          </Tag>
-        </div>
-      </div>
-      <div className='flex items-center justify-between gap-3 md:justify-end'>
-        <Tag color={meta.tagColor} shape='circle'>
-          {getStatusText(status, t)}
-        </Tag>
-        <ModelScoreBar model={model} />
-      </div>
-    </div>
-  );
-};
-
-const VendorBlock = ({ vendor, open, onToggle, t }) => {
-  const status = getItemStatus(vendor);
-  const meta = getStatusMeta(status);
-  const modelCount = vendor.models?.length || 0;
-
-  return (
-    <div
-      className='border-b last:border-b-0'
-      style={{ borderColor: 'var(--semi-color-border)' }}
-    >
-      <button
-        type='button'
-        className='flex w-full items-center gap-3 bg-transparent px-0 py-3 text-left'
-        style={{ color: 'inherit' }}
-        onClick={onToggle}
-      >
-        <span
-          className='shrink-0'
-          style={{ color: 'var(--semi-color-text-2)' }}
+const AvailabilityStrip = ({ buckets, windowEnd, height = 26, t }) => (
+  <div
+    className='flex w-full items-stretch gap-[3px]'
+    style={{ height }}
+    role='img'
+    aria-label={t('滚动24小时分组可用性，每2小时一个时段，按智能调度算法计算。')}
+  >
+    {(buckets || []).map((bucket, index) => {
+      const status = getBarStatus(bucket);
+      const isInProgress =
+        index === (buckets || []).length - 1 && bucket.end > windowEnd;
+      const displayEnd = isInProgress ? windowEnd : bucket.end;
+      return (
+        <Tooltip
+          key={bucket.start}
+          showArrow
+          content={
+            <div className='text-center'>
+              <div>
+                {formatBucketTime(bucket.start)} –{' '}
+                {formatBucketTime(displayEnd)}
+              </div>
+              <div>
+                {t(STATUS_BAR_TEXT[status])}
+                {isInProgress ? ` · ${t('进行中')}` : ''}
+              </div>
+            </div>
+          }
         >
-          {open ? <IconChevronDown /> : <IconChevronRight />}
-        </span>
-        {renderVendorIcon(vendor)}
-        <div className='min-w-0 flex-1'>
-          <div className='flex min-w-0 flex-wrap items-center gap-2'>
-            <Text strong className='truncate'>
-              {vendor.name || t('未知供应商')}
-            </Text>
-            <Tag color={meta.tagColor} shape='circle'>
-              {getStatusText(status, t)}
-            </Tag>
-          </div>
-          <Space spacing={8} wrap>
-            <Text type='secondary' size='small'>
-              {t('模型')} {modelCount}
-            </Text>
-            <Text type='secondary' size='small'>
-              {t('有数据')} {vendor.known_count || 0}
-            </Text>
-            {vendor.unknown_count > 0 && (
-              <Text type='tertiary' size='small'>
-                {t('未知')} {vendor.unknown_count}
-              </Text>
-            )}
-          </Space>
-        </div>
-        <div className='hidden min-w-[54px] text-right md:block'>
-          <Text type={status === 'unknown' ? 'tertiary' : 'secondary'}>
-            {status === 'unknown' ? '-' : vendor.score}
+          <div
+            className='h-full min-w-0 flex-1 cursor-default rounded-[3px]'
+            style={{
+              backgroundColor: STATUS_BAR_COLOR[status],
+              backgroundImage:
+                isInProgress && bucket.has_data
+                  ? 'repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.25) 0 3px, transparent 3px 6px)'
+                  : undefined,
+            }}
+          />
+        </Tooltip>
+      );
+    })}
+  </div>
+);
+
+const ModelRow = ({ model, windowEnd, t }) => (
+  <div
+    className='flex flex-col gap-1.5 rounded-md border px-3 py-2'
+    style={{ borderColor: 'var(--semi-color-border)' }}
+  >
+    <span className='truncate font-mono text-[13px]'>
+      {model.model_name}
+    </span>
+    <AvailabilityStrip
+      buckets={model.buckets}
+      windowEnd={windowEnd}
+      height={16}
+      t={t}
+    />
+  </div>
+);
+
+const GroupBlock = ({ group, windowEnd, open, onToggle, t }) => (
+  <div
+    className='border-b last:border-b-0'
+    style={{ borderColor: 'var(--semi-color-border)' }}
+  >
+    <button
+      type='button'
+      className='w-full bg-transparent px-0 py-3 text-left'
+      style={{ color: 'inherit' }}
+      onClick={onToggle}
+    >
+      <div className='flex flex-col gap-2 md:flex-row md:items-center md:gap-4'>
+        <div className='flex min-w-0 items-center gap-2 md:w-44 md:shrink-0'>
+          <span
+            className='shrink-0'
+            style={{ color: 'var(--semi-color-text-2)' }}
+          >
+            {open ? <IconChevronDown /> : <IconChevronRight />}
+          </span>
+          <Text strong className='truncate'>
+            {group.group}
           </Text>
         </div>
-      </button>
-      <Collapsible isOpen={open} keepDOM>
-        <div className='pb-2 pl-8 md:pl-[76px]'>
-          {(vendor.models || []).map((model) => (
-            <ModelRow
-              key={`${model.model_name}:${model.group || 'default'}`}
-              model={model}
-              t={t}
-            />
-          ))}
+        <div className='min-w-0 flex-1'>
+          <AvailabilityStrip
+            buckets={group.buckets}
+            windowEnd={windowEnd}
+            height={26}
+            t={t}
+          />
         </div>
-      </Collapsible>
-    </div>
-  );
-};
+      </div>
+    </button>
+    <Collapsible isOpen={open} keepDOM>
+      <div className='grid gap-1.5 pb-3 pl-6 md:grid-cols-2 md:gap-x-6 md:pl-14'>
+        {(group.models || []).map((model) => (
+          <ModelRow
+            key={model.model_name}
+            model={model}
+            windowEnd={windowEnd}
+            t={t}
+          />
+        ))}
+      </div>
+    </Collapsible>
+  </div>
+);
 
 const ModelMonitor = () => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
-  const [summary, setSummary] = useState(null);
-  const [expandedVendors, setExpandedVendors] = useState(null);
+  const [availability, setAvailability] = useState(null);
+  const [expandedGroups, setExpandedGroups] = useState(() => new Set());
   const [nextRefreshAt, setNextRefreshAt] = useState(0);
 
   const fetchMonitor = useCallback(
@@ -271,13 +204,13 @@ const ModelMonitor = () => {
         setLoading(true);
       }
       try {
-        const res = await API.get('/api/model_monitor');
+        const res = await API.get('/api/model_monitor/availability');
         const { success, message, data } = res.data;
         if (!success) {
           showError(message);
           return;
         }
-        setSummary(data);
+        setAvailability(data);
         setNextRefreshAt(
           Date.now() + (data?.refresh_seconds || 60) * 1000,
         );
@@ -298,70 +231,61 @@ const ModelMonitor = () => {
     return () => clearInterval(timer);
   }, [fetchMonitor]);
 
-  useEffect(() => {
-    if (!summary?.vendors?.length) return;
-    setExpandedVendors((prev) => {
-      const validKeys = new Set(
-        summary.vendors.map((vendor) => String(vendor.name)),
-      );
-      if (prev !== null) {
-        return prev.filter((key) => validKeys.has(key));
-      }
-      return summary.vendors.slice(0, 3).map((vendor) => String(vendor.name));
-    });
-  }, [summary]);
-
-  const expandedSet = useMemo(
-    () => new Set(expandedVendors || []),
-    [expandedVendors],
-  );
-
-  const toggleVendor = (name) => {
+  const toggleGroup = (name) => {
     const key = String(name);
-    setExpandedVendors((prev) => {
-      const current = new Set(prev || []);
-      if (current.has(key)) {
-        current.delete(key);
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
       } else {
-        current.add(key);
+        next.add(key);
       }
-      return Array.from(current);
+      return next;
     });
   };
 
-  const headerArea = summary && (
-    <div className='flex flex-col gap-2 md:flex-row md:items-center md:justify-between'>
-      <div className='min-w-0'>
-        <Text strong>{t('模型监控')}</Text>
-        <div>
-          <Text type='secondary' size='small'>
-            {t('近7天全局模型体验评分，依靠智能调度算法给出多维度综合评分。')}
-          </Text>
+  const headerArea = availability && (
+    <div className='flex flex-col gap-2.5'>
+      <div className='flex flex-col gap-2 md:flex-row md:items-center md:justify-between'>
+        <div className='min-w-0'>
+          <Text strong>{t('模型监控')}</Text>
+          <div>
+            <Text type='secondary' size='small'>
+              {t(
+                '滚动24小时分组可用性，每2小时一个时段，按智能调度算法计算。',
+              )}
+            </Text>
+          </div>
         </div>
+        <Text type='tertiary' size='small' className='whitespace-nowrap'>
+          {t('每1分钟动态更新数据')}
+          <span
+            className='ml-1 inline-block align-baseline'
+            style={{ fontSize: 11, opacity: 0.72 }}
+          >
+            {t('下次更新时间:')} {formatRefreshClock(nextRefreshAt)}
+          </span>
+        </Text>
       </div>
-      <Space spacing={10} wrap>
-        <Text type='secondary' size='small'>
-          {t('模型')} {summary.model_count}
-        </Text>
-        <Text type='secondary' size='small'>
-          {t('有数据')} {summary.known_count}
-        </Text>
-        <Text type='secondary' size='small'>
-          {t('未知')} {summary.unknown_count}
-        </Text>
-        <Space spacing={4} wrap>
-          <Text type='tertiary' size='small'>
-            {t('每1分钟动态更新数据')}
+      <div className='flex flex-wrap items-center gap-x-4 gap-y-1.5'>
+        {LEGEND_ITEMS.map((item) => (
+          <span key={item.label} className='flex items-center gap-1.5'>
             <span
-              className='ml-1 inline-block align-baseline'
-              style={{ fontSize: 11, opacity: 0.72 }}
-            >
-              {t('下次更新时间:')} {formatRefreshClock(nextRefreshAt)}
-            </span>
-          </Text>
-        </Space>
-      </Space>
+              className='inline-block h-2.5 w-2.5 shrink-0 rounded-[3px]'
+              style={{ backgroundColor: item.color }}
+            />
+            <Text type='tertiary' size='small'>
+              {t(item.label)}
+            </Text>
+          </span>
+        ))}
+      </div>
     </div>
+  );
+
+  const windowEnd = useMemo(
+    () => availability?.window_end || 0,
+    [availability],
   );
 
   if (loading) {
@@ -374,7 +298,7 @@ const ModelMonitor = () => {
     );
   }
 
-  if (!summary || !summary.vendors || summary.vendors.length === 0) {
+  if (!availability || !availability.groups || availability.groups.length === 0) {
     return (
       <div className='mt-[60px] px-2'>
         <Card className='!rounded-2xl'>
@@ -400,14 +324,15 @@ const ModelMonitor = () => {
           >
             {headerArea}
           </div>
-          {summary.vendors.map((vendor) => {
-            const key = String(vendor.name);
+          {availability.groups.map((group) => {
+            const key = String(group.group);
             return (
-              <VendorBlock
+              <GroupBlock
                 key={key}
-                vendor={vendor}
-                open={expandedSet.has(key)}
-                onToggle={() => toggleVendor(key)}
+                group={group}
+                windowEnd={windowEnd}
+                open={expandedGroups.has(key)}
+                onToggle={() => toggleGroup(key)}
                 t={t}
               />
             );

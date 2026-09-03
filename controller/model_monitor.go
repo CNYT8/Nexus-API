@@ -15,3 +15,12 @@ func GetModelMonitor(c *gin.Context) {
 	}
 	common.ApiSuccess(c, summary)
 }
+
+func GetModelMonitorAvailability(c *gin.Context) {
+	availability, err := model.GetModelMonitorAvailability()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, availability)
+}

@@ -23,43 +23,30 @@ export type ModelMonitorStatus =
   | 'poor'
   | 'unknown'
 
-export interface ModelMonitorModel {
-  model_name: string
-  group: string
-  score: number
-  status: ModelMonitorStatus
-  status_text: string
+export interface ModelMonitorAvailabilityBucket {
+  start: number
+  end: number
   has_data: boolean
-}
-
-export interface ModelMonitorVendor {
-  id: number
-  name: string
-  description?: string
-  icon?: string
   score: number
   status: ModelMonitorStatus
-  status_text: string
-  known_count: number
-  unknown_count: number
-  models: ModelMonitorModel[]
 }
 
-export interface ModelMonitorSummary {
-  window_days: number
-  hot_days: number
-  refresh_seconds: number
+export interface ModelMonitorAvailabilityModel {
+  model_name: string
+  buckets: ModelMonitorAvailabilityBucket[]
+}
+
+export interface ModelMonitorAvailabilityGroup {
+  group: string
+  buckets: ModelMonitorAvailabilityBucket[]
+  models: ModelMonitorAvailabilityModel[]
+}
+
+export interface ModelMonitorAvailability {
   updated_at: number
-  model_count: number
-  known_count: number
-  unknown_count: number
-  vendor_count: number
-  best_score: number
-  vendors: ModelMonitorVendor[]
-}
-
-export interface GetModelMonitorResponse {
-  success: boolean
-  message?: string
-  data?: ModelMonitorSummary
+  refresh_seconds: number
+  bucket_seconds: number
+  window_start: number
+  window_end: number
+  groups: ModelMonitorAvailabilityGroup[]
 }

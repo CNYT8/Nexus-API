@@ -17,9 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
-import type { GetModelMonitorResponse } from './types'
+import type { ModelMonitorAvailability } from './types'
 
-export async function getModelMonitor(): Promise<GetModelMonitorResponse> {
-  const res = await api.get('/api/model_monitor')
+export async function getModelMonitorAvailability(): Promise<{
+  success: boolean
+  message?: string
+  data?: ModelMonitorAvailability
+}> {
+  const res = await api.get('/api/model_monitor/availability')
   return res.data
 }

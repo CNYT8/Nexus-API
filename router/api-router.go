@@ -33,6 +33,7 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/home_page_content", controller.GetHomePageContent)
 		apiRouter.GET("/pricing", middleware.HeaderNavModuleAuth("pricing"), controller.GetPricing)
 		apiRouter.GET("/model_monitor", middleware.UserAuth(), controller.GetModelMonitor)
+		apiRouter.GET("/model_monitor/availability", middleware.UserAuth(), controller.GetModelMonitorAvailability)
 		apiRouter.GET("/membership/self", middleware.UserAuth(), controller.GetMembershipSelf)
 		apiRouter.GET("/empty-responses/settings", middleware.RootAuth(), controller.GetEmptyResponseSettings)
 		apiRouter.PUT("/empty-responses/settings", middleware.RootAuth(), controller.UpdateEmptyResponseSettings)

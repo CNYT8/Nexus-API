@@ -603,9 +603,10 @@ func cloneModelMonitorSummary(summary *ModelMonitorSummary) *ModelMonitorSummary
 
 func InvalidateModelMonitorCache() {
 	modelMonitorCache.Lock()
-	defer modelMonitorCache.Unlock()
 	modelMonitorCache.summary = nil
 	modelMonitorCache.expiresAt = 0
+	modelMonitorCache.Unlock()
+	invalidateModelMonitorAvailabilityCache()
 }
 
 func GetModelMonitorSummary() (*ModelMonitorSummary, error) {
