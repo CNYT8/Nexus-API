@@ -4854,6 +4854,7 @@
     "Paste a pattern, no newline required": "Collez une règle, sans retour à la ligne",
     "Per-call price": "Prix par requête",
     "When set, this tier charges a fixed amount per request and can be combined with token prices (fixed fee + usage).": "Si défini, ce palier facture un montant fixe par requête et peut être combiné avec les prix par token (frais fixes + usage).",
-    "Per-call fixed fee": "Frais fixes par requête"
+    "Per-call fixed fee": "Frais fixes par requête",
+    "Hybrid": "Hybride"
   }
 }

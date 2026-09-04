@@ -330,6 +330,10 @@ func updatePricing() {
 			if expr, ok := billing_setting.GetBillingExpr(model); ok && strings.TrimSpace(expr) != "" {
 				pricing.BillingMode = billingMode
 				pricing.BillingExpr = expr
+				// Tiered models are classified for the plaza by their expression:
+				// pure per-call, pure per-token, or hybrid — instead of falling
+				// back to the ModelPrice/ModelRatio quota type.
+				pricing.QuotaType = billing_setting.ClassifyTieredExprQuotaType(expr)
 			}
 		}
 		pricingMap = append(pricingMap, pricing)

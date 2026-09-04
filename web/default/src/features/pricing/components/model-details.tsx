@@ -338,7 +338,9 @@ function ModelHeader(props: { model: PricingModel }) {
         <span className='text-muted-foreground/70'>
           {model.quota_type === QUOTA_TYPE_VALUES.TOKEN
             ? t('Token-based')
-            : t('Per Request')}
+            : model.quota_type === QUOTA_TYPE_VALUES.HYBRID
+              ? t('Hybrid')
+              : t('Per Request')}
         </span>
         {model.billing_mode === 'tiered_expr' && model.billing_expr && (
           <>

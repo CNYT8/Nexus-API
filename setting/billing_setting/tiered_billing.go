@@ -2,6 +2,8 @@ package billing_setting
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -14,6 +16,47 @@ const (
 	BillingModeField      = "billing_mode"
 	BillingExprField      = "billing_expr"
 )
+
+// Quota type classification for tiered billing expressions, consumed by the
+// pricing API so both frontends share one source of truth.
+const (
+	TieredQuotaToken  = 0 // every tier prices tokens only
+	TieredQuotaCall   = 1 // every tier is a fixed per-request charge
+	TieredQuotaHybrid = 2 // some tiers (or tier terms) mix per-call and per-token
+)
+
+var (
+	tieredCallPattern = regexp.MustCompile(`\bcall\s*\(`)
+	// A per-request charge may also be written by hand as "0.25 * 1000000"
+	// (the raw 1M-scale form) instead of call(0.25).
+	tieredCallConstPattern = regexp.MustCompile(`\b\d+(?:\.\d+)?\s*\*\s*(?:1_?000_?000|1000000|1e6)\b`)
+	tieredTokenPattern    = regexp.MustCompile(`\b(?:p|c|cr|cc|cc1h|img|img_o|ai|ao)\b\s*\*`)
+)
+
+// ClassifyTieredExprQuotaType inspects a tiered billing expression and
+// returns the pricing quota type shown in the model plaza:
+//
+//	TieredQuotaToken  - no per-call terms anywhere (pure per-token pricing)
+//	TieredQuotaCall   - only per-call terms, no token variables (pure per-request)
+//	TieredQuotaHybrid - both per-call and per-token terms are present
+//
+// Request rules after "|||" are ignored for classification.
+func ClassifyTieredExprQuotaType(expr string) int {
+	body := expr
+	if idx := strings.Index(body, "|||"); idx >= 0 {
+		body = body[:idx]
+	}
+	hasCall := tieredCallPattern.MatchString(body) || tieredCallConstPattern.MatchString(body)
+	hasToken := tieredTokenPattern.MatchString(body)
+	switch {
+	case hasCall && hasToken:
+		return TieredQuotaHybrid
+	case hasCall:
+		return TieredQuotaCall
+	default:
+		return TieredQuotaToken
+	}
+}
 
 // BillingSetting is managed by config.GlobalConfig.Register.
 // DB keys: billing_setting.billing_mode, billing_setting.billing_expr

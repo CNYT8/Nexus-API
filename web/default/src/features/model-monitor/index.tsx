@@ -96,10 +96,10 @@ function AvailabilityStrip(props: {
   height?: number
 }) {
   const { t } = useTranslation()
-  const height = props.height ?? 18
+  const height = props.height ?? 22
   return (
     <div
-      className='flex w-full items-end justify-end gap-1'
+      className='flex w-full items-end justify-end gap-[5px]'
       role='img'
       aria-label={t(
         'Rolling 24-hour group availability in 2-hour segments, scored by the scheduling algorithm.'
@@ -116,7 +116,7 @@ function AvailabilityStrip(props: {
               render={
                 <div
                   className={cn(
-                    'w-2 shrink-0 cursor-default rounded-[2px]',
+                    'w-2.5 shrink-0 cursor-default rounded-[3px]',
                     barClassName[status]
                   )}
                   style={{
@@ -160,7 +160,7 @@ function ModelRow(props: {
       <AvailabilityStrip
         buckets={props.model.buckets}
         windowEnd={props.windowEnd}
-        height={12}
+        height={15}
       />
     </div>
   )

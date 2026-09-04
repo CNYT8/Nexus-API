@@ -4858,6 +4858,7 @@
     "Paste a pattern, no newline required": "粘贴一个规则，无需换行",
     "Per-call price": "按次价格",
     "When set, this tier charges a fixed amount per request and can be combined with token prices (fixed fee + usage).": "填写后该档每次请求固定收费，可与按量价格组合（固定费用 + 按量）。",
-    "Per-call fixed fee": "按次固定费用"
+    "Per-call fixed fee": "按次固定费用",
+    "Hybrid": "混合计费"
   }
 }

@@ -4854,6 +4854,7 @@
     "Paste a pattern, no newline required": "ルールを貼り付け（改行不要）",
     "Per-call price": "1リクエストあたりの価格",
     "When set, this tier charges a fixed amount per request and can be combined with token prices (fixed fee + usage).": "設定すると、この階層はリクエストごとに固定料金を課金し、トークン単価と組み合わせ可能です（固定料金 + 従量）。",
-    "Per-call fixed fee": "リクエスト固定料金"
+    "Per-call fixed fee": "リクエスト固定料金",
+    "Hybrid": "ハイブリッド"
   }
 }

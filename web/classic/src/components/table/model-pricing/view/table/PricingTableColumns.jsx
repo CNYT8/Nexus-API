@@ -42,6 +42,12 @@ function renderQuotaType(type, t) {
           {t('按次计费')}
         </Tag>
       );
+    case 2:
+      return (
+        <Tag color='amber' shape='circle'>
+          {t('混合计费')}
+        </Tag>
+      );
     case 0:
       return (
         <Tag color='violet' shape='circle'>

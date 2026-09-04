@@ -81,9 +81,9 @@ const formatRefreshClock = (timestamp) => {
 const getBarStatus = (bucket) =>
   bucket?.has_data ? bucket.status || 'unknown' : 'unknown';
 
-const AvailabilityStrip = ({ buckets, windowEnd, height = 18, t }) => (
+const AvailabilityStrip = ({ buckets, windowEnd, height = 22, t }) => (
   <div
-    className='flex w-full items-end justify-end gap-1'
+    className='flex w-full items-end justify-end gap-[5px]'
     role='img'
     aria-label={t('滚动24小时分组可用性，每2小时一个时段，按智能调度算法计算。')}
   >
@@ -110,13 +110,13 @@ const AvailabilityStrip = ({ buckets, windowEnd, height = 18, t }) => (
           }
         >
           <div
-            className='w-2 shrink-0 cursor-default rounded-[2px]'
+            className='w-2.5 shrink-0 cursor-default rounded-[3px]'
             style={{
               height,
               backgroundColor: STATUS_BAR_COLOR[status],
               backgroundImage:
                 isInProgress && bucket.has_data
-                  ? 'repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.25) 0 2px, transparent 2px 4px)'
+                  ? 'repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.25) 0 3px, transparent 3px 6px)'
                   : undefined,
             }}
           />
@@ -137,7 +137,7 @@ const ModelRow = ({ model, windowEnd, t }) => (
     <AvailabilityStrip
       buckets={model.buckets}
       windowEnd={windowEnd}
-      height={12}
+      height={15}
       t={t}
     />
   </div>

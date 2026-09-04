@@ -81,7 +81,9 @@ export function filterByQuotaType(
   const targetType =
     quotaType === QUOTA_TYPES.TOKEN
       ? QUOTA_TYPE_VALUES.TOKEN
-      : QUOTA_TYPE_VALUES.REQUEST
+      : quotaType === QUOTA_TYPES.HYBRID
+        ? QUOTA_TYPE_VALUES.HYBRID
+        : QUOTA_TYPE_VALUES.REQUEST
   return models.filter((m) => m.quota_type === targetType)
 }
 
@@ -102,7 +104,11 @@ export function filterByEndpointType(
  * Get model price for sorting
  */
 function getModelPrice(model: PricingModel): number {
-  return model.quota_type === 0 ? model.model_ratio : model.model_price || 0
+  // Tiered/hybrid models may carry no model_price; fall back to model_ratio
+  // so price sorting keeps a sensible key instead of collapsing to 0.
+  return model.quota_type === 0
+    ? model.model_ratio
+    : model.model_price || model.model_ratio || 0
 }
 
 /**

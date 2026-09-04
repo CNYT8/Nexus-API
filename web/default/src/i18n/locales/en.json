@@ -4851,6 +4851,7 @@
     "Paste a pattern, no newline required": "Paste a pattern, no newline required",
     "Per-call price": "Per-call price",
     "When set, this tier charges a fixed amount per request and can be combined with token prices (fixed fee + usage).": "When set, this tier charges a fixed amount per request and can be combined with token prices (fixed fee + usage).",
-    "Per-call fixed fee": "Per-call fixed fee"
+    "Per-call fixed fee": "Per-call fixed fee",
+    "Hybrid": "Hybrid"
   }
 }

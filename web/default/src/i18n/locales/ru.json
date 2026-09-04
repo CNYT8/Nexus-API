@@ -4854,6 +4854,7 @@
     "Paste a pattern, no newline required": "Вставьте правило, перенос строки не нужен",
     "Per-call price": "Цена за запрос",
     "When set, this tier charges a fixed amount per request and can be combined with token prices (fixed fee + usage).": "Если задано, этот уровень взимает фиксированную сумму за запрос и может сочетаться с ценами за токены (фиксированный платёж + использование).",
-    "Per-call fixed fee": "Фиксированный платёж за запрос"
+    "Per-call fixed fee": "Фиксированный платёж за запрос",
+    "Hybrid": "Гибридная"
   }
 }

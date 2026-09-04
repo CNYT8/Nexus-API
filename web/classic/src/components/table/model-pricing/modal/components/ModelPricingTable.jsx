@@ -78,12 +78,18 @@ const ModelPricingTable = ({
         membershipDiscount: groupMembershipDiscounts[group],
         billingType:
           modelData?.billing_mode === 'tiered_expr'
-            ? t('动态计费')
+            ? modelData?.quota_type === 2
+              ? t('混合计费')
+              : modelData?.quota_type === 1
+                ? t('按次计费')
+                : t('按量计费')
             : modelData?.quota_type === 0
               ? t('按量计费')
               : modelData?.quota_type === 1
                 ? t('按次计费')
-                : '-',
+                : modelData?.quota_type === 2
+                  ? t('混合计费')
+                  : '-',
         priceItems: getModelPriceItems(priceData, t, siteDisplayType),
       };
     });
@@ -126,6 +132,7 @@ const ModelPricingTable = ({
         let color = 'white';
         if (text === t('按量计费')) color = 'violet';
         else if (text === t('按次计费')) color = 'teal';
+        else if (text === t('混合计费')) color = 'amber';
         else if (text === t('动态计费')) color = 'amber';
         return (
           <Tag color={color} size='small' shape='circle'>

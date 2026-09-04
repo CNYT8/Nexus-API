@@ -4854,6 +4854,7 @@
     "Paste a pattern, no newline required": "Dán một quy tắc, không cần xuống dòng",
     "Per-call price": "Giá mỗi yêu cầu",
     "When set, this tier charges a fixed amount per request and can be combined with token prices (fixed fee + usage).": "Khi đặt, tầng này tính phí cố định mỗi yêu cầu và có thể kết hợp với giá theo token (phí cố định + theo lượng dùng).",
-    "Per-call fixed fee": "Phí cố định mỗi yêu cầu"
+    "Per-call fixed fee": "Phí cố định mỗi yêu cầu",
+    "Hybrid": "Kết hợp"
   }
 }

@@ -130,10 +130,17 @@ export function usePricingColumns(
       header: t('Type'),
       cell: ({ row }) => {
         const isTokenBased = row.original.quota_type === QUOTA_TYPE_VALUES.TOKEN
+        const isHybrid = row.original.quota_type === QUOTA_TYPE_VALUES.HYBRID
         return (
           <StatusBadge
-            label={isTokenBased ? t('Token') : t('Request')}
-            variant={isTokenBased ? 'info' : 'neutral'}
+            label={
+              isHybrid
+                ? t('Hybrid')
+                : isTokenBased
+                  ? t('Token')
+                  : t('Request')
+            }
+            variant={isHybrid ? 'warning' : isTokenBased ? 'info' : 'neutral'}
             copyable={false}
           />
         )
