@@ -147,6 +147,22 @@ const PRESET_GROUPS: PresetGroup[] = [
     ],
   },
   {
+    group: 'Per-call',
+    presets: [
+      { key: 'percall-flat', label: 'Per-call $5', expr: 'tier("base", call(5))' },
+      {
+        key: 'percall-tiered',
+        label: 'Tiered per-call',
+        expr: 'len <= 128000 ? tier("short", call(3)) : tier("long", call(5))',
+      },
+      {
+        key: 'percall-plus-usage',
+        label: 'Fixed fee + usage',
+        expr: 'tier("base", call(3) + p * 2 + c * 6)',
+      },
+    ],
+  },
+  {
     group: 'Tiered',
     presets: [
       {
@@ -682,6 +698,17 @@ function VisualTierCard({
           </span>
         </div>
 
+        <div className='space-y-1.5'>
+          <PriceField
+            label={t('Per-call price')}
+            hint={t(
+              'When set, this tier charges a fixed amount per request and can be combined with token prices (fixed fee + usage).'
+            )}
+            value={Number(tier.per_call_cost) || 0}
+            onChange={(value) => handlePriceChange('per_call_cost', value)}
+          />
+        </div>
+
         <div className='space-y-3'>
           <div className='flex flex-wrap gap-x-4 gap-y-2'>
             <PriceField
@@ -803,6 +830,7 @@ function VisualEditor({ visualConfig, onChange }: VisualEditorProps) {
         conditions: [],
         input_unit_cost: 0,
         output_unit_cost: 0,
+        per_call_cost: 0,
       })
     )
     onChange({ ...config, tiers })
@@ -891,7 +919,10 @@ function RawExprEditor({ exprString, onChange }: RawExprEditorProps) {
             <code>ao</code>
           </div>
           <div>
-            {t('Functions')}: <code>tier(name, value)</code>, <code>max</code>,{' '}
+            {t('Functions')}:{' '}
+            <code>tier(name, value)</code>,{' '}
+            <code>call(x)</code> ({t('Per-call fixed fee')}),{' '}
+            <code>max</code>,{' '}
             <code>min</code>, <code>ceil</code>, <code>floor</code>,{' '}
             <code>abs</code>, <code>header(name)</code>,{' '}
             <code>param(path)</code>, <code>has(source, text)</code>
@@ -1504,6 +1535,7 @@ Important: len is NOT affected by auto-exclusion. Tier conditions should use len
 ### Built-in Functions
 
 - tier(name, value) — labels the billing tier; must wrap the cost expression
+- call(x) — fixed per-request charge of $x; composable with per-token prices
 - max(a, b), min(a, b) — maximum/minimum
 - ceil(x), floor(x), abs(x) — ceiling, floor, absolute value
 - header(name) — reads a request header
@@ -1522,6 +1554,10 @@ tier("base", p * 2.5 + c * 15)
 
 With cache:
 tier("base", p * 2.5 + c * 15 + cr * 0.25)
+
+Per-call pricing (fixed $/request, optionally tiered):
+tier("base", call(5))
+len <= 128000 ? tier("short", call(3)) : tier("long", call(5))
 
 Multi-tier (use len for conditions):
 len <= 200000
@@ -1549,6 +1585,7 @@ len <= 128000
 4. Multi-tier uses nested ternary: cond1 ? tier(...) : (cond2 ? tier(...) : tier(...))
 5. Price coefficients are the provider's official $/1M tokens prices
 6. If cache/image/audio don't need separate pricing, omit those variables; their tokens are included in p/c automatically
+7. For per-call models use call(x) where x is the price in dollars per request; it can be combined with token prices (fixed fee + usage)
 
 Please generate a billing expression based on the model information and pricing requirements provided.`
 

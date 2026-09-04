@@ -68,6 +68,13 @@ func runProgram(prog *vm.Program, params TokenParams, request RequestInput) (flo
 			trace.Cost = value
 			return value
 		},
+		// call(x) charges a fixed $x per request. The dollar amount is
+		// converted to the expression's 1M-token scale so per-call prices
+		// compose with per-token terms (call(3) + p * 2 = $3/request +
+		// $2/1M tokens).
+		"call": func(x float64) float64 {
+			return x * 1_000_000
+		},
 		"header": func(key string) string {
 			return headers[strings.ToLower(strings.TrimSpace(key))]
 		},

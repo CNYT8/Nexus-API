@@ -81,10 +81,9 @@ const formatRefreshClock = (timestamp) => {
 const getBarStatus = (bucket) =>
   bucket?.has_data ? bucket.status || 'unknown' : 'unknown';
 
-const AvailabilityStrip = ({ buckets, windowEnd, height = 26, t }) => (
+const AvailabilityStrip = ({ buckets, windowEnd, height = 18, t }) => (
   <div
-    className='flex w-full items-stretch gap-[3px]'
-    style={{ height }}
+    className='flex w-full items-end justify-end gap-1'
     role='img'
     aria-label={t('滚动24小时分组可用性，每2小时一个时段，按智能调度算法计算。')}
   >
@@ -111,12 +110,13 @@ const AvailabilityStrip = ({ buckets, windowEnd, height = 26, t }) => (
           }
         >
           <div
-            className='h-full min-w-0 flex-1 cursor-default rounded-[3px]'
+            className='w-2 shrink-0 cursor-default rounded-[2px]'
             style={{
+              height,
               backgroundColor: STATUS_BAR_COLOR[status],
               backgroundImage:
                 isInProgress && bucket.has_data
-                  ? 'repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.25) 0 3px, transparent 3px 6px)'
+                  ? 'repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.25) 0 2px, transparent 2px 4px)'
                   : undefined,
             }}
           />
@@ -137,7 +137,7 @@ const ModelRow = ({ model, windowEnd, t }) => (
     <AvailabilityStrip
       buckets={model.buckets}
       windowEnd={windowEnd}
-      height={16}
+      height={12}
       t={t}
     />
   </div>
@@ -157,12 +157,12 @@ const GroupBlock = ({ group, windowEnd, open, onToggle, t }) => (
       <div className='flex flex-col gap-2 md:flex-row md:items-center md:gap-4'>
         <div className='flex min-w-0 items-center gap-2 md:w-44 md:shrink-0'>
           <span
-            className='shrink-0'
-            style={{ color: 'var(--semi-color-text-2)' }}
+            className='flex shrink-0 items-center'
+            style={{ color: 'var(--semi-color-text-2)', height: '22px' }}
           >
-            {open ? <IconChevronDown /> : <IconChevronRight />}
+            {open ? <IconChevronDown size='small' /> : <IconChevronRight size='small' />}
           </span>
-          <Text strong className='truncate'>
+          <Text strong className='truncate leading-[22px]'>
             {group.group}
           </Text>
         </div>
@@ -170,7 +170,7 @@ const GroupBlock = ({ group, windowEnd, open, onToggle, t }) => (
           <AvailabilityStrip
             buckets={group.buckets}
             windowEnd={windowEnd}
-            height={26}
+            height={18}
             t={t}
           />
         </div>

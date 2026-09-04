@@ -139,6 +139,10 @@ const Membership = () => {
   );
   const nextTier = data.has_next_tier ? data.next_tier : null;
   const currentTier = current.tier_name || t('无');
+  const currentTierHidden =
+    !!current.tier_id &&
+    (tiers.find((tier) => tier.id === current.tier_id)?.hidden === true ||
+      current.tier_hidden === true);
   const cumulativeAmount = Number(current.cumulative_amount || 0);
   const nextPercent =
     nextTier && Number(nextTier.threshold_amount) > 0
@@ -192,6 +196,11 @@ const Membership = () => {
                   >
                     {currentTier}
                   </Tag>
+                  {currentTierHidden && (
+                    <Tag color='purple' shape='circle'>
+                      {t('隐藏')}
+                    </Tag>
+                  )}
                   <Tag color='white' shape='circle'>
                     {t('累计充值')} {renderQuotaWithAmount(cumulativeAmount)}
                   </Tag>
@@ -260,6 +269,11 @@ const Membership = () => {
                           </Text>
                         </div>
                         <Space wrap spacing={4}>
+                          {tier.hidden === true && (
+                            <Tag color='purple' shape='circle'>
+                              {t('隐藏')}
+                            </Tag>
+                          )}
                           <Tag
                             color={hasDiscount ? 'yellow' : 'white'}
                             shape='circle'

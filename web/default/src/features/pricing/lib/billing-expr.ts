@@ -262,6 +262,8 @@ function parseTierBody(bodyStr: string): Record<string, number> {
   for (const [varName, field] of Object.entries(BILLING_VAR_KEY_TO_FIELD)) {
     tier[field] = coeffs[varName] || 0
   }
+  const callMatch = bodyStr.match(/call\s*\(\s*([\d.eE+-]+)\s*\)/)
+  tier.per_call_cost = callMatch ? Number(callMatch[1]) : 0
   return tier
 }
 
@@ -273,7 +275,8 @@ export function parseTiersFromExpr(exprStr: string): ParsedTier[] {
       `((?:(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)` +
       `(?:\\s*&&\\s*(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`
     const tierRe = new RegExp(
-      `(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*([^)]+)\\)`,
+      // The tier body may contain one level of nested parens: call(x)
+      `(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*((?:[^()]+|call\\s*\\(\\s*[\\d.eE+-]+\\s*\\))+)\\)`,
       'g'
     )
     const tiers: ParsedTier[] = []

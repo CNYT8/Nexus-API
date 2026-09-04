@@ -62,7 +62,6 @@ function formatConditionSummary(conditions, t) {
     .join(' && ');
 }
 
-
 function describeCondition(cond, t) {
   if (cond.source === SOURCE_TIME) {
     const fn = t(TIME_FUNC_LABELS[cond.timeFunc] || cond.timeFunc);
@@ -114,6 +113,7 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
   }
 
   const priceFields = BILLING_PRICING_VARS.map((v) => [v.field, v.shortLabel]);
+  const hasPerCall = tiers.some((tier) => Number(tier.per_call_cost) > 0);
 
   const tierColumns = [
     {
@@ -135,6 +135,13 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
         dataIndex: field,
         render: (v) => v > 0 ? <Text strong>{`${symbol}${(v * rate).toFixed(4)}`}</Text> : '-',
       })),
+    ...(hasPerCall
+        ? [{
+            title: `${t('按次')} (${symbol}/次)`,
+            dataIndex: 'per_call_cost',
+            render: (v) => v > 0 ? <Text strong>{`${symbol}${(v * rate).toFixed(4)}`}</Text> : '-',
+          }]
+        : []),
   ];
 
   const tierData = hasTiers
@@ -142,6 +149,7 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
         key: `tier-${i}`,
         label: tier.label,
         condSummary: formatConditionSummary(tier.conditions, t),
+        per_call_cost: Number(tier.per_call_cost) || 0,
         ...Object.fromEntries(priceFields.map(([field]) => [field, tier[field] || 0])),
       }))
     : [];

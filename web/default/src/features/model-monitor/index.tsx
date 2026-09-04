@@ -96,11 +96,10 @@ function AvailabilityStrip(props: {
   height?: number
 }) {
   const { t } = useTranslation()
-  const height = props.height ?? 26
+  const height = props.height ?? 18
   return (
     <div
-      className='flex w-full items-stretch gap-[3px]'
-      style={{ height }}
+      className='flex w-full items-end justify-end gap-1'
       role='img'
       aria-label={t(
         'Rolling 24-hour group availability in 2-hour segments, scored by the scheduling algorithm.'
@@ -117,10 +116,11 @@ function AvailabilityStrip(props: {
               render={
                 <div
                   className={cn(
-                    'h-full min-w-0 flex-1 cursor-default rounded-[3px]',
+                    'w-2 shrink-0 cursor-default rounded-[2px]',
                     barClassName[status]
                   )}
                   style={{
+                    height,
                     backgroundImage:
                       isInProgress && bucket.has_data
                         ? inProgressStripe
@@ -160,7 +160,7 @@ function ModelRow(props: {
       <AvailabilityStrip
         buckets={props.model.buckets}
         windowEnd={props.windowEnd}
-        height={16}
+        height={12}
       />
     </div>
   )
@@ -184,7 +184,7 @@ function GroupBlock(props: {
         className='bg-transparent flex w-full flex-col gap-2 py-3 text-left md:flex-row md:items-center md:gap-4'
         onClick={props.onToggle}
       >
-        <div className='text-muted-foreground flex min-w-0 items-center gap-2 md:w-44 md:shrink-0'>
+        <div className='text-muted-foreground flex h-6 min-w-0 items-center gap-2 md:w-44 md:shrink-0'>
           {props.open ? (
             <ChevronDown className='size-4 shrink-0' />
           ) : (

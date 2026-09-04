@@ -60,6 +60,7 @@ const createDefaultTier = (index) => ({
   threshold_amount: 0,
   auto_upgrade_enabled: true,
   enabled: true,
+  hidden: false,
   sort_order: index + 1,
   discount_all_groups: false,
   all_group_discount: 1,
@@ -108,6 +109,7 @@ const normalizeTier = (tier, index) => ({
   threshold_amount: Math.max(0, Number(tier.threshold_amount || 0)),
   auto_upgrade_enabled: tier.auto_upgrade_enabled !== false,
   enabled: tier.enabled !== false,
+  hidden: tier.hidden === true,
   sort_order: index + 1,
   discount_all_groups: tier.discount_all_groups === true,
   all_group_discount: normalizeDiscount(tier.all_group_discount),
@@ -343,6 +345,11 @@ const MembershipSetting = () => {
                     <Tag color={tier.enabled ? 'blue' : 'grey'} shape='circle'>
                       {tier.enabled ? t('启用') : t('停用')}
                     </Tag>
+                    {tier.hidden === true && (
+                      <Tag color='purple' shape='circle'>
+                        {t('隐藏')}
+                      </Tag>
+                    )}
                     <Text strong>{tier.name || t('未命名等级')}</Text>
                   </Space>
                   <Button
@@ -417,6 +424,29 @@ const MembershipSetting = () => {
                         {t('累充达到后自动解锁')}
                       </Text>
                     </Space>
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <div className='mb-1'>
+                      <Text size='small'>{t('隐藏等级')}</Text>
+                    </div>
+                    <Space>
+                      <Switch
+                        checked={tier.hidden === true}
+                        onChange={(checked) =>
+                          updateTier(tier.id, 'hidden', checked)
+                        }
+                      />
+                      <Text type='secondary' size='small'>
+                        {t('仅该等级会员可见')}
+                      </Text>
+                    </Space>
+                    {tier.hidden === true && (
+                      <div style={{ marginTop: 4 }}>
+                        <Text type='warning' size='small'>
+                          {t('隐藏等级不参与自动升级，需要在用户管理中手动设置')}
+                        </Text>
+                      </div>
+                    )}
                   </Col>
                   <Col xs={24} md={8}>
                     <div className='mb-1'>

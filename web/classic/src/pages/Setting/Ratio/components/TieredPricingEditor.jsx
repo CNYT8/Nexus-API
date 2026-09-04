@@ -61,6 +61,7 @@ import {
 const { Text } = Typography;
 
 const PRICE_SUFFIX = '$/1M tokens';
+const PER_CALL_PRICE_SUFFIX = '$/次';
 
 function unitCostToPrice(uc) {
   return Number(uc) || 0;
@@ -119,6 +120,7 @@ function normalizeVisualTier(tier = {}) {
     ...tier,
     conditions: Array.isArray(tier.conditions) ? tier.conditions : [],
     cache_mode: getTierCacheMode(tier),
+    per_call_cost: Number(tier.per_call_cost) || 0,
   };
 }
 
@@ -129,6 +131,7 @@ function createDefaultVisualConfig() {
         conditions: [],
         input_unit_cost: 0,
         output_unit_cost: 0,
+        per_call_cost: 0,
         label: 'base',
         cache_mode: CACHE_MODE_GENERIC,
       }),
@@ -148,13 +151,21 @@ function normalizeVisualConfig(config) {
 
 function buildTierBodyExpr(tier) {
   const parts = [];
+  const pc = Number(tier.per_call_cost) || 0;
+  if (pc !== 0) parts.push(`call(${pc})`);
   const ic = Number(tier.input_unit_cost) || 0;
   const oc = Number(tier.output_unit_cost) || 0;
-  parts.push(`p * ${ic}`);
-  parts.push(`c * ${oc}`);
-  for (const cv of CACHE_VAR_MAP) {
-    const v = Number(tier[cv.field]) || 0;
-    if (v !== 0) parts.push(`${cv.exprVar} * ${v}`);
+  const hasTokenTerms =
+    ic !== 0 ||
+    oc !== 0 ||
+    CACHE_VAR_MAP.some((cv) => (Number(tier[cv.field]) || 0) !== 0);
+  if (hasTokenTerms || parts.length === 0) {
+    parts.push(`p * ${ic}`);
+    parts.push(`c * ${oc}`);
+    for (const cv of CACHE_VAR_MAP) {
+      const v = Number(tier[cv.field]) || 0;
+      if (v !== 0) parts.push(`${cv.exprVar} * ${v}`);
+    }
   }
   return parts.join(' + ');
 }
@@ -205,21 +216,26 @@ function tryParseVisualConfig(exprStr) {
       .map((v) => `(?:\\s*\\+\\s*${v}\\s*\\*\\s*([\\d.eE+-]+))?`)
       .join('');
 
-    // Body pattern: p * X + c * Y [+ cr * A] [+ cc * B] [+ cc1h * C]
-    const bodyPat = `p\\s*\\*\\s*([\\d.eE+-]+)\\s*\\+\\s*c\\s*\\*\\s*([\\d.eE+-]+)${optCacheStr}`;
+    // Body pattern: [call(X) +] p * Y + c * Z [+ cr * A] [+ cc * B] [+ cc1h * C]
+    // Either the per-call term or the token terms may be omitted (pure
+    // per-call tiers have no p/c terms; legacy tiers have no call term).
+    const optCallStr = `(?:call\\s*\\(\\s*([\\d.eE+-]+)\\s*\\)(?:\\s*\\+\\s*)?)?`;
+    const optTokenStr = `(?:p\\s*\\*\\s*([\\d.eE+-]+)\\s*\\+\\s*c\\s*\\*\\s*([\\d.eE+-]+)${optCacheStr})?`;
+    const bodyPat = `${optCallStr}${optTokenStr}`;
 
     // Single-tier: tier("label", body)
     const singleRe = new RegExp(`^tier\\("([^"]*)",\\s*${bodyPat}\\)$`);
     const simple = exprStr.match(singleRe);
-    if (simple) {
+    if (simple && (simple[2] != null || simple[3] != null)) {
       const tier = {
         conditions: [],
-        input_unit_cost: Number(simple[2]),
-        output_unit_cost: Number(simple[3]),
+        per_call_cost: simple[2] != null ? Number(simple[2]) : 0,
+        input_unit_cost: simple[3] != null ? Number(simple[3]) : 0,
+        output_unit_cost: simple[4] != null ? Number(simple[4]) : 0,
         label: simple[1],
       };
       CACHE_VAR_MAP.forEach((cv, i) => {
-        const val = simple[4 + i];
+        const val = simple[5 + i];
         if (val != null) tier[cv.field] = Number(val);
       });
       return normalizeVisualConfig({ tiers: [normalizeVisualTier(tier)] });
@@ -245,14 +261,16 @@ function tryParseVisualConfig(exprStr) {
           }
         }
       }
+      if (match[3] == null && match[4] == null) continue; // empty body — skip
       const tier = {
         conditions,
-        input_unit_cost: Number(match[3]),
-        output_unit_cost: Number(match[4]),
+        per_call_cost: match[3] != null ? Number(match[3]) : 0,
+        input_unit_cost: match[4] != null ? Number(match[4]) : 0,
+        output_unit_cost: match[5] != null ? Number(match[5]) : 0,
         label: match[2],
       };
       CACHE_VAR_MAP.forEach((cv, i) => {
-        const val = match[5 + i];
+        const val = match[6 + i];
         if (val != null) tier[cv.field] = Number(val);
       });
       tiers.push(normalizeVisualTier(tier));
@@ -338,7 +356,7 @@ function ConditionRow({ cond, onChange, onRemove, t }) {
 // Price input that preserves intermediate text like "7." or "0.5"
 // ---------------------------------------------------------------------------
 
-function PriceInput({ unitCost, field, index, onUpdate, placeholder }) {
+function PriceInput({ unitCost, field, index, onUpdate, placeholder, suffix }) {
   const priceFromModel = unitCostToPrice(unitCost);
   const [text, setText] = useState(priceFromModel === 0 ? '' : String(priceFromModel));
 
@@ -365,7 +383,7 @@ function PriceInput({ unitCost, field, index, onUpdate, placeholder }) {
     <Input
       value={text}
       placeholder={placeholder || '0'}
-      suffix={PRICE_SUFFIX}
+      suffix={suffix || PRICE_SUFFIX}
       onChange={handleChange}
       style={{ width: '100%', marginTop: 2 }}
     />
@@ -664,6 +682,23 @@ function VisualTierCard({ tier, index, isLast, isOnly, onUpdate, onRemove, t }) 
         </div>
       </div>
 
+      {/* Per-call price */}
+      <div style={{ marginTop: 8 }}>
+        <Text size='small' style={{ color: 'var(--semi-color-text-2)' }}>
+          {t('按次价格')}
+        </Text>
+        <PriceInput
+          unitCost={tier.per_call_cost}
+          field='per_call_cost'
+          index={index}
+          onUpdate={onUpdate}
+          suffix={PER_CALL_PRICE_SUFFIX}
+        />
+        <div className='text-xs text-gray-500' style={{ marginTop: 2 }}>
+          {t('填写后该档每次请求固定收费，可与按量价格组合（固定费用 + 按量）。')}
+        </div>
+      </div>
+
       {/* Extended prices (cache) — collapsible */}
       <ExtendedPriceBlock tier={tier} index={index} onUpdate={onUpdate} t={t} />
     </div>
@@ -703,6 +738,7 @@ function VisualEditor({ visualConfig, onChange, t }) {
       conditions: [],
       input_unit_cost: 0,
       output_unit_cost: 0,
+      per_call_cost: 0,
       label: `第${newTiers.length + 1}档`,
       cache_mode: CACHE_MODE_GENERIC,
     });
@@ -774,6 +810,14 @@ const PRESET_GROUPS = [
       { key: 'qwen3-max', label: 'Qwen3 Max', expr: 'len <= 32000 ? tier("short", p * 1.2 + c * 6 + cr * 0.24 + cc * 1.5) : len <= 128000 ? tier("mid", p * 2.4 + c * 12 + cr * 0.48 + cc * 3) : tier("long", p * 3 + c * 15 + cr * 0.6 + cc * 3.75)' },
       { key: 'glm-4.5-air', label: 'GLM-4.5 Air', expr: 'len < 32000 && c < 200 ? tier("short_output", p * 0.8 + c * 2 + cr * 0.16) : len < 32000 && c >= 200 ? tier("long_output", p * 0.8 + c * 6 + cr * 0.16) : tier("mid_context", p * 1.2 + c * 8 + cr * 0.24)' },
       { key: 'doubao-seed-1.8', label: 'Doubao Seed 1.8', expr: 'len <= 32000 && c <= 200 ? tier("discount", p * 0.8 + c * 2 + cr * 0.16 + cc * 0.17) : len <= 32000 ? tier("short", p * 0.8 + c * 8 + cr * 0.16 + cc * 0.17) : len <= 128000 ? tier("mid", p * 1.2 + c * 16 + cr * 0.16 + cc * 0.17) : tier("long", p * 2.4 + c * 24 + cr * 0.16 + cc * 0.17)' },
+    ],
+  },
+  {
+    group: '按次计费',
+    presets: [
+      { key: 'percall-flat', label: '按次 $5', expr: 'tier("base", call(5))' },
+      { key: 'percall-tiered', label: '阶梯按次', expr: 'len <= 128000 ? tier("short", call(3)) : tier("long", call(5))' },
+      { key: 'percall-plus-usage', label: '固定费 + 按量', expr: 'tier("base", call(3) + p * 2 + c * 6)' },
     ],
   },
   {
@@ -889,6 +933,7 @@ function RawExprEditor({ exprString, onChange, t }) {
             </div>
             <div>
               {t('函数')}: <code>tier(name, value)</code>,{' '}
+              <code>call(x)</code> ({t('按次固定费用')}),{' '}
               <code>max(a, b)</code>, <code>min(a, b)</code>,{' '}
               <code>ceil(x)</code>, <code>floor(x)</code>,{' '}
               <code>abs(x)</code>, <code>header(name)</code>,{' '}
@@ -975,7 +1020,7 @@ function evalExprLocally(exprStr, p, c, extraTokenValues) {
     const cacheCreateTokens = extraTokenValues.cacheCreateTokens || 0;
     const cacheCreate1hTokens = extraTokenValues.cacheCreate1hTokens || 0;
     const len = p + cacheReadTokens + cacheCreateTokens + cacheCreate1hTokens;
-    const env = { p, c, len, tier: tierFn, max: Math.max, min: Math.min, abs: Math.abs, ceil: Math.ceil, floor: Math.floor };
+    const env = { p, c, len, tier: tierFn, call: (x) => x * 1000000, max: Math.max, min: Math.min, abs: Math.abs, ceil: Math.ceil, floor: Math.floor };
     for (const field of EXTRA_ESTIMATOR_FIELDS) {
       env[field.var] = extraTokenValues[field.stateKey] || 0;
     }
@@ -1262,6 +1307,7 @@ p 和 c 是兜底变量，代表所有没有被表达式单独定价的 token。
 ### 内置函数
 
 - tier(name, value) — 标记计费档位名称，必须包裹费用表达式
+- call(x) — 按次固定费用，每次请求固定收取 $x，可与按量价格组合
 - max(a, b)、min(a, b) — 取大/小值
 - ceil(x)、floor(x)、abs(x) — 向上取整、向下取整、绝对值
 - header(name) — 读取请求头
@@ -1280,6 +1326,10 @@ tier("base", p * 2.5 + c * 15)
 
 带缓存的定价：
 tier("base", p * 2.5 + c * 15 + cr * 0.25)
+
+按次计费（固定 $/次，可阶梯）：
+tier("base", call(5))
+len <= 128000 ? tier("short", call(3)) : tier("long", call(5))
 
 多档阶梯（用 len 做条件）：
 len <= 200000
@@ -1307,6 +1357,7 @@ len <= 128000
 4. 多档用嵌套三元运算符：条件1 ? tier(...) : (条件2 ? tier(...) : tier(...))
 5. 价格系数直接写供应商官方 $/1M tokens 价格
 6. 不需要缓存/图片/音频单独定价时可以不写对应变量，它们的 token 会自动包含在 p/c 中
+7. 模型按次计费时用 call(x)，x 为每次请求的美元价格；可叠加按量价格（固定费用 + 按量）
 
 请根据用户提供的模型信息和定价需求，生成计费表达式。`;
 

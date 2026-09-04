@@ -38,3 +38,42 @@ func TestNormalizeTiersFallsBackForUnsafeMembershipMultiplier(t *testing.T) {
 		})
 	}
 }
+
+func TestHiddenTierNeverAutoGranted(t *testing.T) {
+	if err := UpdateTiersByJSONString(`[
+		{"id":"normal","name":"Normal","enabled":true,"auto_upgrade_enabled":true,"threshold_amount":100},
+		{"id":"secret","name":"Secret","enabled":true,"auto_upgrade_enabled":true,"hidden":true,"threshold_amount":1000}
+	]`); err != nil {
+		t.Fatal(err)
+	}
+
+	tier, ok := ResolveAutoTierByAmount(5000)
+	assert.True(t, ok, "a non-hidden auto tier should match")
+	assert.Equal(t, "normal", tier.Id, "hidden tier must never be auto-granted even with higher threshold")
+}
+
+func TestHiddenTierExcludedFromNextTier(t *testing.T) {
+	if err := UpdateTiersByJSONString(`[
+		{"id":"normal","name":"Normal","enabled":true,"auto_upgrade_enabled":true,"threshold_amount":100},
+		{"id":"secret","name":"Secret","enabled":true,"hidden":true,"threshold_amount":1000},
+		{"id":"gold","name":"Gold","enabled":true,"auto_upgrade_enabled":true,"threshold_amount":2000}
+	]`); err != nil {
+		t.Fatal(err)
+	}
+
+	next, ok := NextTierByAmount(150)
+	assert.True(t, ok)
+	assert.Equal(t, "gold", next.Id, "next tier should skip hidden tiers")
+}
+
+func TestHiddenTierDiscountStillApplies(t *testing.T) {
+	if err := UpdateTiersByJSONString(`[
+		{"id":"secret","name":"Secret","enabled":true,"hidden":true,"discount_all_groups":true,"all_group_discount":0.5}
+	]`); err != nil {
+		t.Fatal(err)
+	}
+
+	discount, ok := GetTierDiscount("secret", "default")
+	assert.True(t, ok, "hidden tier must keep applying its discount to members")
+	assert.Equal(t, 0.5, discount.Multiplier)
+}

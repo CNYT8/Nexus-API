@@ -2428,6 +2428,8 @@ function parseTierBody(bodyStr) {
   for (const [varName, field] of Object.entries(BILLING_VAR_KEY_TO_FIELD)) {
     tier[field] = coeffs[varName] || 0;
   }
+  const callMatch = bodyStr.match(/call\s*\(\s*([\d.eE+-]+)\s*\)/);
+  tier.per_call_cost = callMatch ? Number(callMatch[1]) : 0;
   return tier;
 }
 
@@ -2436,7 +2438,7 @@ export function parseTiersFromExpr(exprStr) {
   try {
     const { body } = stripExprVersion(exprStr);
     const condGroup = `((?:(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)(?:\\s*&&\\s*(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`;
-    const tierRe = new RegExp(`(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*([^)]+)\\)`, 'g');
+    const tierRe = new RegExp(`(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*((?:[^()]+|call\\s*\\(\\s*[\\d.eE+-]+\\s*\\))+)\\)`, 'g');
     const tiers = [];
     let m;
     while ((m = tierRe.exec(body)) !== null) {
@@ -2531,6 +2533,9 @@ export function renderTieredModelPrice(opts) {
 
   const lines = [
     buildBillingText('命中档位：{{tier}}', { tier: matchedTier || tier.label }),
+    ...(tier.per_call_cost > 0
+        ? [buildBillingPriceText('按次：{{symbol}}{{price}} / 次', { symbol, usdAmount: tier.per_call_cost, rate })]
+        : []),
     ...priceLines
         .filter(([field]) => tier[field] > 0)
         .map(([field, label]) =>
@@ -2580,6 +2585,14 @@ export function renderTieredModelPriceSimple(opts) {
             : i18next.t('阶梯计费（未匹配到对应阶梯）'),
       });
     } else if (isPriceDisplayMode(displayMode)) {
+      if (tier.per_call_cost > 0) {
+        segments.push({
+          tone: 'secondary',
+          text: i18next.t('按次 {{price}} / 次', {
+            price: formatCompactDisplayPrice(tier.per_call_cost),
+          }),
+        });
+      }
       const hasAnyCacheTokens = cacheTokens > 0 || cacheCreationTokens > 0
           || cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
       const priceSegments = BILLING_PRICING_VARS

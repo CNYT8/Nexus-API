@@ -24,6 +24,7 @@ type Tier struct {
 	ThresholdAmount    float64         `json:"threshold_amount"`
 	AutoUpgradeEnabled bool            `json:"auto_upgrade_enabled"`
 	Enabled            bool            `json:"enabled"`
+	Hidden             bool            `json:"hidden"`
 	SortOrder          int             `json:"sort_order"`
 	DiscountAllGroups  bool            `json:"discount_all_groups"`
 	AllGroupDiscount   float64         `json:"all_group_discount"`
@@ -151,7 +152,8 @@ func ResolveAutoTierByAmount(amount float64) (Tier, bool) {
 	var matched Tier
 	found := false
 	for _, tier := range GetEnabledTiers() {
-		if !tier.AutoUpgradeEnabled {
+		// Hidden tiers are managed manually and never auto-granted.
+		if tier.Hidden || !tier.AutoUpgradeEnabled {
 			continue
 		}
 		if amount+1e-9 < tier.ThresholdAmount {
@@ -169,6 +171,11 @@ func NextTierByAmount(amount float64) (Tier, bool) {
 	var next Tier
 	found := false
 	for _, tier := range GetEnabledTiers() {
+		// Hidden tiers are invisible to users who are not already in them,
+		// so they must not be offered as the next upgrade goal.
+		if tier.Hidden {
+			continue
+		}
 		if amount+1e-9 >= tier.ThresholdAmount {
 			continue
 		}

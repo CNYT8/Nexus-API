@@ -1816,11 +1816,11 @@
     "按价格设置": "Set by price",
     "按倍率类型筛选": "Filter by ratio type",
     "按倍率设置": "Set by ratio",
-    "按次": "Per request",
+    "按次": "Per-call",
     "按次 {{symbol}}{{price}} * {{ratioType}} {{ratio}} = {{symbol}}{{total}}": "Per request {{symbol}}{{price}} * {{ratioType}} {{ratio}} = {{symbol}}{{total}}",
     "按次：{{symbol}}{{price}}": "Per request: {{symbol}}{{price}}",
     "按次：{{symbol}}{{price}} * {{ratioType}}：{{ratio}} = {{symbol}}{{total}}": "Per request: {{symbol}}{{price}} * {{ratioType}}: {{ratio}} = {{symbol}}{{total}}",
-    "按次计费": "Pay per request",
+    "按次计费": "Per-call billing",
     "按照如下格式输入：AccessKey|SecretAccessKey|Region": "Enter in the format: AccessKey|SecretAccessKey|Region",
     "按量计费": "Pay as you go",
     "按量计费下需要先填写输入价格，才能保存其它价格项。": "For per-token billing, fill in the input price before saving other price fields.",
@@ -4287,6 +4287,18 @@
     "Empty response claim failed": "Empty response claim failed",
     "Claimed {{count}} empty responses for {{quota}}": "Claimed {{count}} empty responses for {{quota}}",
     "无调用": "No calls",
-    "滚动24小时分组可用性，每2小时一个时段，按智能调度算法计算。": "Rolling 24-hour group availability in 2-hour segments, scored by the scheduling algorithm."
+    "滚动24小时分组可用性，每2小时一个时段，按智能调度算法计算。": "Rolling 24-hour group availability in 2-hour segments, scored by the scheduling algorithm.",
+    "命中阈值百分比": "Match threshold percentage",
+    "新增输出敏感词": "Add output sensitive pattern",
+    "输入 1234 后点击添加，不需要换行": "Type 1234 and click add, no newline required",
+    "按次价格": "Per-call price",
+    "填写后该档每次请求固定收费，可与按量价格组合（固定费用 + 按量）。": "When set, this tier charges a fixed amount per request and can be combined with token prices (fixed fee + usage).",
+    "按次固定费用": "Per-call fixed fee",
+    "按次：{{symbol}}{{price}} / 次": "Per-call: {{symbol}}{{price}} / call",
+    "按次 {{price}} / 次": "Per-call {{price}} / call",
+    "隐藏等级": "Hidden tier",
+    "仅该等级会员可见": "Visible only to its members",
+    "隐藏等级不参与自动升级，需要在用户管理中手动设置": "Hidden tiers never auto-upgrade; assign them manually in user management",
+    "隐藏": "Hidden"
   }
 }

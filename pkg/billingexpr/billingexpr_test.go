@@ -1092,3 +1092,74 @@ func BenchmarkExprRunCached(b *testing.B) {
 		billingexpr.RunExpr(benchComplexExpr, params)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// call(x): fixed per-request pricing, composable with per-token terms
+// ---------------------------------------------------------------------------
+
+func TestPerCall_Flat(t *testing.T) {
+	cost, trace, err := billingexpr.RunExpr(`tier("base", call(5))`, billingexpr.TokenParams{P: 1234, C: 567})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(cost-5_000_000) > 1e-6 {
+		t.Errorf("cost = %f, want 5000000", cost)
+	}
+	if trace.MatchedTier != "base" {
+		t.Errorf("tier = %q, want base", trace.MatchedTier)
+	}
+}
+
+func TestPerCall_Tiered(t *testing.T) {
+	expr := `len <= 128000 ? tier("short", call(3)) : tier("long", call(5))`
+	cost, trace, err := billingexpr.RunExpr(expr, billingexpr.TokenParams{P: 100000, Len: 100000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(cost-3_000_000) > 1e-6 || trace.MatchedTier != "short" {
+		t.Errorf("short tier: cost = %f tier = %q", cost, trace.MatchedTier)
+	}
+	cost, trace, err = billingexpr.RunExpr(expr, billingexpr.TokenParams{P: 500000, Len: 500000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(cost-5_000_000) > 1e-6 || trace.MatchedTier != "long" {
+		t.Errorf("long tier: cost = %f tier = %q", cost, trace.MatchedTier)
+	}
+}
+
+func TestPerCall_CombinedWithTokens(t *testing.T) {
+	cost, _, err := billingexpr.RunExpr(`tier("base", call(3) + p * 2 + c * 6)`, billingexpr.TokenParams{P: 1_000_000, C: 500_000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := 3_000_000 + 1_000_000*2 + 500_000*6
+	wantF := float64(want)
+	if math.Abs(cost-wantF) > 1e-6 {
+		t.Errorf("cost = %f, want %f", cost, wantF)
+	}
+}
+
+func TestPerCall_QuotaConversion(t *testing.T) {
+	// A pure per-call expression settles to $5 * QuotaPerUnit, matching the
+	// per-call billing pattern (quota = modelPrice * QuotaPerUnit).
+	snap := billingexpr.BillingSnapshot{
+		BillingMode:  "tiered_expr",
+		ModelName:    "m",
+		ExprString:   `tier("base", call(5))`,
+		ExprHash:     billingexpr.ExprHashString(`tier("base", call(5))`),
+		GroupRatio:   1,
+		QuotaPerUnit: 500000,
+		ExprVersion:  1,
+	}
+	res, err := billingexpr.ComputeTieredQuota(&snap, billingexpr.TokenParams{P: 999, C: 999, Len: 999})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ActualQuotaAfterGroup != 5*500000 {
+		t.Errorf("quota = %d, want %d", res.ActualQuotaAfterGroup, 5*500000)
+	}
+	if res.MatchedTier != "base" {
+		t.Errorf("tier = %q, want base", res.MatchedTier)
+	}
+}

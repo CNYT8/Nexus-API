@@ -7,6 +7,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// visibleSelfTiers filters the tier list for the membership center: hidden
+// tiers are only visible to users who currently hold them. Everything else
+// (enabled check, ordering) follows GetEnabledTiers semantics.
+func visibleSelfTiers(currentTierId string) []membership_setting.Tier {
+	tiers := membership_setting.GetEnabledTiers()
+	visible := make([]membership_setting.Tier, 0, len(tiers))
+	for _, tier := range tiers {
+		if tier.Hidden && tier.Id != currentTierId {
+			continue
+		}
+		visible = append(visible, tier)
+	}
+	return visible
+}
+
 func GetMembershipSelf(c *gin.Context) {
 	userId := c.GetInt("id")
 	if !membership_setting.IsEnabled() {
@@ -33,7 +48,7 @@ func GetMembershipSelf(c *gin.Context) {
 
 	common.ApiSuccess(c, gin.H{
 		"enabled":       membership_setting.IsEnabled(),
-		"tiers":         membership_setting.GetEnabledTiers(),
+		"tiers":         visibleSelfTiers(summary.TierId),
 		"current":       summary,
 		"next_tier":     nextTier,
 		"has_next_tier": hasNextTier,

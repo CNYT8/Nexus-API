@@ -238,7 +238,12 @@ export function resolveMatchedTier(
 export interface TieredBillingSummary {
   tiers: ParsedTier[]
   tier: ParsedTier
-  priceEntries: Array<{ field: string; shortLabel: string; price: number }>
+  priceEntries: Array<{
+    field: string
+    shortLabel: string
+    price: number
+    isPerCall?: boolean
+  }>
 }
 
 /**
@@ -271,6 +276,15 @@ export function getTieredBillingSummary(
   const cacheTokensPresent = hasAnyCacheTokens(other)
 
   const priceEntries: TieredBillingSummary['priceEntries'] = []
+  const perCallCost = Number(tier.per_call_cost)
+  if (Number.isFinite(perCallCost) && perCallCost > 0) {
+    priceEntries.push({
+      field: 'per_call_cost',
+      shortLabel: 'Per-call',
+      price: perCallCost,
+      isPerCall: true,
+    })
+  }
   for (const v of BILLING_PRICING_VARS) {
     if (!v.field) continue
     if (v.group === 'cache' && !cacheTokensPresent) continue

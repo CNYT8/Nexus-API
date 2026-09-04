@@ -4844,6 +4844,13 @@
     "In progress": "In progress",
     "Group availability": "Group availability",
     "No models in this group": "No models in this group",
-    "Rolling 24-hour group availability in 2-hour segments, scored by the scheduling algorithm.": "Rolling 24-hour group availability in 2-hour segments, scored by the scheduling algorithm."
+    "Rolling 24-hour group availability in 2-hour segments, scored by the scheduling algorithm.": "Rolling 24-hour group availability in 2-hour segments, scored by the scheduling algorithm.",
+    "Add output sensitive pattern": "Add output sensitive pattern",
+    "Match threshold percentage": "Match threshold percentage",
+    "Output Sensitive Words": "Output Sensitive Words",
+    "Paste a pattern, no newline required": "Paste a pattern, no newline required",
+    "Per-call price": "Per-call price",
+    "When set, this tier charges a fixed amount per request and can be combined with token prices (fixed fee + usage).": "When set, this tier charges a fixed amount per request and can be combined with token prices (fixed fee + usage).",
+    "Per-call fixed fee": "Per-call fixed fee"
   }
 }

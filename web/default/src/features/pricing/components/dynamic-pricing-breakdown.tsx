@@ -227,6 +227,9 @@ export function DynamicPricingBreakdown({
       (tier) => Number(tier[v.field as string as keyof ParsedTier] || 0) > 0
     )
   })
+  const hasPerCall = tiers.some(
+    (tier) => Number(tier.per_call_cost) > 0
+  )
 
   return (
     <section className='min-w-0 py-3 sm:py-4'>
@@ -286,6 +289,18 @@ export function DynamicPricingBreakdown({
                     </div>
                   )}
                   <div className='grid grid-cols-2 gap-x-3 gap-y-1.5'>
+                    {hasPerCall && (
+                      <div className='min-w-0'>
+                        <div className='text-muted-foreground truncate text-[10px] font-medium tracking-wider uppercase'>
+                          {t('Per-call')}
+                        </div>
+                        <div className='truncate font-mono text-sm font-semibold'>
+                          {Number(tier.per_call_cost) > 0
+                            ? `${symbol}${(Number(tier.per_call_cost) * rate).toFixed(4)}`
+                            : '-'}
+                        </div>
+                      </div>
+                    )}
                     {visiblePriceFields.map((v) => {
                       const value = Number(
                         tier[v.field as string as keyof ParsedTier] || 0
@@ -315,6 +330,11 @@ export function DynamicPricingBreakdown({
                   <TableHead className='text-muted-foreground py-2 font-medium'>
                     {t('Tier')}
                   </TableHead>
+                  {hasPerCall && (
+                    <TableHead className='text-muted-foreground py-2 text-right font-medium'>
+                      {t('Per-call')} ({symbol}/{t('request')})
+                    </TableHead>
+                  )}
                   {visiblePriceFields.map((v) => (
                     <TableHead
                       key={v.field}
@@ -363,6 +383,17 @@ export function DynamicPricingBreakdown({
                           </div>
                         )}
                       </TableCell>
+                      {hasPerCall && (
+                        <TableCell className='py-2.5 text-right align-top font-mono'>
+                          {Number(tier.per_call_cost) > 0 ? (
+                            <span className='font-semibold'>
+                              {`${symbol}${(Number(tier.per_call_cost) * rate).toFixed(4)}`}
+                            </span>
+                          ) : (
+                            '-'
+                          )}
+                        </TableCell>
+                      )}
                       {visiblePriceFields.map((v) => {
                         const value = Number(
                           tier[v.field as string as keyof ParsedTier] || 0

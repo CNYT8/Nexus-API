@@ -76,6 +76,7 @@ Powered by [expr-lang/expr](https://github.com/expr-lang/expr). Expressions are 
 | Function | Signature | Purpose |
 |----------|-----------|---------|
 | `tier` | `tier(name, value) → float64` | Records which pricing tier matched; must wrap the cost expression |
+| `call` | `call(x) → float64` | Fixed per-request charge of $x (converted to the 1M-token scale; composable with per-token terms) |
 | `param` | `param(path) → any` | Reads a JSON path from the request body (uses gjson) |
 | `header` | `header(key) → string` | Reads a request header value |
 | `has` | `has(source, substr) → bool` | Substring check |
@@ -106,6 +107,13 @@ tier("base", p * 2 + c * 8 + img * 2.5)
 
 # Multimodal with audio
 tier("base", p * 0.43 + c * 3.06 + img * 0.78 + ai * 3.81 + ao * 15.11)
+
+# Per-call pricing (fixed $/request, optionally tiered by input length)
+tier("base", call(5))
+len <= 128000 ? tier("short", call(3)) : tier("long", call(5))
+
+# Fixed fee + usage ($3/request + $2/1M input + $6/1M output)
+tier("base", call(3) + p * 2 + c * 6)
 ```
 
 ### Request Rules (appended after `|||`)

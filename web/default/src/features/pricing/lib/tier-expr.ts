@@ -33,6 +33,7 @@ export type VisualTier = {
   conditions: TierConditionInput[]
   input_unit_cost: number
   output_unit_cost: number
+  per_call_cost: number
   cache_mode: CacheMode
   cache_read_unit_cost?: number
   cache_create_unit_cost?: number
@@ -68,6 +69,7 @@ export function normalizeVisualTier(
     cache_mode: getTierCacheMode(tier),
     conditions: Array.isArray(tier.conditions) ? tier.conditions : [],
     ...tier,
+    per_call_cost: Number(tier.per_call_cost) || 0,
     cache_read_unit_cost: Number(tier.cache_read_unit_cost) || 0,
     cache_create_unit_cost: Number(tier.cache_create_unit_cost) || 0,
     cache_create_1h_unit_cost: Number(tier.cache_create_1h_unit_cost) || 0,
@@ -85,6 +87,7 @@ export function createDefaultVisualConfig(): VisualConfig {
         conditions: [],
         input_unit_cost: 0,
         output_unit_cost: 0,
+        per_call_cost: 0,
         label: 'base',
         cache_mode: CACHE_MODE_GENERIC,
       }),
@@ -114,13 +117,23 @@ function buildConditionStr(conditions: TierConditionInput[]): string {
 
 function buildTierBodyExpr(tier: VisualTier): string {
   const parts: string[] = []
+  const pc = Number(tier.per_call_cost) || 0
+  if (pc !== 0) parts.push(`call(${pc})`)
   const ic = Number(tier.input_unit_cost) || 0
   const oc = Number(tier.output_unit_cost) || 0
-  parts.push(`p * ${ic}`)
-  parts.push(`c * ${oc}`)
-  for (const cv of BILLING_CACHE_VAR_MAP) {
-    const v = Number((tier as Record<string, unknown>)[cv.field]) || 0
-    if (v !== 0) parts.push(`${cv.exprVar} * ${v}`)
+  const hasTokenTerms =
+    ic !== 0 ||
+    oc !== 0 ||
+    BILLING_CACHE_VAR_MAP.some(
+      (cv) => Number((tier as Record<string, unknown>)[cv.field] || 0) !== 0
+    )
+  if (hasTokenTerms || parts.length === 0) {
+    parts.push(`p * ${ic}`)
+    parts.push(`c * ${oc}`)
+    for (const cv of BILLING_CACHE_VAR_MAP) {
+      const v = Number((tier as Record<string, unknown>)[cv.field]) || 0
+      if (v !== 0) parts.push(`${cv.exprVar} * ${v}`)
+    }
   }
   return parts.join(' + ')
 }
@@ -173,19 +186,25 @@ export function tryParseVisualConfig(
       .map((v) => `(?:\\s*\\+\\s*${v}\\s*\\*\\s*([\\d.eE+-]+))?`)
       .join('')
 
-    const bodyPat = `p\\s*\\*\\s*([\\d.eE+-]+)\\s*\\+\\s*c\\s*\\*\\s*([\\d.eE+-]+)${optCacheStr}`
+    // Body pattern: [call(X) +] p * Y + c * Z [+ cache terms]. Either the
+    // per-call term or the token terms may be omitted (pure per-call tiers
+    // have no p/c terms; legacy tiers have no call term).
+    const optCallStr = `(?:call\\s*\\(\\s*([\\d.eE+-]+)\\s*\\)(?:\\s*\\+\\s*)?)?`
+    const optTokenStr = `(?:p\\s*\\*\\s*([\\d.eE+-]+)\\s*\\+\\s*c\\s*\\*\\s*([\\d.eE+-]+)${optCacheStr})?`
+    const bodyPat = `${optCallStr}${optTokenStr}`
 
     const singleRe = new RegExp(`^tier\\("([^"]*)",\\s*${bodyPat}\\)$`)
     const simple = body.match(singleRe)
-    if (simple) {
+    if (simple && (simple[2] != null || simple[3] != null)) {
       const tier: Record<string, unknown> = {
         conditions: [],
-        input_unit_cost: Number(simple[2]),
-        output_unit_cost: Number(simple[3]),
+        per_call_cost: simple[2] != null ? Number(simple[2]) : 0,
+        input_unit_cost: simple[3] != null ? Number(simple[3]) : 0,
+        output_unit_cost: simple[4] != null ? Number(simple[4]) : 0,
         label: simple[1],
       }
       BILLING_CACHE_VAR_MAP.forEach((cv, i) => {
-        const val = simple[4 + i]
+        const val = simple[5 + i]
         if (val != null) tier[cv.field] = Number(val)
       })
       return normalizeVisualConfig({
@@ -217,15 +236,17 @@ export function tryParseVisualConfig(
           }
         }
       }
+      if (match[3] == null && match[4] == null) continue // empty body — skip
       const tier: Record<string, unknown> = {
         conditions,
-        input_unit_cost: Number(match[3]),
-        output_unit_cost: Number(match[4]),
+        per_call_cost: match[3] != null ? Number(match[3]) : 0,
+        input_unit_cost: match[4] != null ? Number(match[4]) : 0,
+        output_unit_cost: match[5] != null ? Number(match[5]) : 0,
         label: match[2],
       }
       const m = match
       BILLING_CACHE_VAR_MAP.forEach((cv, i) => {
-        const val = m[5 + i]
+        const val = m[6 + i]
         if (val != null) tier[cv.field] = Number(val)
       })
       tiers.push(normalizeVisualTier(tier as Partial<VisualTier>))
@@ -293,6 +314,7 @@ export function evalExprLocally(
       c: completionTokens,
       len,
       tier: tierFn,
+      call: (x: number) => x * 1_000_000,
       max: Math.max,
       min: Math.min,
       abs: Math.abs,
