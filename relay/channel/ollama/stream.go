@@ -76,6 +76,51 @@ func ollamaToolCallsToOpenAI(toolCalls []OllamaToolCall, startIndex int, include
 	return result, startIndex
 }
 
+func buildOllamaStreamDelta(chunk *ollamaChatStreamChunk, responseID string, created int64, model string, toolCallIndex *int) (dto.ChatCompletionsStreamResponse, bool) {
+	delta := dto.ChatCompletionsStreamResponse{
+		Id:      responseID,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   model,
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Index: 0,
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{Role: "assistant"},
+		}},
+	}
+
+	var content string
+	if chunk.Message != nil {
+		content = chunk.Message.Content
+	} else {
+		content = chunk.Response
+	}
+	if content != "" {
+		delta.Choices[0].Delta.SetContentString(content)
+	}
+
+	hasPayload := content != ""
+	if chunk.Message != nil && len(chunk.Message.Thinking) > 0 {
+		raw := strings.TrimSpace(string(chunk.Message.Thinking))
+		if raw != "" && raw != "null" {
+			// Unmarshal the JSON string to get the actual content without quotes
+			var thinkingContent string
+			if err := common.Unmarshal(chunk.Message.Thinking, &thinkingContent); err == nil {
+				delta.Choices[0].Delta.SetReasoningContent(thinkingContent)
+			} else {
+				// Fallback to raw string if it's not a JSON string
+				delta.Choices[0].Delta.SetReasoningContent(raw)
+			}
+			hasPayload = true
+		}
+	}
+	if chunk.Message != nil && len(chunk.Message.ToolCalls) > 0 {
+		delta.Choices[0].Delta.ToolCalls, *toolCallIndex = ollamaToolCallsToOpenAI(chunk.Message.ToolCalls, *toolCallIndex, true)
+		hasPayload = true
+	}
+
+	return delta, hasPayload
+}
+
 func toUnix(ts string) int64 {
 	if ts == "" {
 		return time.Now().Unix()
@@ -125,7 +170,19 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			logger.LogError(c, fmt.Sprintf("ollama stream json decode error: %v bytes=%d", err, len(line)))
 			return usage, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
-		if outputSensitiveMatchers != nil && !chunk.Done {
+		if chunk.Model != "" {
+			model = chunk.Model
+		}
+		created = toUnix(chunk.CreatedAt)
+		if chunk.Done {
+			// Persist usage before policy scanning: a sensitive-word hit on the
+			// final frame must still settle the real token usage.
+			usage.PromptTokens = chunk.PromptEvalCount
+			usage.CompletionTokens = chunk.EvalCount
+			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+		}
+
+		if outputSensitiveMatchers != nil {
 			matched := false
 			for _, fragment := range relaycommon.OutputSensitiveTextFragments(line) {
 				if info.ThinkingProcessStrip && fragment.HiddenThinking {
@@ -150,49 +207,9 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 				return usage, nil
 			}
 		}
-		if chunk.Model != "" {
-			model = chunk.Model
-		}
-		created = toUnix(chunk.CreatedAt)
 
 		if !chunk.Done {
-			// delta content
-			var content string
-			if chunk.Message != nil {
-				content = chunk.Message.Content
-			} else {
-				content = chunk.Response
-			}
-			delta := dto.ChatCompletionsStreamResponse{
-				Id:      responseId,
-				Object:  "chat.completion.chunk",
-				Created: created,
-				Model:   model,
-				Choices: []dto.ChatCompletionsStreamResponseChoice{{
-					Index: 0,
-					Delta: dto.ChatCompletionsStreamResponseChoiceDelta{Role: "assistant"},
-				}},
-			}
-			if content != "" {
-				delta.Choices[0].Delta.SetContentString(content)
-			}
-			if chunk.Message != nil && len(chunk.Message.Thinking) > 0 {
-				raw := strings.TrimSpace(string(chunk.Message.Thinking))
-				if raw != "" && raw != "null" {
-					// Unmarshal the JSON string to get the actual content without quotes
-					var thinkingContent string
-					if err := common.Unmarshal(chunk.Message.Thinking, &thinkingContent); err == nil {
-						delta.Choices[0].Delta.SetReasoningContent(thinkingContent)
-					} else {
-						// Fallback to raw string if it's not a JSON string
-						delta.Choices[0].Delta.SetReasoningContent(raw)
-					}
-				}
-			}
-			// tool calls
-			if chunk.Message != nil && len(chunk.Message.ToolCalls) > 0 {
-				delta.Choices[0].Delta.ToolCalls, toolCallIndex = ollamaToolCallsToOpenAI(chunk.Message.ToolCalls, toolCallIndex, true)
-			}
+			delta, _ := buildOllamaStreamDelta(&chunk, responseId, created, model, &toolCallIndex)
 			if info.ThinkingProcessStrip {
 				relaycommon.StripChatCompletionsThinking(&delta)
 			}
@@ -202,10 +219,18 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			continue
 		}
 		// done frame
+		// Some Ollama-compatible upstreams carry the last content or tool calls
+		// on the done frame; emit them before the stop frame so the finish
+		// reason and tool call indexes stay correct.
+		if delta, hasPayload := buildOllamaStreamDelta(&chunk, responseId, created, model, &toolCallIndex); hasPayload {
+			if info.ThinkingProcessStrip {
+				relaycommon.StripChatCompletionsThinking(&delta)
+			}
+			if data, err := common.Marshal(delta); err == nil && (!info.ThinkingProcessStrip || relaycommon.ChatCompletionsHasVisibleData(&delta)) {
+				_ = helper.StringData(c, string(data))
+			}
+		}
 		// finalize once and break loop
-		usage.PromptTokens = chunk.PromptEvalCount
-		usage.CompletionTokens = chunk.EvalCount
-		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 		finishReason := chunk.DoneReason
 		if finishReason == "" {
 			finishReason = "stop"

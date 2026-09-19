@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -44,8 +45,16 @@ type StripeAdaptor struct {
 }
 
 func (*StripeAdaptor) RequestAmount(c *gin.Context, req *StripePayRequest) {
-	if req.Amount < getStripeMinTopup() {
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("充值数量不能小于 %d", getStripeMinTopup())})
+	minimum, err := getStripeMinTopup()
+	if rejectTopUpQuota(c, err) {
+		return
+	}
+	if req.Amount < minimum {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("充值数量不能小于 %d", minimum)})
+		return
+	}
+	if req.Amount > 10000 {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值数量不能大于 10000"})
 		return
 	}
 	id := c.GetInt("id")
@@ -54,7 +63,14 @@ func (*StripeAdaptor) RequestAmount(c *gin.Context, req *StripePayRequest) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
 		return
 	}
+	creditedQuota, quotaErr := getStripeCreditedQuota(req.Amount, group)
+	if rejectInvalidCreditedQuota(c, id, creditedQuota, quotaErr) {
+		return
+	}
 	payMoney := getStripePayMoney(float64(req.Amount), group)
+	if rejectInvalidTopUpMoney(c, payMoney) {
+		return
+	}
 	if payMoney <= 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -67,8 +83,12 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "不支持的支付渠道"})
 		return
 	}
-	if req.Amount < getStripeMinTopup() {
-		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("充值数量不能小于 %d", getStripeMinTopup()), "data": 10})
+	minimum, err := getStripeMinTopup()
+	if rejectTopUpQuota(c, err) {
+		return
+	}
+	if req.Amount < minimum {
+		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("充值数量不能小于 %d", minimum), "data": 10})
 		return
 	}
 	if req.Amount > 10000 {
@@ -87,8 +107,19 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	}
 
 	id := c.GetInt("id")
-	user, _ := model.GetUserById(id, false)
+	user, err := model.GetUserById(id, false)
+	if err != nil || user == nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "用户不存在"})
+		return
+	}
 	chargedMoney := GetChargedAmount(float64(req.Amount), *user)
+	creditedQuota, quotaErr := getStripeCreditedQuota(req.Amount, user.Group)
+	if rejectInvalidCreditedQuota(c, id, creditedQuota, quotaErr) {
+		return
+	}
+	if rejectInvalidTopUpMoney(c, getStripePayMoney(float64(req.Amount), user.Group)) {
+		return
+	}
 
 	reference := fmt.Sprintf("new-api-ref-%d-%d-%s", user.Id, time.Now().UnixMilli(), randstr.String(4))
 	referenceId := "ref_" + common.Sha1([]byte(reference))
@@ -393,25 +424,40 @@ func genStripeLink(referenceId string, customerId string, email string, amount i
 	return result.URL, nil
 }
 
-func GetChargedAmount(count float64, user model.User) float64 {
-	topUpGroupRatio := common.GetTopupGroupRatio(user.Group)
+// stripeTopUpGroupRatio returns the top-up group ratio with the legacy zero
+// fallback, so a zero ratio never makes a Stripe top-up free.
+func stripeTopUpGroupRatio(group string) float64 {
+	topUpGroupRatio := common.GetTopupGroupRatio(group)
 	if topUpGroupRatio == 0 {
 		topUpGroupRatio = 1
 	}
+	return topUpGroupRatio
+}
 
-	return count * topUpGroupRatio
+// getStripeCreditedQuota mirrors the quota the settlement path credits:
+// Recharge() converts the stored Money (amount * group ratio) with the shared
+// money conversion, so both sides must stay on that exact formula.
+func getStripeCreditedQuota(amount int64, group string) (int, error) {
+	if amount <= 0 {
+		return 0, model.ErrInvalidTopUpQuota
+	}
+	return model.TopUpQuotaFromMoney(float64(amount) * stripeTopUpGroupRatio(group))
+}
+
+func GetChargedAmount(count float64, user model.User) float64 {
+	return count * stripeTopUpGroupRatio(user.Group)
 }
 
 func getStripePayMoney(amount float64, group string) float64 {
+	if !validTopUpPricing(group, setting.StripeUnitPrice, int64(amount)) {
+		return math.NaN()
+	}
 	originalAmount := amount
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		amount = amount / common.QuotaPerUnit
 	}
 	// Using float64 for monetary calculations is acceptable here due to the small amounts involved
-	topupGroupRatio := common.GetTopupGroupRatio(group)
-	if topupGroupRatio == 0 {
-		topupGroupRatio = 1
-	}
+	topupGroupRatio := stripeTopUpGroupRatio(group)
 	// apply optional preset discount by the original request amount (if configured), default 1.0
 	discount := 1.0
 	if ds, ok := operation_setting.GetPaymentSetting().AmountDiscount[int(originalAmount)]; ok {
@@ -423,10 +469,15 @@ func getStripePayMoney(amount float64, group string) float64 {
 	return payMoney
 }
 
-func getStripeMinTopup() int64 {
-	minTopup := setting.StripeMinTopUp
-	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
-		minTopup = minTopup * int(common.QuotaPerUnit)
+func getStripeMinTopup() (int64, error) {
+	qpu, err := model.TopUpQuotaPerUnit()
+	if err != nil || setting.StripeMinTopUp < 0 {
+		return 0, model.ErrInvalidTopUpQuota
 	}
-	return int64(minTopup)
+	minimum := decimal.NewFromInt(int64(setting.StripeMinTopUp))
+	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
+		// Keep Stripe's legacy truncation of QPU BEFORE multiplication.
+		minimum = minimum.Mul(qpu.Truncate(0))
+	}
+	return checkedTopUpInt64(minimum)
 }

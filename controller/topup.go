@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -147,6 +149,9 @@ func GetEpayClient() *epay.Client {
 }
 
 func getPayMoney(amount int64, group string) float64 {
+	if !validTopUpPricing(group, operation_setting.Price, amount) {
+		return math.NaN()
+	}
 	dAmount := decimal.NewFromInt(amount)
 	// 充值金额以“展示类型”为准：
 	// - USD/CNY: 前端传 amount 为金额单位；TOKENS: 前端传 tokens，需要换成 USD 金额
@@ -176,14 +181,163 @@ func getPayMoney(amount int64, group string) float64 {
 	return payMoney.InexactFloat64()
 }
 
-func getMinTopup() int64 {
-	minTopup := operation_setting.MinTopUp
-	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
-		dMinTopup := decimal.NewFromInt(int64(minTopup))
-		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-		minTopup = int(dMinTopup.Mul(dQuotaPerUnit).IntPart())
+// Pricing guards reject unusable configuration without changing the legacy
+// zero group-ratio / non-positive discount fallbacks or any charge formula.
+func validTopUpPricing(group string, price float64, amount int64) bool {
+	ratio := common.GetTopupGroupRatio(group)
+	discount := operation_setting.GetPaymentSetting().AmountDiscount[int(amount)]
+	_, err := model.TopUpQuotaPerUnit()
+	return err == nil && price > 0 && ratio >= 0 &&
+		finiteTopUpNumber(price) && finiteTopUpNumber(ratio) && finiteTopUpNumber(discount)
+}
+
+func finiteTopUpNumber(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func rejectInvalidTopUpMoney(c *gin.Context, money float64) bool {
+	if money > 0 && finiteTopUpNumber(money) {
+		return false
 	}
-	return int64(minTopup)
+	return rejectTopUpQuota(c, model.ErrPaymentConfirmationInvalid)
+}
+
+// checkedTopUpInt64 preserves truncation, but never lets IntPart wrap around.
+func checkedTopUpInt64(value decimal.Decimal) (int64, error) {
+	value = value.Truncate(0)
+	if value.IsNegative() || value.GreaterThan(decimal.NewFromInt(math.MaxInt64)) {
+		return 0, model.ErrTopUpQuotaOutOfRange
+	}
+	return value.IntPart(), nil
+}
+
+func getMinTopup() (int64, error) {
+	qpu, err := model.TopUpQuotaPerUnit()
+	if err != nil || operation_setting.MinTopUp < 0 {
+		return 0, model.ErrInvalidTopUpQuota
+	}
+	minimum := decimal.NewFromInt(int64(operation_setting.MinTopUp))
+	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
+		minimum = minimum.Mul(qpu)
+	}
+	return checkedTopUpInt64(minimum)
+}
+
+// normalizeEpayTopUpAmount mirrors the amount stored for Epay orders. It keeps
+// the legacy truncation (no minimum clamp) so the advisory quota pre-check
+// validates exactly the amount the settlement path later converts.
+func normalizeEpayTopUpAmount(amount int64) (int64, error) {
+	qpu, err := model.TopUpQuotaPerUnit()
+	if err != nil || amount <= 0 {
+		return 0, model.ErrInvalidTopUpQuota
+	}
+	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
+		return checkedTopUpInt64(decimal.NewFromInt(amount).Div(qpu))
+	}
+	return amount, nil
+}
+
+// normalizeWaffoTopUpAmount mirrors the float division and minimum of 1 used by
+// Waffo order creation, so the pre-check validates the same amount that will be
+// stored and later converted by the settlement path.
+func normalizeWaffoTopUpAmount(amount int64) (int64, error) {
+	if _, err := model.TopUpQuotaPerUnit(); err != nil || amount <= 0 {
+		return 0, model.ErrInvalidTopUpQuota
+	}
+	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
+		normalized := float64(amount) / common.QuotaPerUnit
+		// float64(MaxInt64) rounds UP to 2^63, which is already out of range.
+		if math.IsNaN(normalized) || math.IsInf(normalized, 0) || normalized >= 0x1p63 {
+			return 0, model.ErrTopUpQuotaOutOfRange
+		}
+		amount = int64(normalized)
+		if amount < 1 {
+			amount = 1
+		}
+	}
+	return amount, nil
+}
+
+// maxTopUpAmount is a currency-mode hint only, not a validation rule. Use an
+// exact quotient and saturate before IntPart even with subnormal QPU values.
+func maxTopUpAmount() int64 {
+	qpu, err := model.TopUpQuotaPerUnit()
+	if err != nil {
+		return 0
+	}
+	maximum, _ := decimal.NewFromInt(int64(model.MaxStoredUserQuota())).QuoRem(qpu, 0)
+	if maximum.GreaterThan(decimal.NewFromInt(math.MaxInt64)) {
+		return math.MaxInt64
+	}
+	return maximum.IntPart()
+}
+
+// rejectTopUpQuota writes the unified top-up rejection response (HTTP 200 with
+// {"message":"error","data":...}) and reports whether the request was rejected.
+func rejectTopUpQuota(c *gin.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	// Never expose wrapped database errors (or their SQL/credentials) to users.
+	message := "充值校验失败，请稍后重试"
+	for _, publicErr := range []error{model.ErrInvalidTopUpQuota, model.ErrTopUpQuotaOutOfRange, model.ErrTopUpUserNotFound, model.ErrTopUpQuotaLimitExceeded} {
+		if errors.Is(err, publicErr) {
+			message = publicErr.Error()
+			break
+		}
+	}
+	var limitErr *topUpAmountLimitError
+	if errors.As(err, &limitErr) {
+		message = fmt.Sprintf("单笔充值数量不能大于 %d", limitErr.maximum)
+	}
+	logger.LogError(c.Request.Context(), fmt.Sprintf("充值校验失败 user_id=%d error=%q", c.GetInt("id"), err.Error()))
+	c.JSON(http.StatusOK, gin.H{"message": "error", "data": message})
+	return true
+}
+
+type topUpAmountLimitError struct{ maximum int64 }
+
+func (err *topUpAmountLimitError) Error() string {
+	return fmt.Sprintf("单笔充值数量不能大于 %d", err.maximum)
+}
+
+// validateTopUpQuota converts the normalized amount with the settlement
+// conversion and verifies the user's remaining wallet capacity.
+func validateTopUpQuota(userId int, amount int64) error {
+	creditedQuota, err := model.TopUpQuotaFromAmount(amount)
+	if err != nil {
+		// Normalized currency units are not the requested TOKENS quantity.
+		if operation_setting.GetQuotaDisplayType() != operation_setting.QuotaDisplayTypeTokens {
+			if maxAmount := maxTopUpAmount(); maxAmount > 0 && amount > maxAmount {
+				return &topUpAmountLimitError{maximum: maxAmount}
+			}
+		}
+		return err
+	}
+	return model.ValidateTopUpQuotaCapacity(userId, creditedQuota)
+}
+
+func rejectInvalidTopUpQuota(c *gin.Context, userId int, amount int64) bool {
+	return rejectTopUpQuota(c, validateTopUpQuota(userId, amount))
+}
+
+// rejectInvalidCreditedQuota validates an already-computed credited quota
+// (for example Stripe's amount multiplied by the group ratio).
+func rejectInvalidCreditedQuota(c *gin.Context, userId int, creditedQuota int, quotaErr error) bool {
+	if quotaErr != nil {
+		return rejectTopUpQuota(c, quotaErr)
+	}
+	return rejectTopUpQuota(c, model.ValidateTopUpQuotaCapacity(userId, creditedQuota))
+}
+
+// rejectInvalidDirectQuota validates a direct quota product (Creem) before the
+// order is created.
+func rejectInvalidDirectQuota(c *gin.Context, userId int, amount int64) bool {
+	creditedQuota, err := model.DirectTopUpQuota(amount)
+	if err != nil {
+		return rejectTopUpQuota(c, err)
+	}
+	return rejectTopUpQuota(c, model.ValidateTopUpQuotaCapacity(userId, creditedQuota))
 }
 
 func RequestEpay(c *gin.Context) {
@@ -193,18 +347,30 @@ func RequestEpay(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "参数错误"})
 		return
 	}
-	if req.Amount < getMinTopup() {
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("充值数量不能小于 %d", getMinTopup())})
+	minimum, err := getMinTopup()
+	if rejectTopUpQuota(c, err) {
+		return
+	}
+	if req.Amount < minimum {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("充值数量不能小于 %d", minimum)})
 		return
 	}
 
 	id := c.GetInt("id")
+	amount, err := normalizeEpayTopUpAmount(req.Amount)
+	if rejectTopUpQuota(c, err) || rejectInvalidTopUpQuota(c, id, amount) {
+		return
+	}
+
 	group, err := model.GetUserGroup(id, true)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
 		return
 	}
 	payMoney := getPayMoney(req.Amount, group)
+	if rejectInvalidTopUpMoney(c, payMoney) {
+		return
+	}
 	if payMoney < 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -238,12 +404,6 @@ func RequestEpay(c *gin.Context) {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 拉起支付失败 user_id=%d trade_no=%s payment_method=%s amount=%d error=%q", id, tradeNo, req.PaymentMethod, req.Amount, err.Error()))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
-	}
-	amount := req.Amount
-	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
-		dAmount := decimal.NewFromInt(int64(amount))
-		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-		amount = dAmount.Div(dQuotaPerUnit).IntPart()
 	}
 	topUp := &model.TopUp{
 		UserId:          id,
@@ -396,17 +556,28 @@ func RequestAmount(c *gin.Context) {
 		return
 	}
 
-	if req.Amount < getMinTopup() {
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("充值数量不能小于 %d", getMinTopup())})
+	minimum, err := getMinTopup()
+	if rejectTopUpQuota(c, err) {
+		return
+	}
+	if req.Amount < minimum {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("充值数量不能小于 %d", minimum)})
 		return
 	}
 	id := c.GetInt("id")
+	amount, err := normalizeEpayTopUpAmount(req.Amount)
+	if rejectTopUpQuota(c, err) || rejectInvalidTopUpQuota(c, id, amount) {
+		return
+	}
 	group, err := model.GetUserGroup(id, true)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
 		return
 	}
 	payMoney := getPayMoney(req.Amount, group)
+	if rejectInvalidTopUpMoney(c, payMoney) {
+		return
+	}
 	if payMoney <= 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return

@@ -33,7 +33,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { IconCopy, IconDelete, IconPlus } from '@douyinfe/semi-icons';
 import { renderQuota } from '../../../../helpers/render';
-import { copy, showSuccess } from '../../../../helpers';
+import { copy, showSuccess, showWarning } from '../../../../helpers';
 import { BILLING_EXTRA_VARS, BILLING_CACHE_VAR_MAP, BILLING_CONDITION_VARS } from '../../../../constants';
 import {
   createEmptyCondition,
@@ -1156,6 +1156,11 @@ function RuleConditionRow({ cond, onChange, onRemove, t }) {
             {t(hint)}
           </Text>
         )}
+        {isRange && (
+          <Text size='small' style={{ color: 'var(--semi-color-text-3)' }}>
+            {t('开始 ≤ 结束为当日区间，开始 > 结束为跨零点区间')}
+          </Text>
+        )}
       </div>
     );
   }
@@ -1425,9 +1430,11 @@ function LlmPromptHelper({ t, model }) {
 export default function TieredPricingEditor({ model, onExprChange, requestRuleExpr, onRequestRuleExprChange, t }) {
   const currentExpr = model?.billingExpr || '';
 
-  const [editorMode, setEditorMode] = useState('visual');
-  const [visualConfig, setVisualConfig] = useState(null);
-  const [rawExpr, setRawExpr] = useState('');
+  const [editorMode, setEditorMode] = useState(() =>
+    currentExpr && !tryParseVisualConfig(currentExpr) ? 'raw' : 'visual',
+  );
+  const [visualConfig, setVisualConfig] = useState(() => tryParseVisualConfig(currentExpr));
+  const [rawExpr, setRawExpr] = useState(() => combineBillingExpr(currentExpr, requestRuleExpr));
   const [promptTokens, setPromptTokens] = useState(200000);
   const [completionTokens, setCompletionTokens] = useState(10000);
   const [cacheReadTokens, setCacheReadTokens] = useState(0);
@@ -1464,10 +1471,10 @@ export default function TieredPricingEditor({ model, onExprChange, requestRuleEx
     if (parsed) {
       setEditorMode('visual');
       setVisualConfig(parsed);
-      setRawExpr(currentExpr);
+      setRawExpr(combineBillingExpr(currentExpr, currentRequestRuleExpr));
     } else if (currentExpr) {
       setEditorMode('raw');
-      setRawExpr(currentExpr);
+      setRawExpr(combineBillingExpr(currentExpr, currentRequestRuleExpr));
       setVisualConfig(null);
     } else {
       setEditorMode('visual');
@@ -1484,21 +1491,19 @@ export default function TieredPricingEditor({ model, onExprChange, requestRuleEx
     return billingExpr;
   }, [editorMode, visualConfig, rawExpr]);
 
-  useEffect(() => {
-    if (effectiveExpr !== currentExpr) {
-      onExprChange(effectiveExpr);
-    }
-  }, [effectiveExpr]);
-
+  // Loading or switching modes must not rewrite stored prices/rules.
+  // Publish only explicit edits, never regenerated initialization state.
   const handleVisualChange = useCallback((newConfig) => {
     setVisualConfig(newConfig);
-  }, []);
+    onExprChange(generateExprFromVisualConfig(newConfig));
+  }, [onExprChange]);
 
   const handleRawChange = useCallback((val) => {
     setRawExpr(val);
-    const { requestRuleExpr: ruleStr } = splitBillingExprAndRequestRules(val);
+    const { billingExpr, requestRuleExpr: ruleStr } = splitBillingExprAndRequestRules(val);
+    onExprChange(billingExpr);
     onRequestRuleExprChange(ruleStr);
-  }, [onRequestRuleExprChange]);
+  }, [onExprChange, onRequestRuleExprChange]);
 
   const handleModeSwitch = useCallback(
     (e) => {
@@ -1506,22 +1511,22 @@ export default function TieredPricingEditor({ model, onExprChange, requestRuleEx
       if (newMode === 'visual') {
         const { billingExpr, requestRuleExpr: ruleStr } = splitBillingExprAndRequestRules(rawExpr);
         const parsed = tryParseVisualConfig(billingExpr);
-        if (parsed) {
-          setVisualConfig(parsed);
-        } else {
-          setVisualConfig(createDefaultVisualConfig());
-        }
         const parsedGroups = tryParseRequestRuleExpr(ruleStr);
-        setRequestRuleGroups(parsedGroups || []);
+        if ((!parsed && billingExpr) || !parsedGroups) {
+          showWarning(t('这个公式比较复杂，下面的简化表单没法完整还原，请在表达式编辑模式下修改。'));
+          return;
+        }
+        setVisualConfig(parsed || createDefaultVisualConfig());
+        setRequestRuleGroups(parsedGroups);
+        onExprChange(billingExpr);
         onRequestRuleExprChange(ruleStr);
       } else {
-        const expr = generateExprFromVisualConfig(visualConfig);
-        const ruleExpr = buildRequestRuleExpr(requestRuleGroups);
-        setRawExpr(combineBillingExpr(expr, ruleExpr) || expr);
+        // Keep unsupported rule text as well as the original billing body.
+        setRawExpr(combineBillingExpr(currentExpr, currentRequestRuleExpr));
       }
       setEditorMode(newMode);
     },
-    [rawExpr, visualConfig, requestRuleGroups, onRequestRuleExprChange],
+    [rawExpr, currentExpr, currentRequestRuleExpr, onExprChange, onRequestRuleExprChange, t],
   );
 
   const applyPreset = useCallback(
@@ -1533,14 +1538,16 @@ export default function TieredPricingEditor({ model, onExprChange, requestRuleEx
       const parsed = tryParseVisualConfig(preset.expr);
       if (parsed) {
         setVisualConfig(parsed);
+        setEditorMode('visual');
       } else {
         setEditorMode('raw');
         setVisualConfig(null);
       }
       setRequestRuleGroups(presetGroups);
+      onExprChange(preset.expr);
       onRequestRuleExprChange(ruleExpr);
     },
-    [onRequestRuleExprChange],
+    [onExprChange, onRequestRuleExprChange],
   );
 
   const extraTokenValues = {

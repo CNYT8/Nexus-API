@@ -18,10 +18,18 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/sjson"
 )
 
 func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
+	info.ImageRequestCount = 0
+	delete(info.PriceData.OtherRatios, "n")
+	delete(info.PriceData.OtherRatios, "prompt_extend")
+	// Multipart adaptors replace the boundary header. A retry must parse the
+	// original body with its original boundary, not the previous attempt's.
+	contentType := c.Request.Header.Get("Content-Type")
+	defer c.Request.Header.Set("Content-Type", contentType)
 
 	imageReq, ok := info.Request.(*dto.ImageRequest)
 	if !ok {
@@ -43,15 +51,36 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
 	}
 	adaptor.Init(info)
+	if _, err := request.ImageCount(info.ChannelType == constant.ChannelTypeAli); err != nil {
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
 
 	var requestBody io.Reader
+	var jsonData []byte
+	var quantityRequest *dto.ImageRequest
 
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
-		requestBody = common.NewReplayableBodyReader(storage)
+		if strings.Contains(contentType, "multipart/form-data") {
+			reader, err := storage.NewReader()
+			if err != nil {
+				return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			}
+			quantityRequest, err = service.ImageBillingRequestFromMultipart(reader, contentType)
+			reader.Close()
+			if err != nil {
+				return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			}
+			requestBody = common.NewReplayableBodyReader(storage)
+		} else {
+			jsonData, err = storage.Bytes()
+			if err != nil {
+				return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			}
+		}
 	} else {
 		convertedRequest, err := adaptor.ConvertImageRequest(c, info, *request)
 		if err != nil {
@@ -59,11 +88,17 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		}
 		relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
 
-		switch convertedRequest.(type) {
+		switch converted := convertedRequest.(type) {
 		case *bytes.Buffer:
-			requestBody = convertedRequest.(io.Reader)
+			// Inspect the converted bytes, not the ingress form cache: adaptors
+			// can change fields and must not bypass supplemental reservation.
+			quantityRequest, err = service.ImageBillingRequestFromMultipart(bytes.NewReader(converted.Bytes()), c.Request.Header.Get("Content-Type"))
+			if err != nil {
+				return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			}
+			requestBody = converted
 		default:
-			jsonData, err := common.Marshal(convertedRequest)
+			jsonData, err = common.Marshal(convertedRequest)
 			if err != nil {
 				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 			}
@@ -75,16 +110,38 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 					return newAPIErrorFromParamOverride(err)
 				}
 			}
-
-			logger.LogDebug(c, "image request body: %s", jsonData)
-			body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+		}
+	}
+	if quantityRequest == nil {
+		quantityRequest, err = service.ImageBillingRequestFromJSON(jsonData, info.ChannelType)
+		if err != nil {
+			return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
+	}
+	imageCount, err := quantityRequest.ImageCount(info.ChannelType == constant.ChannelTypeAli)
+	if err != nil {
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	promptExtend := quantityRequest.BillingParameters != nil && quantityRequest.BillingParameters.PromptExtend != nil && *quantityRequest.BillingParameters.PromptExtend
+	if jsonData != nil {
+		if info.ChannelType == constant.ChannelTypeAli {
+			// Ali parameters.n wins over top-level n. Make the reserved quantity
+			// explicit even for pass-through/empty/null provider parameters.
+			jsonData, err = sjson.SetBytes(jsonData, "parameters.n", imageCount)
 			if err != nil {
 				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 			}
-			defer closer.Close()
-			jsonData = nil
-			requestBody = body
 		}
+		logger.LogDebug(c, "image request body: %s", jsonData)
+		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		defer closer.Close()
+		requestBody = body
+	}
+	if billingErr := service.PrepareImageBillingForRequest(c, info, imageCount, promptExtend); billingErr != nil {
+		return billingErr
 	}
 
 	statusCodeMappingStr := c.GetString("status_code_mapping")
@@ -117,9 +174,9 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		return newAPIError
 	}
 
-	imageN := uint(1)
-	if request.N != nil {
-		imageN = *request.N
+	imageN := info.RequestedImageCount()
+	if n, ok := info.PriceData.OtherRatios["n"]; ok && info.TieredBillingSnapshot == nil && (info.PriceData.UsePrice || info.ChannelType == constant.ChannelTypeAli) {
+		imageN = int(n)
 	}
 
 	if usage.(*dto.Usage).TotalTokens == 0 {

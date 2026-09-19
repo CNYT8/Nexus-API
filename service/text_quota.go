@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -147,12 +148,24 @@ func noteQuotaClamp(relayInfo *relaycommon.RelayInfo, clamp *common.QuotaClamp) 
 	}
 }
 
+// Only a successful evaluation and an AST proof of the actual price may relax
+// the missing-usage floor. Display regexes and the estimated tier are not money
+// authorities (call(p), for example, is usage dependent).
+func isUsageIndependentSettlement(info *relaycommon.RelayInfo, result *billingexpr.TieredResult) bool {
+	return result != nil && result.Clamp == nil && info.TieredBillingSnapshot != nil &&
+		billingexpr.IsUsageIndependentPrice(info.TieredBillingSnapshot.ExprString, result.MatchedTier)
+}
+
+func missingSettlementUsage(usage *dto.Usage) bool {
+	return usage == nil || (usage.PromptTokens <= 0 && usage.CompletionTokens <= 0) || usage.UsageSource == "responses_estimated"
+}
+
 func composeTieredTextQuota(relayInfo *relaycommon.RelayInfo, summary textQuotaSummary, tieredQuota int, tieredResult *billingexpr.TieredResult) int {
 	if summary.ToolCallSurchargeQuota.IsZero() {
 		return tieredQuota
 	}
 
-	if tieredResult != nil {
+	if tieredResult != nil && tieredResult.Clamp == nil && !math.IsNaN(tieredResult.ActualQuotaBeforeGroup) && !math.IsInf(tieredResult.ActualQuotaBeforeGroup, 0) {
 		if snap := relayInfo.TieredBillingSnapshot; snap != nil {
 			quota, clamp := common.QuotaFromDecimalChecked(decimal.NewFromFloat(tieredResult.ActualQuotaBeforeGroup).
 				Mul(decimal.NewFromFloat(snap.GroupRatio)).
@@ -348,18 +361,49 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	adminRejectReason := common.GetContextKeyString(ctx, constant.ContextKeyAdminRejectReason)
 	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
 
+	snap := relayInfo.TieredBillingSnapshot
+	missingUsage := missingSettlementUsage(originUsage) || summary.TotalTokens == 0
+
+	// Evaluate all tiered expressions with the existing prompt estimate when
+	// usage is missing, but do not mistake that estimate for reported usage.
+	billingUsage := usage
+	if billingUsage == nil && snap != nil {
+		billingUsage = &dto.Usage{
+			PromptTokens:     summary.PromptTokens,
+			CompletionTokens: summary.CompletionTokens,
+			TotalTokens:      summary.TotalTokens,
+		}
+	}
+
 	var tieredResult *billingexpr.TieredResult
 	tieredBillingApplied := false
-	if originUsage != nil {
+	usedConservative := false
+	if billingUsage != nil {
 		var tieredUsedVars map[string]bool
-		if snap := relayInfo.TieredBillingSnapshot; snap != nil {
+		if snap != nil {
 			tieredUsedVars = billingexpr.UsedVars(snap.ExprString)
 		}
-		tieredOk, tieredQuota, tieredRes := TryTieredSettle(relayInfo, BuildTieredTokenParams(usage, summary.IsClaudeUsageSemantic, tieredUsedVars))
+		tieredOk, tieredQuota, tieredRes := TryTieredSettle(relayInfo, BuildTieredTokenParams(billingUsage, summary.IsClaudeUsageSemantic, tieredUsedVars))
 		if tieredOk {
 			tieredBillingApplied = true
 			tieredResult = tieredRes
+			if snap.GroupRatio == 0 {
+				tieredQuota = 0
+				tieredRes = nil
+			}
+			if missingUsage && !isUsageIndependentSettlement(relayInfo, tieredRes) {
+				// The reservation covers the expression, not separately metered
+				// tools. Apply the floor BEFORE adding their surcharge.
+				if floor := conservativeSettlementQuota(relayInfo); floor >= tieredQuota {
+					usedConservative = true
+					tieredQuota = floor
+					tieredRes = nil // compose from the retained base, not the evaluated base
+				}
+			}
 			summary.Quota = composeTieredTextQuota(relayInfo, summary, tieredQuota, tieredRes)
+			// Tiered expressions replace legacy token/audio prices altogether;
+			// tools remain separate. Do not log an uncharged legacy audio fee.
+			summary.AudioInputPrice = 0
 		}
 	}
 
@@ -379,11 +423,20 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		extraContent = append(extraContent, fmt.Sprintf("Image Generation Call 花费 %s", decimal.NewFromFloat(summary.ImageGenerationCallPrice).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))
 	}
 
-	if summary.TotalTokens == 0 {
-		retainedQuota := conservativeSettlementQuota(relayInfo)
-		summary.Quota = retainedQuota
-		extraContent = append(extraContent, "上游没有返回计费信息，无法精确结算，按预扣额度保守计费")
-		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, settle with pre-consumed quota, userId %d, channelId %d, tokenId %d, model %s, pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, retainedQuota))
+	if missingUsage || summary.TotalTokens == 0 {
+		if !tieredBillingApplied {
+			usedConservative = true
+			floor := conservativeSettlementQuota(relayInfo)
+			floorWithTools := composeTieredTextQuota(relayInfo, summary, floor, nil)
+			if floorWithTools > summary.Quota {
+				summary.Quota = floorWithTools
+			}
+		}
+		retainedQuota := summary.Quota
+		if usedConservative {
+			extraContent = append(extraContent, "上游没有返回计费信息，无法精确结算，按预扣额度保守计费")
+			logger.LogError(ctx, fmt.Sprintf("missing usage, settle with conservative quota, userId %d, channelId %d, tokenId %d, model %s, quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, retainedQuota))
+		}
 		if retainedQuota > 0 {
 			model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, retainedQuota)
 			model.UpdateChannelUsedQuota(relayInfo.ChannelId, retainedQuota)
@@ -422,7 +475,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		other = GenerateTextOtherInfo(ctx, relayInfo, summary.ModelRatio, summary.GroupRatio, summary.CompletionRatio, summary.CacheTokens, summary.CacheRatio, summary.ModelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
 	}
 	if adminRejectReason != "" {
-		other["reject_reason"] = adminRejectReason
+		model.SetLogOtherAdminField(other, "reject_reason", adminRejectReason)
 	}
 	if summary.ImageTokens != 0 {
 		other["image"] = true

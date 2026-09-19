@@ -18,25 +18,22 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
-	"github.com/samber/lo"
 )
 
 func oaiImage2AliImageRequest(info *relaycommon.RelayInfo, request dto.ImageRequest, isSync bool) (*AliImageRequest, error) {
 	var imageRequest AliImageRequest
 	imageRequest.Model = request.Model
 	imageRequest.ResponseFormat = request.ResponseFormat
+	imageRequest.Parameters = AliImageParameters{
+		Size:      strings.Replace(request.Size, "x", "*", -1),
+		Watermark: request.Watermark,
+	}
 	if request.Extra != nil {
 		if val, ok := request.Extra["parameters"]; ok {
+			imageRequest.Parameters = AliImageParameters{}
 			err := common.Unmarshal(val, &imageRequest.Parameters)
 			if err != nil {
 				return nil, fmt.Errorf("invalid parameters field: %w", err)
-			}
-		} else {
-			// 兼容没有parameters字段的情况，从openai标准字段中提取参数
-			imageRequest.Parameters = AliImageParameters{
-				Size:      strings.Replace(request.Size, "x", "*", -1),
-				N:         int(lo.FromPtrOr(request.N, uint(1))),
-				Watermark: request.Watermark,
 			}
 		}
 		if val, ok := request.Extra["input"]; ok {
@@ -47,15 +44,17 @@ func oaiImage2AliImageRequest(info *relaycommon.RelayInfo, request dto.ImageRequ
 		}
 	}
 
-	if strings.Contains(request.Model, "z-image") {
-		// z-image 开启prompt_extend后，按2倍计费
-		if imageRequest.Parameters.PromptExtendValue() {
-			info.PriceData.AddOtherRatio("prompt_extend", 2)
-		}
+	count, err := request.ImageCount(true)
+	if err != nil {
+		return nil, err
 	}
-
-	if imageRequest.Parameters.N != 0 {
-		info.PriceData.AddOtherRatio("n", float64(imageRequest.Parameters.N))
+	parameters, err := request.ImageParameters()
+	if err != nil {
+		return nil, err
+	}
+	imageRequest.Parameters.N = common.GetPointer(uint(count))
+	if parameters != nil {
+		imageRequest.Parameters.PromptExtend = parameters.PromptExtend
 	}
 
 	// 同步图片模型和异步图片模型请求格式不一样
@@ -153,6 +152,10 @@ func getImageBase64sFromForm(c *gin.Context, fieldName string) ([]string, error)
 }
 
 func oaiFormEdit2AliImageEdit(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (*AliImageRequest, error) {
+	count, err := request.ImageCount(true)
+	if err != nil {
+		return nil, err
+	}
 	var imageRequest AliImageRequest
 	imageRequest.Model = request.Model
 	imageRequest.ResponseFormat = request.ResponseFormat
@@ -180,8 +183,15 @@ func oaiFormEdit2AliImageEdit(c *gin.Context, info *relaycommon.RelayInfo, reque
 		},
 	}
 	imageRequest.Parameters = AliImageParameters{
-		N:         int(lo.FromPtrOr(request.N, uint(1))),
+		N:         common.GetPointer(uint(count)),
 		Watermark: request.Watermark,
+	}
+	parameters, err := request.ImageParameters()
+	if err != nil {
+		return nil, err
+	}
+	if parameters != nil {
+		imageRequest.Parameters.PromptExtend = parameters.PromptExtend
 	}
 	return &imageRequest, nil
 }
@@ -327,10 +337,18 @@ func aliImageHandler(a *Adaptor, c *gin.Context, resp *http.Response, info *rela
 	}
 
 	imageResponses := responseAli2OpenAIImage(c, aliResponse, originRespBody, info, responseFormat)
-	if aliResponse.Usage.ImageCount != 0 {
-		info.PriceData.AddOtherRatio("n", float64(aliResponse.Usage.ImageCount))
-	} else if len(imageResponses.Data) != 0 {
-		info.PriceData.AddOtherRatio("n", float64(len(imageResponses.Data)))
+	count := int64(aliResponse.Usage.ImageCount)
+	if count < 0 || count > dto.MaxImageN {
+		logger.LogWarn(c, "invalid Ali image usage count; falling back to response images or requested quantity")
+		count = 0
+	}
+	if count == 0 {
+		count = int64(len(imageResponses.Data))
+	}
+	if count > dto.MaxImageN {
+		logger.LogWarn(c, "invalid Ali response image count; retaining requested quantity")
+	} else if count > 0 {
+		info.UpdateImageCount(count)
 	}
 	jsonResponse, err := common.Marshal(imageResponses)
 	if err != nil {

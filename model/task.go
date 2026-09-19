@@ -81,19 +81,31 @@ type Properties struct {
 }
 
 func (m *Properties) Scan(val interface{}) error {
-	bytesValue, _ := val.([]byte)
-	if len(bytesValue) == 0 {
-		*m = Properties{}
-		return nil
+	bytesValue, err := jsonScanBytes(val)
+	if err != nil {
+		return err
 	}
-	return common.Unmarshal(bytesValue, m)
+	var decoded Properties
+	if len(bytesValue) != 0 {
+		if err := common.Unmarshal(bytesValue, &decoded); err != nil {
+			return err
+		}
+	}
+	*m = decoded
+	return nil
 }
 
 func (m Properties) Value() (driver.Value, error) {
 	if m == (Properties{}) {
 		return nil, nil
 	}
-	return common.Marshal(m)
+	// 必须返回 string 而非 []byte:PG simple protocol 下 []byte 按 bytea 编码,
+	// 写 json 列会触发 SQLSTATE 22P02。
+	b, err := common.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
 }
 
 type TaskPrivateData struct {
@@ -143,18 +155,30 @@ func GenerateTaskID() string {
 }
 
 func (p *TaskPrivateData) Scan(val interface{}) error {
-	bytesValue, _ := val.([]byte)
-	if len(bytesValue) == 0 {
-		return nil
+	bytesValue, err := jsonScanBytes(val)
+	if err != nil {
+		return err
 	}
-	return common.Unmarshal(bytesValue, p)
+	var decoded TaskPrivateData
+	if len(bytesValue) != 0 {
+		if err := common.Unmarshal(bytesValue, &decoded); err != nil {
+			return err
+		}
+	}
+	*p = decoded
+	return nil
 }
 
 func (p TaskPrivateData) Value() (driver.Value, error) {
 	if (p == TaskPrivateData{}) {
 		return nil, nil
 	}
-	return common.Marshal(p)
+	// 同 Properties.Value:string 避免 PG simple protocol 的 bytea 编码。
+	b, err := common.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
 }
 
 // SyncTaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段

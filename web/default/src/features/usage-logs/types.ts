@@ -94,6 +94,7 @@ export interface ChannelAffinityInfo {
 
 export interface LogOtherData {
   admin_info?: {
+    reject_reason?: string
     is_multi_key?: boolean
     multi_key_index?: number
     use_channel?: number[]

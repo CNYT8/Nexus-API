@@ -283,16 +283,30 @@ func CalcOpenRouterCacheCreateTokens(usage dto.Usage, priceData types.PriceData)
 }
 
 func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent string) {
+	missingUsage := missingSettlementUsage(usage)
+	if usage == nil {
+		// A successful audio response without usage must not panic or skip
+		// settlement; fall back to the provider prompt estimate.
+		estimatePromptTokens := relayInfo.GetEstimatePromptTokens()
+		usage = &dto.Usage{
+			PromptTokens: estimatePromptTokens,
+			TotalTokens:  estimatePromptTokens,
+		}
+	}
 	usage = normalizeChannelSystemPromptUsage(relayInfo, usage)
 
+	snap := relayInfo.TieredBillingSnapshot
 	var tieredUsedVars map[string]bool
-	if snap := relayInfo.TieredBillingSnapshot; snap != nil {
+	if snap != nil {
 		tieredUsedVars = billingexpr.UsedVars(snap.ExprString)
 	}
 	var tieredResult *billingexpr.TieredResult
 	tieredOk, tieredQuota, tieredRes := TryTieredSettle(relayInfo, BuildTieredTokenParams(usage, false, tieredUsedVars))
 	if tieredOk {
 		tieredResult = tieredRes
+		if snap.GroupRatio == 0 {
+			tieredQuota = 0
+		}
 	}
 
 	useTimeSeconds := time.Now().Unix() - relayInfo.StartTime.Unix()
@@ -342,13 +356,21 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	}
 
 	// record all the consume log even if quota is 0
-	if totalTokens == 0 {
-		// Missing usage on an otherwise successful response is not free: retain
-		// the reservation so the request cannot bypass billing.
-		quota = conservativeSettlementQuota(relayInfo)
-		logContent += "（上游无计费信息，按预扣额度保守结算）"
-		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, settle with pre-consumed quota, userId %d, channelId %d, "+
-			"tokenId %d, model %s, pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, relayInfo.OriginModelName, quota))
+	if missingUsage || totalTokens == 0 {
+		// Only the actual, proven usage-independent branch can release the
+		// reservation without usage. A prompt estimate does not remove the floor.
+		usedConservative := false
+		if !isUsageIndependentSettlement(relayInfo, tieredResult) {
+			if floor := conservativeSettlementQuota(relayInfo); floor >= quota {
+				quota = floor
+				usedConservative = true
+			}
+		}
+		if usedConservative {
+			logContent += "（上游无计费信息，按预扣额度保守结算）"
+			logger.LogError(ctx, fmt.Sprintf("total tokens is 0, settle with pre-consumed quota, userId %d, channelId %d, "+
+				"tokenId %d, model %s, pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, relayInfo.OriginModelName, quota))
+		}
 		if quota > 0 {
 			model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
 			model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
@@ -368,7 +390,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	}
 	other := GenerateAudioOtherInfo(ctx, relayInfo, usage, modelRatio, groupRatio,
 		completionRatio.InexactFloat64(), audioRatio.InexactFloat64(), audioCompletionRatio.InexactFloat64(), modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
-	if tieredResult != nil {
+	if tieredOk {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	attachQuotaSaturation(ctx, relayInfo, other)

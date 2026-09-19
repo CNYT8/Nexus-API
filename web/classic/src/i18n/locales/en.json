@@ -3956,6 +3956,8 @@
     "日期": "Day",
     "时区": "Timezone",
     "跨夜范围": "Cross-midnight range",
+    "时间范围": "Time range",
+    "开始 ≤ 结束为当日区间，开始 > 结束为跨零点区间": "Start ≤ end: within the day; start > end: across midnight",
     "添加时间规则": "Add time rule",
     "起": "From",
     "止": "To",

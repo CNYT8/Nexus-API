@@ -45,3 +45,26 @@ func TestGormLoggerParameterizedOutsideDebug(t *testing.T) {
 	assert.NotContains(t, output.String(), "secret-value")
 	assert.Contains(t, output.String(), "sqlite error")
 }
+
+// PostgreSQL 事务池代理(PgBouncer/Neon/Supabase)下 prepared statement 冲突的
+// SQLSTATE 08P01/42P05 必须换成可自诊断的固定提示,不能回显驱动原始 message。
+func TestSanitizeDBErrorPreparedStatementConflictsDoNotLeakDriverMessage(t *testing.T) {
+	for _, code := range []string{"08P01", "42P05"} {
+		t.Run(code, func(t *testing.T) {
+			want := fmt.Sprintf("postgres error SQLSTATE %s: prepared statement conflict with a transaction-pooling proxy (PgBouncer/Neon/Supabase); other clients sharing this database must disable prepared statements, or upgrade PgBouncer to >=1.21 with max_prepared_statements enabled", code)
+			secret := "secret-value"
+			err := &pgconn.PgError{
+				Severity: "FATAL",
+				Code:     code,
+				Message:  "prepared statement name is already in use: stmt_" + secret,
+				Detail:   "driver-detail-" + secret,
+			}
+
+			sanitized := sanitizeDBError(err)
+			require.Error(t, sanitized)
+			assert.Equal(t, want, sanitized.Error())
+			assert.NotContains(t, sanitized.Error(), secret)
+			assert.NotContains(t, sanitized.Error(), "prepared statement name is already in use")
+		})
+	}
+}

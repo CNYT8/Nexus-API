@@ -33,6 +33,11 @@ func GetAllLogs(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if c.GetInt("role") == common.RoleRootUser {
+		model.FormatRootLogs(logs)
+	} else {
+		model.FormatAdminLogs(logs)
+	}
 	if restricted {
 		model.StripChannelRestrictedAdminLogFields(logs)
 	}

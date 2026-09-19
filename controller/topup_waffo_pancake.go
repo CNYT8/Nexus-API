@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -32,6 +33,10 @@ func isPermanentWaffoPancakeResolutionError(err error) bool {
 }
 
 func RequestWaffoPancakeAmount(c *gin.Context) {
+	if setting.WaffoPancakeMinTopUp < 0 {
+		rejectTopUpQuota(c, model.ErrInvalidTopUpQuota)
+		return
+	}
 	var req WaffoPancakePayRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "参数错误"})
@@ -44,6 +49,10 @@ func RequestWaffoPancakeAmount(c *gin.Context) {
 	}
 
 	id := c.GetInt("id")
+	amount, err := normalizeWaffoPancakeTopUpAmount(req.Amount)
+	if rejectTopUpQuota(c, err) || rejectInvalidTopUpQuota(c, id, amount) {
+		return
+	}
 	group, err := model.GetUserGroup(id, true)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
@@ -51,6 +60,9 @@ func RequestWaffoPancakeAmount(c *gin.Context) {
 	}
 
 	payMoney := getWaffoPancakePayMoney(req.Amount, group)
+	if rejectInvalidTopUpMoney(c, payMoney) {
+		return
+	}
 	if payMoney <= 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -60,6 +72,9 @@ func RequestWaffoPancakeAmount(c *gin.Context) {
 }
 
 func getWaffoPancakePayMoney(amount int64, group string) float64 {
+	if !validTopUpPricing(group, setting.WaffoPancakeUnitPrice, amount) {
+		return math.NaN()
+	}
 	dAmount := decimal.NewFromInt(amount)
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		dAmount = dAmount.Div(decimal.NewFromFloat(common.QuotaPerUnit))
@@ -83,18 +98,17 @@ func getWaffoPancakePayMoney(amount int64, group string) float64 {
 	return payMoney.InexactFloat64()
 }
 
-func normalizeWaffoPancakeTopUpAmount(amount int64) int64 {
-	if operation_setting.GetQuotaDisplayType() != operation_setting.QuotaDisplayTypeTokens {
-		return amount
+func normalizeWaffoPancakeTopUpAmount(amount int64) (int64, error) {
+	// Same decimal truncation as Epay, but preserve Pancake's minimum of 1
+	// only for valid positive inputs, never for failed/overflowed conversions.
+	normalized, err := normalizeEpayTopUpAmount(amount)
+	if err != nil {
+		return 0, err
 	}
-
-	normalized := decimal.NewFromInt(amount).
-		Div(decimal.NewFromFloat(common.QuotaPerUnit)).
-		IntPart()
 	if normalized < 1 {
-		return 1
+		normalized = 1
 	}
-	return normalized
+	return normalized, nil
 }
 
 func formatWaffoPancakeAmount(payMoney float64) string {
@@ -367,6 +381,10 @@ func getWaffoPancakeBuyerIdentity(user *model.User) string {
 }
 
 func RequestWaffoPancakePay(c *gin.Context) {
+	if setting.WaffoPancakeMinTopUp < 0 {
+		rejectTopUpQuota(c, model.ErrInvalidTopUpQuota)
+		return
+	}
 	if !isWaffoPancakeTopUpEnabled() {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "Waffo Pancake 配置不完整"})
 		return
@@ -383,6 +401,10 @@ func RequestWaffoPancakePay(c *gin.Context) {
 	}
 
 	id := c.GetInt("id")
+	amount, err := normalizeWaffoPancakeTopUpAmount(req.Amount)
+	if rejectTopUpQuota(c, err) || rejectInvalidTopUpQuota(c, id, amount) {
+		return
+	}
 	user, err := model.GetUserById(id, false)
 	if err != nil || user == nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "用户不存在"})
@@ -396,6 +418,9 @@ func RequestWaffoPancakePay(c *gin.Context) {
 	}
 
 	payMoney := getWaffoPancakePayMoney(req.Amount, group)
+	if rejectInvalidTopUpMoney(c, payMoney) {
+		return
+	}
 	if payMoney < 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -404,7 +429,7 @@ func RequestWaffoPancakePay(c *gin.Context) {
 	tradeNo := fmt.Sprintf("WAFFO_PANCAKE-%d-%d-%s", id, time.Now().UnixMilli(), randstr.String(6))
 	topUp := &model.TopUp{
 		UserId:          id,
-		Amount:          normalizeWaffoPancakeTopUpAmount(req.Amount),
+		Amount:          amount,
 		Money:           payMoney,
 		TradeNo:         tradeNo,
 		PaymentMethod:   model.PaymentMethodWaffoPancake,

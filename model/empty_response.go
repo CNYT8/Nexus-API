@@ -115,6 +115,13 @@ func isExcludedEmptyResponseLog(other string) bool {
 	if rejectReason, _ := otherMap["reject_reason"].(string); strings.TrimSpace(rejectReason) != "" {
 		return true
 	}
+	// Read both stored shapes: moving private diagnostics must not make policy
+	// rejections eligible for empty-response compensation.
+	if adminInfo, ok := otherMap["admin_info"].(map[string]interface{}); ok {
+		if reason, _ := adminInfo["reject_reason"].(string); strings.TrimSpace(reason) != "" {
+			return true
+		}
+	}
 	requestPath, _ := otherMap["request_path"].(string)
 	requestPath = strings.ToLower(strings.SplitN(requestPath, "?", 2)[0])
 	for _, marker := range []string{

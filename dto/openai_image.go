@@ -2,7 +2,9 @@ package dto
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -14,6 +16,13 @@ import (
 // MaxImageN caps the image generation count. Without this bound a huge or
 // wrapped-negative n overflows quota calculation into a negative charge.
 const MaxImageN = 128
+
+// ImageBillingParameters contains only the provider scalars parsed by request
+// validation. Keep this separate from the complete provider request payload.
+type ImageBillingParameters struct {
+	N            *uint `json:"n,omitempty"`
+	PromptExtend *bool `json:"prompt_extend,omitempty"`
+}
 
 type ImageRequest struct {
 	Model             string          `json:"model"`
@@ -40,7 +49,87 @@ type ImageRequest struct {
 	UserId           json.RawMessage `json:"user_id,omitempty"`
 	Image            json.RawMessage `json:"image,omitempty"`
 	// 用匿名参数接收额外参数
-	Extra map[string]json.RawMessage `json:"-"`
+	Extra             map[string]json.RawMessage `json:"-"`
+	BillingParameters *ImageBillingParameters    `json:"-"`
+}
+
+// ImageCount resolves the validated request quantity. Top-level zero retains
+// its legacy default of one; an explicit provider count must be positive.
+func (i *ImageRequest) ImageCount(useProviderParameters bool) (int, error) {
+	n := uint(1)
+	if i.N != nil && *i.N != 0 {
+		n = *i.N
+	}
+	if n > MaxImageN {
+		return 0, fmt.Errorf("n must be an integer between 1 and %d", MaxImageN)
+	}
+	parameters, err := i.ImageParameters()
+	if err != nil {
+		return 0, err
+	}
+	if parameters != nil && parameters.N != nil {
+		if *parameters.N > MaxImageN || *parameters.N == 0 {
+			return 0, fmt.Errorf("parameters.n must be an integer between 1 and %d", MaxImageN)
+		}
+		if useProviderParameters {
+			n = *parameters.N
+		}
+	}
+	return int(n), nil
+}
+
+// ImageParameters also supports direct adaptor/pricing callers that did not
+// pass through ingress validation. Never modify the frozen incoming request.
+func (i *ImageRequest) ImageParameters() (*ImageBillingParameters, error) {
+	if raw, exists := i.Extra["parameters"]; exists {
+		var parameters *ImageBillingParameters
+		if err := common.Unmarshal(raw, &parameters); err != nil {
+			return nil, fmt.Errorf("invalid image parameters: %w", err)
+		}
+		return parameters, nil
+	}
+	return i.BillingParameters, nil
+}
+
+// ImageBillingRequestFromJSON validates the complete JSON document, not just
+// successful path lookups: malformed outgoing JSON must never default to n=1.
+func ImageBillingRequestFromJSON(data []byte) (*ImageRequest, error) {
+	var scalars *struct {
+		N          *uint                   `json:"n"`
+		Parameters *ImageBillingParameters `json:"parameters"`
+	}
+	if err := common.Unmarshal(data, &scalars); err != nil {
+		return nil, fmt.Errorf("invalid image billing parameters: %w", err)
+	}
+	if scalars == nil {
+		return nil, fmt.Errorf("image request must be a JSON object")
+	}
+	return &ImageRequest{N: scalars.N, BillingParameters: scalars.Parameters}, nil
+}
+
+// ImageBillingRequestFromForm rejects ambiguous repeated scalars. Files and
+// prompts are deliberately excluded from the billing request.
+func ImageBillingRequestFromForm(values map[string][]string) (*ImageRequest, error) {
+	request := &ImageRequest{}
+	for _, name := range []string{"n", "parameters"} {
+		fields := values[name]
+		if len(fields) > 1 {
+			return nil, fmt.Errorf("duplicate image %s field", name)
+		}
+		if len(fields) == 0 {
+			continue
+		}
+		if name == "n" {
+			n, err := strconv.ParseUint(strings.TrimSpace(fields[0]), 10, 64)
+			if err != nil || n > MaxImageN {
+				return nil, fmt.Errorf("n must be an integer between 1 and %d", MaxImageN)
+			}
+			request.N = common.GetPointer(uint(n))
+		} else if err := common.Unmarshal([]byte(fields[0]), &request.BillingParameters); err != nil {
+			return nil, fmt.Errorf("invalid image parameters: %w", err)
+		}
+	}
+	return request, nil
 }
 
 func (i *ImageRequest) UnmarshalJSON(data []byte) error {

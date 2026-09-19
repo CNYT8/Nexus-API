@@ -4604,6 +4604,8 @@
     "请输入部署地区，例如：us-central1\\n支持使用模型映射格式\\n{\\n    \"default\": \"us-central1\",\\n    \"claude-3-5-sonnet-20240620\": \"europe-west1\"\\n}": "Enter the deployment region, for example: us-central1\\nModel mapping format is supported:\\n{\\n    \"default\": \"us-central1\",\\n    \"claude-3-5-sonnet-20240620\": \"europe-west1\"\\n}",
     "请选择一种 SMTP 传输加密方式": "Select an SMTP transport encryption mode",
     "跨夜范围": "Overnight range",
+    "时间范围": "Khoảng thời gian",
+    "开始 ≤ 结束为当日区间，开始 > 结束为跨零点区间": "Bắt đầu ≤ kết thúc: trong ngày; bắt đầu > kết thúc: qua nửa đêm",
     "输入 @ 可引用所有模型已使用标签": "Enter @ to reference tags used by all models",
     "输入 Token": "Input tokens",
     "输入 Token 数": "Input token count",

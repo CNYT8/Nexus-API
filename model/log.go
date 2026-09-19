@@ -103,36 +103,22 @@ func stripNonConsumeLogClients(logs []*Log) {
 		if strings.TrimSpace(log.Other) == "" {
 			continue
 		}
-		otherMap, err := common.StrToMap(log.Other)
-		if err != nil || otherMap == nil {
-			continue
-		}
+		otherMap := decodeLogOther(log.Other)
 		delete(otherMap, "user_agent")
-		log.Other = common.MapToJsonStr(otherMap)
+		log.Other = encodeLogOther(otherMap)
 	}
 }
 
 func formatUserLogs(logs []*Log, startIdx int) {
 	stripNonConsumeLogClients(logs)
-	for i := range logs {
-		logs[i].ChannelName = ""
-		var otherMap map[string]interface{}
-		otherMap, _ = common.StrToMap(logs[i].Other)
-		if otherMap != nil {
-			// Remove admin-only debug fields.
-			delete(otherMap, "admin_info")
-			delete(otherMap, "audit_info")
-			// delete(otherMap, "reject_reason")
-			delete(otherMap, "stream_status")
-			delete(otherMap, "is_model_mapped")
-			delete(otherMap, "is_system_prompt_overwritten")
-			delete(otherMap, "upstream_model_name")
-			delete(otherMap, "original_model")
-			delete(otherMap, "original_model_name")
-			delete(otherMap, "upstream_model")
+	for i, log := range logs {
+		if log == nil {
+			continue
 		}
-		logs[i].Other = common.MapToJsonStr(otherMap)
-		logs[i].Id = startIdx + i + 1
+		log.ChannelId = 0
+		log.ChannelName = ""
+		log.Other = formatUserLogOther(log.Other)
+		log.Id = startIdx + i + 1
 	}
 }
 
@@ -147,46 +133,23 @@ func StripChannelRestrictedAdminLogFields(logs []*Log) {
 			continue
 		}
 
-		otherMap, err := common.StrToMap(log.Other)
-		if err != nil || otherMap == nil {
-			continue
-		}
-		stripChannelRestrictedLogMap(otherMap)
-		if adminInfo, ok := otherMap["admin_info"].(map[string]interface{}); ok {
-			stripChannelRestrictedAdminInfo(adminInfo)
-			if len(adminInfo) == 0 {
-				delete(otherMap, "admin_info")
+		otherMap := decodeLogOther(log.Other)
+		normalizeLogRejectReason(otherMap)
+		delete(otherMap, "root_info")
+		stripChannelLogMetadata(otherMap)
+		for _, scope := range []string{"admin_info", "audit_info"} {
+			if raw, exists := otherMap[scope]; exists {
+				info := decodeLogOther(string(raw))
+				stripChannelLogMetadata(info)
+				if len(info) == 0 {
+					delete(otherMap, scope)
+				} else {
+					otherMap[scope] = []byte(encodeLogOther(info))
+				}
 			}
 		}
-		log.Other = common.MapToJsonStr(otherMap)
+		log.Other = encodeLogOther(otherMap)
 	}
-}
-
-func stripChannelRestrictedLogMap(otherMap map[string]interface{}) {
-	delete(otherMap, "channel_id")
-	delete(otherMap, "channel_name")
-	delete(otherMap, "channel_type")
-	delete(otherMap, "channel_affinity")
-	delete(otherMap, "is_model_mapped")
-	delete(otherMap, "is_system_prompt_overwritten")
-	delete(otherMap, "upstream_model_name")
-	delete(otherMap, "original_model")
-	delete(otherMap, "original_model_name")
-	delete(otherMap, "upstream_model")
-}
-
-func stripChannelRestrictedAdminInfo(adminInfo map[string]interface{}) {
-	delete(adminInfo, "use_channel")
-	delete(adminInfo, "channel_affinity")
-	delete(adminInfo, "channel_id")
-	delete(adminInfo, "channel_name")
-	delete(adminInfo, "channel_type")
-	delete(adminInfo, "is_model_mapped")
-	delete(adminInfo, "is_system_prompt_overwritten")
-	delete(adminInfo, "upstream_model_name")
-	delete(adminInfo, "original_model")
-	delete(adminInfo, "original_model_name")
-	delete(adminInfo, "upstream_model")
 }
 
 func GetLogByTokenId(tokenId int) (logs []*Log, err error) {

@@ -1,6 +1,8 @@
 package router
 
 import (
+	"strings"
+
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
@@ -187,6 +189,7 @@ func SetRelayRouter(router *gin.Engine) {
 	}
 
 	relayGeminiRouter := router.Group("/v1beta")
+	relayGeminiRouter.Use(rejectGeminiCountTokens)
 	relayGeminiRouter.Use(middleware.RouteTag("relay"))
 	relayGeminiRouter.Use(middleware.SystemPerformanceCheck())
 	relayGeminiRouter.Use(middleware.TokenAuth())
@@ -197,6 +200,16 @@ func SetRelayRouter(router *gin.Engine) {
 		relayGeminiRouter.POST("/models/*path", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatGemini)
 		})
+	}
+}
+
+// rejectGeminiCountTokens answers the unimplemented Gemini :countTokens
+// endpoint like an unregistered route before auth/channel selection instead of
+// silently relaying it as generateContent.
+func rejectGeminiCountTokens(c *gin.Context) {
+	if strings.HasSuffix(c.Request.URL.Path, ":countTokens") {
+		controller.RelayNotFound(c)
+		c.Abort()
 	}
 }
 

@@ -4,12 +4,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+// The process-wide limiter survives -count repetitions; give each invocation
+// separate user identities instead of inheriting the preceding run's quota.
+var ticketRateLimitTestUsers atomic.Int64
 
 func TestTicketWriteRateLimitIsScopedByUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -47,8 +52,10 @@ func TestTicketWriteRateLimitIsScopedByUser(t *testing.T) {
 		return recorder.Code
 	}
 
-	require.Equal(t, http.StatusNoContent, request("880001"))
-	require.Equal(t, http.StatusTooManyRequests, request("880001"))
-	require.Equal(t, http.StatusNoContent, request("880002"))
+	base := int64(880000) + ticketRateLimitTestUsers.Add(2)
+	first, second := strconv.FormatInt(base, 10), strconv.FormatInt(base+1, 10)
+	require.Equal(t, http.StatusNoContent, request(first))
+	require.Equal(t, http.StatusTooManyRequests, request(first))
+	require.Equal(t, http.StatusNoContent, request(second))
 	require.Equal(t, http.StatusUnauthorized, request(""))
 }

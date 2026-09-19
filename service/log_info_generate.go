@@ -67,6 +67,10 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	other["cache_ratio"] = cacheRatio
 	other["model_price"] = modelPrice
 	other["user_group_ratio"] = userGroupRatio
+	if ctx.GetBool("responses_tool_call") {
+		// Tool-only successes are not empty model answers eligible for a refund.
+		other["tool_calls"] = true
+	}
 	other["frt"] = float64(relayInfo.FirstResponseTime.UnixMilli() - relayInfo.StartTime.UnixMilli())
 	if relayInfo.ReasoningEffort != "" {
 		other["reasoning_effort"] = relayInfo.ReasoningEffort
@@ -307,5 +311,9 @@ func InjectTieredBillingInfo(other map[string]interface{}, relayInfo *relaycommo
 	other["expr_b64"] = base64.StdEncoding.EncodeToString([]byte(snap.ExprString))
 	if result != nil {
 		other["matched_tier"] = result.MatchedTier
+	} else if snap.EstimatedTier != "" {
+		// Evaluation may fall back to the reservation; keep the tier selected at
+		// pre-consume time so the usage log still shows it.
+		other["matched_tier"] = snap.EstimatedTier
 	}
 }

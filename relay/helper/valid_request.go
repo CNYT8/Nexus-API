@@ -1,14 +1,17 @@
 package helper
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -172,15 +175,20 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 			c.Request.PostForm = formData
 			imageRequest.Prompt = formData.Get("prompt")
 			imageRequest.Model = formData.Get("model")
-			if nValue := strings.TrimSpace(formData.Get("n")); nValue != "" {
-				n, err := strconv.Atoi(nValue)
-				if err != nil || n < 0 || n > dto.MaxImageN {
-					return nil, fmt.Errorf("n must be an integer between 1 and %d", dto.MaxImageN)
-				}
-				imageRequest.N = common.GetPointer(uint(n))
+			if len(form.File["n"]) > 0 || len(form.File["parameters"]) > 0 {
+				return nil, errors.New("image n and parameters must be scalar fields")
 			}
+			billingRequest, err := dto.ImageBillingRequestFromForm(form.Value)
+			if err != nil {
+				return nil, err
+			}
+			imageRequest.N = billingRequest.N
+			imageRequest.BillingParameters = billingRequest.BillingParameters
 			imageRequest.Quality = formData.Get("quality")
 			imageRequest.Size = formData.Get("size")
+			if parameters := formData.Get("parameters"); parameters != "" {
+				imageRequest.Extra = map[string]json.RawMessage{"parameters": json.RawMessage(parameters)}
+			}
 			if streamValue := strings.TrimSpace(formData.Get("stream")); streamValue != "" {
 				stream, err := strconv.ParseBool(streamValue)
 				if err != nil {
@@ -210,10 +218,25 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 		}
 		fallthrough
 	default:
-		err := common.UnmarshalBodyReusable(c, imageRequest)
+		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return nil, err
 		}
+		reader, err := storage.NewReader()
+		if err != nil {
+			return nil, err
+		}
+		defer reader.Close()
+		decoder := json.NewDecoder(reader)
+		if err := decoder.Decode(imageRequest); err != nil {
+			return nil, err
+		}
+		// The shared disk-backed decoder accepts a JSON prefix. Images must
+		// reject trailing data before reservation, including disk-cached bodies.
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			return nil, errors.New("image request must contain exactly one JSON object")
+		}
+		c.Request.Body = io.NopCloser(common.NewReplayableBodyReader(storage))
 
 		if imageRequest.Model == "" {
 			//imageRequest.Model = "dall-e-3"
@@ -261,6 +284,17 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 		}
 	}
 
+	// Provider parameters can override the top-level count. Validate before
+	// pricing so malformed multipliers return a client error, not a pricing
+	// failure after reservation has started.
+	parameters, err := imageRequest.ImageParameters()
+	if err != nil {
+		return nil, err
+	}
+	imageRequest.BillingParameters = parameters
+	if _, err := imageRequest.ImageCount(common.GetContextKeyInt(c, constant.ContextKeyChannelType) == constant.ChannelTypeAli); err != nil {
+		return nil, err
+	}
 	return imageRequest, nil
 }
 

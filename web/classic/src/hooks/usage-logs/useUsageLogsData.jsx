@@ -510,10 +510,11 @@ export const useLogsData = () => {
             value: logs[i].content,
           });
         }
-        if (isAdminUser && other?.reject_reason) {
+        const rejectReason = other?.admin_info?.reject_reason ?? other?.reject_reason;
+        if (isAdminUser && rejectReason) {
           expandDataLocal.push({
             key: t('拦截原因'),
-            value: other.reject_reason,
+            value: rejectReason,
           });
         }
       }

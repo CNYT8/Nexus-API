@@ -178,6 +178,69 @@ func TestFetchModelsUsesSharedChannelFetchBehavior(t *testing.T) {
 	require.JSONEq(t, `{"success":true,"message":"","data":["claude-sonnet"]}`, recorder.Body.String())
 }
 
+func TestFetchChannelUpstreamModelIDsVolcEngineUsesAPIV3Fallback(t *testing.T) {
+	originalTransport := http.DefaultTransport
+	received := make(chan *http.Request, 1)
+	http.DefaultTransport = controllerRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		received <- request
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"data":[{"id":" doubao-pro-32k "},{"id":"doubao-pro-32k"},{"id":"doubao-lite-4k"}]}`)),
+			Request:    request,
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	baseURL := "https://ark.example.test"
+	channel := &model.Channel{
+		Type:    constant.ChannelTypeVolcEngine,
+		Key:     "volc-secret",
+		BaseURL: &baseURL,
+	}
+
+	models, err := fetchChannelUpstreamModelIDs(channel)
+	require.NoError(t, err)
+	require.Equal(t, []string{"doubao-pro-32k", "doubao-lite-4k"}, models)
+
+	request := <-received
+	require.Equal(t, http.MethodGet, request.Method)
+	require.Equal(t, "/api/v3/models", request.URL.Path)
+	require.Equal(t, "ark.example.test", request.URL.Host)
+	require.Equal(t, "Bearer volc-secret", request.Header.Get("Authorization"))
+}
+
+func TestFetchChannelUpstreamModelIDsVolcEngineKeepsSpecialBasePlan(t *testing.T) {
+	originalTransport := http.DefaultTransport
+	received := make(chan *http.Request, 1)
+	http.DefaultTransport = controllerRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		received <- request
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"data":[{"id":"doubao-pro-32k"}]}`)),
+			Request:    request,
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	baseURL := "doubao-coding-plan"
+	channel := &model.Channel{
+		Type:    constant.ChannelTypeVolcEngine,
+		Key:     "volc-secret",
+		BaseURL: &baseURL,
+	}
+
+	models, err := fetchChannelUpstreamModelIDs(channel)
+	require.NoError(t, err)
+	require.Equal(t, []string{"doubao-pro-32k"}, models)
+
+	request := <-received
+	require.Equal(t, "/api/coding/v3/v1/models", request.URL.Path)
+	require.Equal(t, http.MethodGet, request.Method)
+	require.Equal(t, "Bearer volc-secret", request.Header.Get("Authorization"))
+}
+
 func TestNormalizeModelNames(t *testing.T) {
 	result := normalizeModelNames([]string{
 		" gpt-4o ",

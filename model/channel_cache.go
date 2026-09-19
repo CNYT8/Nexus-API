@@ -262,6 +262,29 @@ func CacheGetChannelInfo(id int) (*ChannelInfo, error) {
 	return &c.ChannelInfo, nil
 }
 
+// cacheUpdateChannelStatusState publishes only committed status fields. The caller
+// holds the polling lock; cache locks must always be acquired after that lock.
+func cacheUpdateChannelStatusState(stored *Channel) {
+	if !common.MemoryCacheEnabled {
+		return
+	}
+	channelSyncLock.Lock()
+	defer channelSyncLock.Unlock()
+	if current, ok := channelsIDM[stored.Id]; ok {
+		// Replace the pointer rather than mutating snapshots held by other callers.
+		updated := *current
+		updated.Status = stored.Status
+		updated.OtherInfo = stored.OtherInfo
+		if stored.ChannelInfo.IsMultiKey {
+			updated.ChannelInfo = stored.ChannelInfo
+			// The in-memory cursor is newer than the persisted cursor.
+			updated.ChannelInfo.MultiKeyPollingIndex = current.ChannelInfo.MultiKeyPollingIndex
+		}
+		channelsIDM[stored.Id] = &updated
+	}
+	cacheUpdateChannelRoutingLocked(stored.Id, stored.Status)
+}
+
 func CacheUpdateChannelStatus(id int, status int) {
 	if !common.MemoryCacheEnabled {
 		return
@@ -269,9 +292,47 @@ func CacheUpdateChannelStatus(id int, status int) {
 	channelSyncLock.Lock()
 	defer channelSyncLock.Unlock()
 	if channel, ok := channelsIDM[id]; ok {
-		channel.Status = status
+		updated := *channel
+		updated.Status = status
+		channelsIDM[id] = &updated
 	}
-	if status != common.ChannelStatusEnabled {
+	cacheUpdateChannelRoutingLocked(id, status)
+}
+
+// Caller holds channelSyncLock. Re-enabling must restore routing immediately,
+// not wait for the periodic full cache refresh.
+func cacheUpdateChannelRoutingLocked(id int, status int) {
+	if status == common.ChannelStatusEnabled {
+		channel, ok := channelsIDM[id]
+		if !ok {
+			return
+		}
+		if group2model2channels == nil {
+			group2model2channels = make(map[string]map[string][]int)
+		}
+		for _, group := range channel.GetGroups() {
+			if group2model2channels[group] == nil {
+				group2model2channels[group] = make(map[string][]int)
+			}
+			for _, model := range channel.GetModels() {
+				ids := group2model2channels[group][model]
+				found := false
+				for _, channelID := range ids {
+					if channelID == id {
+						found = true
+						break
+					}
+				}
+				if !found {
+					ids = append(ids, id)
+					sort.SliceStable(ids, func(i, j int) bool {
+						return channelsIDM[ids[i]].GetPriority() > channelsIDM[ids[j]].GetPriority()
+					})
+					group2model2channels[group][model] = ids
+				}
+			}
+		}
+	} else {
 		// delete the channel from group2model2channels
 		for group, model2channels := range group2model2channels {
 			for model, channels := range model2channels {

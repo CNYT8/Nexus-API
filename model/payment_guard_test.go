@@ -1,6 +1,8 @@
 package model
 
 import (
+	"fmt"
+	"math"
 	"sync"
 	"testing"
 
@@ -432,7 +434,7 @@ func TestRechargeRollsBackWhenUserCannotBeCredited(t *testing.T) {
 		Amount:        "9.99",
 		DecimalPlaces: 2,
 	})
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrTopUpUserNotFound)
 	assert.Equal(t, common.TopUpStatusPending, getTopUpStatusForPaymentGuardTest(t, "epay-missing-user"))
 }
 
@@ -449,4 +451,194 @@ func TestPaymentQuotaUsesDatabaseIntWidth(t *testing.T) {
 	require.Error(t, err)
 	_, err = directTopUpQuota(maxStoredUserQuota + 1)
 	require.Error(t, err)
+}
+
+func TestTopUpQuotaNumericSafety(t *testing.T) {
+	original := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = original })
+	for _, qpu := range []float64{-1, 0, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		common.QuotaPerUnit = qpu
+		_, err := TopUpQuotaFromAmount(1)
+		require.ErrorIs(t, err, ErrInvalidTopUpQuota)
+		_, err = TopUpQuotaFromMoney(1)
+		require.ErrorIs(t, err, ErrInvalidTopUpQuota)
+		quota, err := DirectTopUpQuota(math.MaxInt32)
+		require.NoError(t, err) // Creem never depends on QPU.
+		require.Equal(t, math.MaxInt32, quota)
+	}
+	for _, qpu := range []float64{0.5, 1e-20, math.SmallestNonzeroFloat64} {
+		common.QuotaPerUnit = qpu
+		quota, err := TopUpQuotaFromAmount(1)
+		require.ErrorIs(t, err, ErrTopUpQuotaOutOfRange)
+		require.Zero(t, quota)
+		quota, err = TopUpQuotaFromMoney(1)
+		require.ErrorIs(t, err, ErrTopUpQuotaOutOfRange)
+		require.Zero(t, quota)
+	}
+	common.QuotaPerUnit = 1
+	for _, amount := range []float64{-1, 0, math.NaN(), math.Inf(1), math.Inf(-1), math.MaxFloat64, 0x1p63, math.MaxInt32 + 0.5} {
+		_, err := TopUpQuotaFromMoney(amount)
+		require.Error(t, err)
+	}
+	for _, amount := range []int64{math.MinInt64, -1, 0, math.MaxInt32 + 1, math.MaxInt64} {
+		_, err := TopUpQuotaFromAmount(amount)
+		require.Error(t, err)
+		_, err = DirectTopUpQuota(amount)
+		require.Error(t, err)
+	}
+	for _, amount := range []float64{1, 1.9, math.MaxInt32} {
+		quota, err := TopUpQuotaFromMoney(amount)
+		require.NoError(t, err)
+		require.Equal(t, int(amount), quota)
+	}
+	common.QuotaPerUnit = math.MaxFloat64
+	_, err := TopUpQuotaFromAmount(math.MaxInt64)
+	require.ErrorIs(t, err, ErrTopUpQuotaOutOfRange)
+	_, err = TopUpQuotaFromMoney(math.MaxFloat64)
+	require.ErrorIs(t, err, ErrTopUpQuotaOutOfRange)
+}
+
+func TestPaymentQuotaAllSettlementEntrypoints(t *testing.T) {
+	original := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = original })
+	confirmation := PaymentConfirmation{Amount: "9.99", DecimalPlaces: 2}
+	for _, provider := range []string{PaymentProviderEpay, PaymentProviderStripe, PaymentProviderCreem, PaymentProviderWaffo, PaymentProviderWaffoPancake} {
+		for _, manual := range []bool{false, true} {
+			for _, qpu := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1), 0.01, math.SmallestNonzeroFloat64, math.MaxFloat64, 1} {
+				t.Run(fmt.Sprintf("%s/manual=%t/qpu=%g", provider, manual, qpu), func(t *testing.T) {
+					truncateTables(t)
+					common.QuotaPerUnit = qpu
+					const userID = 1301
+					credit := 2
+					if provider == PaymentProviderStripe {
+						credit = 9 // Money=9.99, not Amount=2.
+					}
+					initial := math.MaxInt32 - credit
+					insertUserForPaymentGuardTest(t, userID, initial)
+					insertTopUpForPaymentGuardTest(t, "numeric-settlement", userID, provider)
+					recharge := func() error {
+						if manual {
+							return ManualCompleteTopUp("numeric-settlement", "127.0.0.1")
+						}
+						switch provider {
+						case PaymentProviderEpay:
+							return RechargeEpay("numeric-settlement", "alipay", "127.0.0.1", confirmation)
+						case PaymentProviderStripe:
+							return Recharge("numeric-settlement", "cus_test", "127.0.0.1")
+						case PaymentProviderCreem:
+							return RechargeCreem("numeric-settlement", "127.0.0.1", confirmation)
+						case PaymentProviderWaffo:
+							return RechargeWaffo("numeric-settlement", "127.0.0.1", confirmation)
+						default:
+							return RechargeWaffoPancake("numeric-settlement", confirmation)
+						}
+					}
+					if qpu == 1 || provider == PaymentProviderCreem {
+						require.NoError(t, recharge())
+						require.NoError(t, recharge())
+						require.Equal(t, math.MaxInt32, getUserQuotaForPaymentGuardTest(t, userID))
+						require.Equal(t, common.TopUpStatusSuccess, getTopUpStatusForPaymentGuardTest(t, "numeric-settlement"))
+					} else {
+						require.Error(t, recharge())
+						require.Equal(t, initial, getUserQuotaForPaymentGuardTest(t, userID))
+						require.Equal(t, common.TopUpStatusPending, getTopUpStatusForPaymentGuardTest(t, "numeric-settlement"))
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestTopUpQuotaExportedWrappers(t *testing.T) {
+	originalQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 2
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+
+	assert.Equal(t, int(maxStoredUserQuota), MaxStoredUserQuota())
+
+	quota, err := TopUpQuotaFromAmount(3)
+	require.NoError(t, err)
+	assert.Equal(t, 6, quota)
+
+	quota, err = TopUpQuotaFromMoney(3.5)
+	require.NoError(t, err)
+	assert.Equal(t, 7, quota)
+
+	quota, err = DirectTopUpQuota(9)
+	require.NoError(t, err)
+	assert.Equal(t, 9, quota)
+
+	_, err = TopUpQuotaFromAmount(0)
+	require.ErrorIs(t, err, ErrInvalidTopUpQuota)
+	_, err = TopUpQuotaFromMoney(0)
+	require.ErrorIs(t, err, ErrInvalidTopUpQuota)
+	_, err = DirectTopUpQuota(0)
+	require.ErrorIs(t, err, ErrInvalidTopUpQuota)
+	_, err = TopUpQuotaFromAmount(int64(maxStoredUserQuota) + 1)
+	require.ErrorIs(t, err, ErrTopUpQuotaOutOfRange)
+	_, err = DirectTopUpQuota(int64(maxStoredUserQuota) + 1)
+	require.ErrorIs(t, err, ErrInvalidTopUpQuota)
+}
+
+func TestValidateTopUpQuotaCapacityBoundaries(t *testing.T) {
+	truncateTables(t)
+
+	const creditedQuota = 1_000_000
+	userID := 1201
+	insertUserForPaymentGuardTest(t, userID, int(maxStoredUserQuota)-creditedQuota)
+
+	// The final balance may reach exactly MaxInt32, matching addUserQuotaTx.
+	require.NoError(t, ValidateTopUpQuotaCapacity(userID, creditedQuota))
+
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", userID).
+		Update("quota", int(maxStoredUserQuota)-creditedQuota+1).Error)
+	require.ErrorIs(t, ValidateTopUpQuotaCapacity(userID, creditedQuota), ErrTopUpQuotaLimitExceeded)
+}
+
+func TestValidateTopUpQuotaCapacityRejectsInvalidQuota(t *testing.T) {
+	truncateTables(t)
+
+	userID := 1202
+	insertUserForPaymentGuardTest(t, userID, 0)
+
+	for _, creditedQuota := range []int{-1, 0, int(maxStoredUserQuota) + 1} {
+		require.ErrorIs(t, ValidateTopUpQuotaCapacity(userID, creditedQuota), ErrInvalidTopUpQuota)
+	}
+}
+
+func TestValidateTopUpQuotaCapacityUserNotFound(t *testing.T) {
+	truncateTables(t)
+
+	require.ErrorIs(t, ValidateTopUpQuotaCapacity(1203, 100), ErrTopUpUserNotFound)
+}
+
+func TestRechargeEpayEnforcesFinalWalletQuotaLimit(t *testing.T) {
+	truncateTables(t)
+	originalQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+
+	// The helper stores Amount=2, so every callback credits exactly 2 quota.
+	confirmation := PaymentConfirmation{Amount: "9.99", DecimalPlaces: 2}
+
+	t.Run("allows exact highest wallet balance", func(t *testing.T) {
+		truncateTables(t)
+		insertUserForPaymentGuardTest(t, 1204, int(maxStoredUserQuota)-2)
+		insertTopUpForPaymentGuardTest(t, "epay-wallet-exact", 1204, PaymentProviderEpay)
+
+		require.NoError(t, RechargeEpay("epay-wallet-exact", "alipay", "127.0.0.1", confirmation))
+		assert.Equal(t, int(maxStoredUserQuota), getUserQuotaForPaymentGuardTest(t, 1204))
+		assert.Equal(t, common.TopUpStatusSuccess, getTopUpStatusForPaymentGuardTest(t, "epay-wallet-exact"))
+	})
+
+	t.Run("rejects wallet overflow and keeps order pending", func(t *testing.T) {
+		truncateTables(t)
+		insertUserForPaymentGuardTest(t, 1205, int(maxStoredUserQuota)-1)
+		insertTopUpForPaymentGuardTest(t, "epay-wallet-over-limit", 1205, PaymentProviderEpay)
+
+		err := RechargeEpay("epay-wallet-over-limit", "alipay", "127.0.0.1", confirmation)
+		require.ErrorIs(t, err, ErrTopUpQuotaLimitExceeded)
+		assert.Equal(t, common.TopUpStatusPending, getTopUpStatusForPaymentGuardTest(t, "epay-wallet-over-limit"))
+		assert.Equal(t, int(maxStoredUserQuota)-1, getUserQuotaForPaymentGuardTest(t, 1205))
+	})
 }

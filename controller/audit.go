@@ -26,6 +26,7 @@ var auditContentTemplates = map[string]string{
 	"user.group_ratio.update": "Set user group ${group} final ratio to ${ratio}x",
 	"user.group_ratio.delete": "Cleared user group ${group} final ratio override",
 	"user.binding_clear":      "Cleared ${bindingType} binding for user ${username}",
+	"user.binding_bind":       "Processed legacy ${provider} binding ${legacy_id} -> ${provider_user_id} (success: ${success}, reason: ${reason})",
 	"user.2fa_disable":        "Force-disabled two-factor authentication for the user",
 	"user.passkey_register":   "Registered a passkey",
 	"user.passkey_delete":     "Deleted a passkey",

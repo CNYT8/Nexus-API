@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
@@ -92,6 +94,12 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
+	var itemTextBuilder strings.Builder
+	terminalOutputTokens := 0
+	toolCounts := map[string]int{}
+	terminalToolCounts := map[string]int{}
+	started := false
+	explicitFailure := false
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -102,23 +110,44 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
+		started = true
 		sendResponsesStreamData(c, streamResponse, data)
+
+		// Preserve the distinction between explicit rejection and an empty or
+		// interrupted success. Record a soft error even if the scanner already
+		// saw [DONE], so empty-response compensation cannot treat failure as success.
+		failed := streamResponse.Type == "error" || streamResponse.Type == "response.failed" || streamResponse.Type == "response.error"
+		if streamResponse.Response != nil {
+			failed = failed || responsesStatusIsFailed(streamResponse.Response.Status) || streamResponse.Response.GetOpenAIError() != nil
+		}
+		if failed && !explicitFailure {
+			explicitFailure = true
+			sr.Error(fmt.Errorf("upstream Responses request failed"))
+		}
+
 		switch streamResponse.Type {
-		case "response.completed":
+		case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
 			if streamResponse.Response != nil {
-				if streamResponse.Response.Usage != nil {
-					if streamResponse.Response.Usage.InputTokens != 0 {
-						usage.PromptTokens = streamResponse.Response.Usage.InputTokens
+				applyResponsesStreamUsage(usage, streamResponse.Response.Usage)
+				// A full terminal snapshot may contain more than the deltas we saw.
+				// Compare estimates rather than concatenating duplicate output.
+				outputs := gjson.Get(data, "response.output").Array()
+				text := responsesOutputTokenText(outputs)
+				counts := map[string]int{}
+				for _, output := range outputs {
+					kind := output.Get("type").String()
+					if strings.HasSuffix(kind, "_call") {
+						c.Set("responses_tool_call", true)
 					}
-					if streamResponse.Response.Usage.OutputTokens != 0 {
-						usage.CompletionTokens = streamResponse.Response.Usage.OutputTokens
+					counts[responsesBuiltInTool(kind)]++
+				}
+				for kind, count := range counts {
+					if count > terminalToolCounts[kind] {
+						terminalToolCounts[kind] = count
 					}
-					if streamResponse.Response.Usage.TotalTokens != 0 {
-						usage.TotalTokens = streamResponse.Response.Usage.TotalTokens
-					}
-					if streamResponse.Response.Usage.InputTokensDetails != nil {
-						usage.PromptTokensDetails.CachedTokens = streamResponse.Response.Usage.InputTokensDetails.CachedTokens
-					}
+				}
+				if tokens := service.CountTextToken(text, info.UpstreamModelName); tokens > terminalOutputTokens {
+					terminalOutputTokens = tokens
 				}
 				if streamResponse.Response.HasImageGenerationCall() {
 					c.Set("image_generation_call", true)
@@ -126,39 +155,150 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					c.Set("image_generation_call_size", streamResponse.Response.GetSize())
 				}
 			}
-		case "response.output_text.delta":
-			// 处理输出文本
+		case "response.output_text.delta", "response.function_call_arguments.delta",
+			"response.reasoning_summary_text.delta", "response.reasoning_text.delta", "response.refusal.delta":
+			if streamResponse.Type == "response.function_call_arguments.delta" {
+				c.Set("responses_tool_call", true)
+			}
+			// Every delta kind here is generated output that upstream bills as
+			// output tokens, so all of them feed the missing-usage estimate.
 			responseTextBuilder.WriteString(streamResponse.Delta)
 		case dto.ResponsesOutputTypeItemDone:
+			itemTextBuilder.WriteString(responsesOutputTokenText([]gjson.Result{gjson.Get(data, "item")}))
 			// 函数调用处理
 			if streamResponse.Item != nil {
-				switch streamResponse.Item.Type {
-				case dto.BuildInCallWebSearchCall:
-					if info != nil && info.ResponsesUsageInfo != nil && info.ResponsesUsageInfo.BuiltInTools != nil {
-						if webSearchTool, exists := info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview]; exists && webSearchTool != nil {
-							webSearchTool.CallCount++
-						}
-					}
+				kind := streamResponse.Item.Type
+				if strings.HasSuffix(kind, "_call") {
+					c.Set("responses_tool_call", true)
 				}
+				toolCounts[responsesBuiltInTool(kind)]++
 			}
 		}
 	})
 
-	if usage.CompletionTokens == 0 {
-		// 计算输出文本的 token 数量
-		tempStr := responseTextBuilder.String()
-		if len(tempStr) > 0 {
-			// 非正常结束，使用输出文本的 token 数量
-			completionTokens := service.CountTextToken(tempStr, info.UpstreamModelName)
-			usage.CompletionTokens = completionTokens
+	for kind, count := range terminalToolCounts {
+		if count > toolCounts[kind] {
+			toolCounts[kind] = count
+		}
+	}
+	if info.ResponsesUsageInfo != nil {
+		for kind, count := range toolCounts {
+			if kind != "" {
+				if tool := info.ResponsesUsageInfo.BuiltInTools[kind]; tool != nil {
+					tool.CallCount += count
+				}
+			}
 		}
 	}
 
-	if usage.PromptTokens == 0 && usage.CompletionTokens != 0 {
+	reportedUsage := usage.PromptTokens > 0 || usage.CompletionTokens > 0 || usage.TotalTokens > 0
+	if usage.TotalTokens > 0 {
+		// Some providers send only total_tokens. Do not discard that known usage
+		// when rebuilding the total below; recover the absent component first.
+		if usage.PromptTokens > 0 && usage.CompletionTokens == 0 && usage.TotalTokens > usage.PromptTokens {
+			usage.CompletionTokens = usage.TotalTokens - usage.PromptTokens
+		} else if usage.PromptTokens == 0 && usage.TotalTokens > usage.CompletionTokens {
+			usage.PromptTokens = usage.TotalTokens - usage.CompletionTokens
+		}
+	}
+	if usage.CompletionTokens == 0 {
+		for _, text := range []string{responseTextBuilder.String(), itemTextBuilder.String()} {
+			if tokens := service.CountTextToken(text, info.UpstreamModelName); tokens > terminalOutputTokens {
+				terminalOutputTokens = tokens
+			}
+		}
+		usage.CompletionTokens = terminalOutputTokens
+		if terminalOutputTokens > 0 {
+			usage.UsageSource = "responses_estimated"
+		}
+	}
+
+	// No generated or reported usage: this is a rejection, not a billable
+	// empty success. Partial output/usage is settled normally and never refunded.
+	if explicitFailure && !reportedUsage && usage.CompletionTokens == 0 && !c.GetBool("responses_tool_call") {
+		return nil, types.NewErrorWithStatusCode(fmt.Errorf("upstream Responses request failed"), types.ErrorCodeBadResponse, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+	}
+
+	// Upstream bills the prompt as soon as it starts generating, so a stream
+	// that produced any event but no usage still owes its input tokens unless
+	// upstream reported an explicit failure.
+	billsPrompt := usage.CompletionTokens != 0 || (started && !explicitFailure)
+	if info != nil && usage.PromptTokens == 0 && billsPrompt {
 		usage.PromptTokens = info.GetEstimatePromptTokens()
+		usage.UsageSource = "responses_estimated"
 	}
 
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 
 	return usage, nil
+}
+
+func responsesBuiltInTool(kind string) string {
+	switch kind {
+	case dto.BuildInCallWebSearchCall:
+		return dto.BuildInToolWebSearchPreview
+	case "file_search_call":
+		return dto.BuildInToolFileSearch
+	}
+	return ""
+}
+
+// responsesOutputTokenText reads only billable textual output, not IDs, tool
+// names, image/base64 payloads or encrypted reasoning. The legacy response DTO
+// omits summary/refusal fields, so extract these from the original SSE JSON.
+func responsesOutputTokenText(outputs []gjson.Result) string {
+	var text strings.Builder
+	for _, output := range outputs {
+		if output.Get("type").String() == "function_call" {
+			text.WriteString(output.Get("arguments").String())
+		}
+		for _, field := range []string{"content", "summary"} {
+			for _, part := range output.Get(field).Array() {
+				switch part.Get("type").String() {
+				case "output_text", "text", "reasoning_text", "summary_text":
+					text.WriteString(part.Get("text").String())
+				case "refusal":
+					text.WriteString(part.Get("refusal").String())
+				}
+			}
+		}
+	}
+	return text.String()
+}
+
+// applyResponsesStreamUsage merges upstream usage into the accumulated usage.
+// Zero values are treated as "not reported" and never overwrite a known value.
+func applyResponsesStreamUsage(dst *dto.Usage, src *dto.Usage) {
+	if dst == nil || src == nil {
+		return
+	}
+	if src.InputTokens > 0 {
+		dst.PromptTokens = src.InputTokens
+	} else if src.PromptTokens > 0 {
+		dst.PromptTokens = src.PromptTokens
+	}
+	if src.OutputTokens > 0 {
+		dst.CompletionTokens = src.OutputTokens
+	} else if src.CompletionTokens > 0 {
+		dst.CompletionTokens = src.CompletionTokens
+	}
+	if src.TotalTokens > 0 {
+		dst.TotalTokens = src.TotalTokens
+	}
+	if src.InputTokensDetails != nil && src.InputTokensDetails.CachedTokens > 0 {
+		dst.PromptTokensDetails.CachedTokens = src.InputTokensDetails.CachedTokens
+	}
+}
+
+// responsesStatusIsFailed reports whether a Responses API status payload is
+// the explicit "failed" terminal state.
+func responsesStatusIsFailed(status json.RawMessage) bool {
+	if len(status) == 0 {
+		return false
+	}
+	var value string
+	if err := common.Unmarshal(status, &value); err != nil {
+		return false
+	}
+	return value == "failed"
 }

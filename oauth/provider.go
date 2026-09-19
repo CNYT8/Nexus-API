@@ -34,3 +34,11 @@ type Provider interface {
 	// GetProviderPrefix returns the prefix for auto-generated usernames (e.g., "github_")
 	GetProviderPrefix() string
 }
+
+// VerifiedEmailProvider is implemented by providers that can list the email
+// addresses they have confirmed for the signed-in account. The login flow uses
+// it to match a provider account against an existing account's email before
+// migrating a legacy binding.
+type VerifiedEmailProvider interface {
+	GetVerifiedEmails(ctx context.Context, token *OAuthToken) ([]string, error)
+}

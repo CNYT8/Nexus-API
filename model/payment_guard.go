@@ -16,6 +16,14 @@ var (
 	ErrPaymentAmountMismatch      = errors.New("payment amount mismatch")
 	ErrPaymentCurrencyMismatch    = errors.New("payment currency mismatch")
 	ErrPaymentOrderMismatch       = errors.New("payment order mismatch")
+
+	// Top-up quota sentinels are shared by the controller pre-payment checks
+	// and the atomic settlement guard so callers can distinguish invalid
+	// input, a missing user and a wallet ceiling rejection with errors.Is.
+	ErrInvalidTopUpQuota       = errors.New("无效的充值额度")
+	ErrTopUpQuotaOutOfRange    = errors.New("充值额度超出允许范围")
+	ErrTopUpUserNotFound       = errors.New("充值用户不存在")
+	ErrTopUpQuotaLimitExceeded = errors.New("本次充值后额度将超出允许范围")
 )
 
 // PaymentConfirmation contains provider-signed values that must match the
@@ -76,41 +84,101 @@ func (confirmation PaymentConfirmation) Validate(expectedAmount float64) error {
 // Keep validation aligned with that schema even on 64-bit Go and SQLite tests.
 const maxStoredUserQuota = int64(math.MaxInt32)
 
-func topUpQuotaFromAmount(amount int64) (int, error) {
-	if amount <= 0 || common.QuotaPerUnit <= 0 || math.IsNaN(common.QuotaPerUnit) || math.IsInf(common.QuotaPerUnit, 0) {
-		return 0, errors.New("无效的充值额度")
-	}
+// MaxStoredUserQuota returns the maximum value the users.quota column can
+// hold (SQL INT / MaxInt32). Controller pre-payment checks must use this exact
+// ceiling: Nexus accepts a final balance of MaxInt32, one higher than the
+// upstream MaxQuota-1 boundary. The atomic settlement guard uses the same
+// constant, so pre-checks and credits never disagree on what can be stored.
+func MaxStoredUserQuota() int {
+	return int(maxStoredUserQuota)
+}
 
-	quota := decimal.NewFromInt(amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
-	if quota.LessThanOrEqual(decimal.Zero) || quota.GreaterThan(decimal.NewFromInt(maxStoredUserQuota)) {
-		return 0, errors.New("充值额度超出允许范围")
+// TopUpQuotaFromAmount, TopUpQuotaFromMoney and DirectTopUpQuota expose the
+// exact conversions used by the settlement path in model/topup.go. Controllers
+// must reuse them instead of re-implementing the math, so quotes, stored order
+// amounts and callback credits always resolve to the same quota.
+func TopUpQuotaFromAmount(amount int64) (int, error) {
+	return topUpQuotaFromAmount(amount)
+}
+
+func TopUpQuotaFromMoney(amount float64) (int, error) {
+	return topUpQuotaFromMoney(amount)
+}
+
+func DirectTopUpQuota(amount int64) (int, error) {
+	return directTopUpQuota(amount)
+}
+
+// TopUpQuotaPerUnit validates the configuration before any decimal conversion
+// or division. Quotes, order normalization and settlement share this guard.
+func TopUpQuotaPerUnit() (decimal.Decimal, error) {
+	qpu := common.QuotaPerUnit
+	if qpu <= 0 || math.IsNaN(qpu) || math.IsInf(qpu, 0) {
+		return decimal.Zero, ErrInvalidTopUpQuota
 	}
-	return int(quota.IntPart()), nil
+	return decimal.NewFromFloat(qpu), nil
+}
+
+func topUpQuotaFromAmount(amount int64) (int, error) {
+	qpu, err := TopUpQuotaPerUnit()
+	if amount <= 0 || err != nil {
+		return 0, ErrInvalidTopUpQuota
+	}
+	return checkedTopUpQuota(decimal.NewFromInt(amount).Mul(qpu))
 }
 
 func topUpQuotaFromMoney(amount float64) (int, error) {
-	if amount <= 0 || math.IsNaN(amount) || math.IsInf(amount, 0) ||
-		common.QuotaPerUnit <= 0 || math.IsNaN(common.QuotaPerUnit) || math.IsInf(common.QuotaPerUnit, 0) {
-		return 0, errors.New("无效的充值额度")
+	qpu, err := TopUpQuotaPerUnit()
+	if amount <= 0 || math.IsNaN(amount) || math.IsInf(amount, 0) || err != nil {
+		return 0, ErrInvalidTopUpQuota
 	}
+	return checkedTopUpQuota(decimal.NewFromFloat(amount).Mul(qpu))
+}
 
-	quota := decimal.NewFromFloat(amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
-	if quota.LessThanOrEqual(decimal.Zero) || quota.GreaterThan(decimal.NewFromInt(maxStoredUserQuota)) {
-		return 0, errors.New("充值额度超出允许范围")
+func checkedTopUpQuota(quota decimal.Decimal) (int, error) {
+	// A positive fraction that truncates to zero cannot be credited. Check
+	// before IntPart, together with the inclusive SQL INT upper bound.
+	if quota.LessThan(decimal.NewFromInt(1)) || quota.GreaterThan(decimal.NewFromInt(maxStoredUserQuota)) {
+		return 0, ErrTopUpQuotaOutOfRange
 	}
 	return int(quota.IntPart()), nil
 }
 
 func directTopUpQuota(amount int64) (int, error) {
 	if amount <= 0 || amount > maxStoredUserQuota {
-		return 0, errors.New("无效的充值额度")
+		return 0, ErrInvalidTopUpQuota
 	}
 	return int(amount), nil
 }
 
+// ValidateTopUpQuotaCapacity is the advisory pre-payment check used by the
+// controllers. It reads the current wallet balance from the database (never
+// from Redis) and rejects orders whose credit could not be stored: the final
+// balance must stay within the users.quota column range. The settlement path
+// repeats the same invariant atomically, because the balance can change after
+// the payment link or local order is created.
+func ValidateTopUpQuotaCapacity(userID int, creditedQuota int) error {
+	if creditedQuota <= 0 || int64(creditedQuota) > maxStoredUserQuota {
+		return ErrInvalidTopUpQuota
+	}
+	maxExistingQuota := maxStoredUserQuota - int64(creditedQuota)
+
+	var user User
+	if err := DB.Select("COALESCE(quota, 0) AS quota").Where("id = ?", userID).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrTopUpUserNotFound
+		}
+		return err
+	}
+	if int64(user.Quota) > maxExistingQuota {
+		return ErrTopUpQuotaLimitExceeded
+	}
+	return nil
+}
+
 func addUserQuotaTx(tx *gorm.DB, userID int, quota int) error {
 	if tx == nil || userID <= 0 || quota <= 0 {
-		return errors.New("无效的充值参数")
+		return ErrInvalidTopUpQuota
 	}
 	maxExistingQuota := maxStoredUserQuota - int64(quota)
 	result := tx.Model(&User{}).
@@ -120,7 +188,17 @@ func addUserQuotaTx(tx *gorm.DB, userID int, quota int) error {
 		return result.Error
 	}
 	if result.RowsAffected != 1 {
-		return errors.New("充值用户不存在或额度超出允许范围")
+		// The conditional update can miss either because the user row does
+		// not exist or because adding the quota would overflow the wallet.
+		// Count inside the same transaction to keep the two cases distinct.
+		var count int64
+		if err := tx.Model(&User{}).Where("id = ?", userID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return ErrTopUpUserNotFound
+		}
+		return ErrTopUpQuotaLimitExceeded
 	}
 	return nil
 }

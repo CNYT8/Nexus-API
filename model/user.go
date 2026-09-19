@@ -817,12 +817,42 @@ func (user *User) FillUserByGitHubId() error {
 	return nil
 }
 
-// UpdateGitHubId updates the user's GitHub ID (used for migration from login to numeric ID)
-func (user *User) UpdateGitHubId(newGitHubId string) error {
-	if user.Id == 0 {
-		return errors.New("user id is empty")
+// ErrGitHubBindingAlreadyClaimed reports that the numeric GitHub binding a
+// legacy binding would migrate to is already owned by another account.
+var ErrGitHubBindingAlreadyClaimed = errors.New("github binding is already claimed by another user")
+
+// MigrateLegacyGitHubBindingWithTx rewrites a login-name GitHub binding to the
+// numeric account ID once the login flow has confirmed ownership. It locks the
+// user row, verifies that the binding still equals legacyID, ensures the target
+// ID is not claimed by another account and then performs a compare-and-swap
+// update. It reports whether the row was rewritten; a row whose binding changed
+// since it was read is left untouched.
+func MigrateLegacyGitHubBindingWithTx(tx *gorm.DB, userID int, legacyID, gitHubID string) (bool, error) {
+	if tx == nil || userID <= 0 || legacyID == "" || gitHubID == "" {
+		return false, errors.New("invalid legacy GitHub binding migration request")
 	}
-	return DB.Model(user).Update("github_id", newGitHubId).Error
+
+	var user User
+	if err := lockForUpdate(tx).Select("id", "github_id").First(&user, userID).Error; err != nil {
+		return false, err
+	}
+	if user.GitHubId != legacyID {
+		return false, nil
+	}
+
+	var claimed int64
+	if err := tx.Unscoped().Model(&User{}).Where("github_id = ? AND id <> ?", gitHubID, userID).Count(&claimed).Error; err != nil {
+		return false, err
+	}
+	if claimed != 0 {
+		return false, ErrGitHubBindingAlreadyClaimed
+	}
+
+	result := tx.Model(&User{}).Where("id = ? AND github_id = ?", userID, legacyID).Update("github_id", gitHubID)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
 }
 
 func (user *User) FillUserByDiscordId() error {
