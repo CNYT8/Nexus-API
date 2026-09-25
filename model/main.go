@@ -213,7 +213,10 @@ func InitDB() (err error) {
 		}
 		common.SysLog("database migration started")
 		err = migrateDB()
-		return err
+		if err != nil {
+			return err
+		}
+		return InitializeStoredUserQuotaLimit()
 	} else {
 		common.FatalLog(err)
 	}
