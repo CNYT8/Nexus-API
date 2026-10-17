@@ -167,7 +167,7 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 			return err
 		}
 
-		if err := addUserQuotaTx(tx, topUp.UserId, quota); err != nil {
+		if _, err := CreditTopUpTx(tx, topUp.UserId, topUp.TradeNo, quota); err != nil {
 			return err
 		}
 		if customerId != "" {
@@ -413,7 +413,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		}
 
 		// 增加用户额度（立即写库，保持一致性）
-		if err := addUserQuotaTx(tx, topUp.UserId, quotaToAdd); err != nil {
+		if _, err := CreditTopUpTx(tx, topUp.UserId, topUp.TradeNo, quotaToAdd); err != nil {
 			return err
 		}
 
@@ -485,7 +485,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string, c
 		if err := tx.Save(topUp).Error; err != nil {
 			return err
 		}
-		if err := addUserQuotaTx(tx, topUp.UserId, quotaToAdd); err != nil {
+		if _, err := CreditTopUpTx(tx, topUp.UserId, topUp.TradeNo, quotaToAdd); err != nil {
 			return err
 		}
 		credited = true
@@ -553,7 +553,7 @@ func RechargeCreem(referenceId string, callerIp string, confirmation PaymentConf
 		}
 
 		// 支付人邮箱不属于账号身份凭据，回调只能更改额度。
-		if err := addUserQuotaTx(tx, topUp.UserId, quota); err != nil {
+		if _, err := CreditTopUpTx(tx, topUp.UserId, topUp.TradeNo, quota); err != nil {
 			return err
 		}
 
@@ -623,7 +623,7 @@ func RechargeWaffo(tradeNo string, callerIp string, confirmation PaymentConfirma
 			return err
 		}
 
-		if err := addUserQuotaTx(tx, topUp.UserId, quotaToAdd); err != nil {
+		if _, err := CreditTopUpTx(tx, topUp.UserId, topUp.TradeNo, quotaToAdd); err != nil {
 			return err
 		}
 
@@ -692,7 +692,7 @@ func RechargeWaffoPancake(tradeNo string, confirmation PaymentConfirmation) (err
 			return err
 		}
 
-		if err := addUserQuotaTx(tx, topUp.UserId, quotaToAdd); err != nil {
+		if _, err := CreditTopUpTx(tx, topUp.UserId, topUp.TradeNo, quotaToAdd); err != nil {
 			return err
 		}
 

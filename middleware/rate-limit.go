@@ -213,3 +213,18 @@ func SearchRateLimit() func(c *gin.Context) {
 	}
 	return userRateLimitFactory(common.SearchRateLimitNum, common.SearchRateLimitDuration, "SR")
 }
+
+// rebateReadRateLimitNum/Duration bound rebate read traffic per authenticated
+// user. They are deliberately independent from the optional global limiter so
+// the rebate endpoints stay protected even when global limits are disabled.
+const (
+	rebateReadRateLimitNum      = 60
+	rebateReadRateLimitDuration = 60
+)
+
+// RebateReadRateLimit limits rebate summary/record reads per authenticated
+// user. Must run after UserAuth; keying by user ID defeats IP rotation and
+// keeps the two read-only endpoints from being used to hammer the database.
+func RebateReadRateLimit() func(c *gin.Context) {
+	return userRateLimitFactory(rebateReadRateLimitNum, rebateReadRateLimitDuration, "RB")
+}

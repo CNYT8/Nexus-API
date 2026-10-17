@@ -72,6 +72,14 @@ func main() {
 		}
 	}()
 
+	// Offline wallet-credit maintenance. Activating source-attributed wallet
+	// accounting is only safe while old writers are stopped and drained, so the
+	// cutover is an explicit operator action instead of a background side effect.
+	if action := strings.ToLower(strings.TrimSpace(os.Getenv("NEXUS_WALLET_MAINTENANCE"))); action != "" {
+		runWalletMaintenance(action)
+		return
+	}
+
 	if common.RedisEnabled {
 		// for compatibility with old versions
 		common.MemoryCacheEnabled = true
@@ -119,6 +127,13 @@ func main() {
 
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()
+
+	// Scheduled invitation rebate payout task
+	service.StartRebatePayoutTask()
+
+	// Replay wallet settlements interrupted between their non-refundable barrier
+	// and the final accounting transaction
+	service.StartRebateRecoveryTask()
 
 	// Wire task polling adaptor factory (breaks service -> relay import cycle)
 	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {

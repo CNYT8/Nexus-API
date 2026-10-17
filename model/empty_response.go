@@ -384,21 +384,26 @@ func ClaimEmptyResponseCompensation(userId int, now int64) (int, int, error) {
 			return err
 		}
 
-		pendingQuery := tx.Model(&EmptyResponseRecord{}).
-			Where("user_id = ? AND status = ? AND log_created_at >= ?", userId, "pending", cycleStart)
-		if err := pendingQuery.Select("COALESCE(SUM(refund_quota), 0)").Scan(&refundTotal).Error; err != nil {
+		var pending []EmptyResponseRecord
+		if err := tx.Select("id", "request_id", "refund_quota").
+			Where("user_id = ? AND status = ? AND log_created_at >= ?", userId, "pending", cycleStart).
+			Order("id").
+			Find(&pending).Error; err != nil {
 			return err
 		}
-		var pendingCount int64
-		if err := pendingQuery.Count(&pendingCount).Error; err != nil {
-			return err
-		}
-		refundedCount = int(pendingCount)
-
-		if refundTotal > 0 {
-			if err := addUserQuotaTx(tx, userId, refundTotal); err != nil {
+		refundedCount = len(pending)
+		for i := range pending {
+			record := &pending[i]
+			if record.RefundQuota <= 0 {
+				continue
+			}
+			refundTotal += record.RefundQuota
+			if _, err := CreditWalletSourceTx(tx, userId, WalletCreditSourcePromotion, "empty_response_refund", "empty_response", record.RequestId, record.RefundQuota); err != nil {
 				return err
 			}
+		}
+
+		if refundTotal > 0 {
 			if err := tx.Model(&EmptyResponseRecord{}).
 				Where("user_id = ? AND status = ? AND log_created_at >= ?", userId, "pending", cycleStart).
 				Updates(map[string]interface{}{"status": "refunded", "refunded_at": now}).Error; err != nil {
@@ -412,6 +417,7 @@ func ClaimEmptyResponseCompensation(userId int, now int64) (int, int, error) {
 	}
 
 	if refundTotal > 0 {
+		invalidateWalletCreditCache(userId)
 		RecordLog(userId, LogTypeRefund, fmt.Sprintf("空回赔付成功，记录 %d 条，返还额度 %s", refundedCount, logger.LogQuota(refundTotal)))
 	}
 	return refundedCount, refundTotal, nil

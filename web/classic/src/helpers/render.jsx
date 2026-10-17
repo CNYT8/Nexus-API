@@ -2437,7 +2437,8 @@ export function parseTiersFromExpr(exprStr) {
   if (!exprStr) return [];
   try {
     const { body } = stripExprVersion(exprStr);
-    const condGroup = `((?:(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)(?:\\s*&&\\s*(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`;
+    const conditionVar = '(?:len\\s*\\+\\s*c|p|c|len)';
+    const condGroup = `(?:^|:)\\s*((?:${conditionVar}\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)(?:\\s*&&\\s*${conditionVar}\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`;
     const tierRe = new RegExp(`(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*((?:[^()]+|call\\s*\\(\\s*[\\d.eE+-]+\\s*\\))+)\\)`, 'g');
     const tiers = [];
     let m;
@@ -2446,8 +2447,8 @@ export function parseTiersFromExpr(exprStr) {
       const conditions = [];
       if (condStr) {
         for (const cp of condStr.split(/\s*&&\s*/)) {
-          const cm = cp.trim().match(/^(p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/);
-          if (cm) conditions.push({ var: cm[1], op: cm[2], value: Number(cm[3]) });
+          const cm = cp.trim().match(/^(len\s*\+\s*c|p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/);
+          if (cm) conditions.push({ var: cm[1].replace(/\s+/g, ''), op: cm[2], value: Number(cm[3]) });
         }
       }
       const tier = parseTierBody(m[3]);

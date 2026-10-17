@@ -104,7 +104,10 @@ function formatConditionSummary(
 ): string {
   return conditions
     .map((c) => {
-      const varLabel = t(VAR_LABELS[c.var] || c.var)
+      const varLabel =
+        c.var === 'len+c'
+          ? `${t('Input')} + ${t('Output')}`
+          : t(VAR_LABELS[c.var] || c.var)
       const hint = formatTokenHint(c.value)
       return `${varLabel} ${OP_LABELS[c.op] || c.op} ${hint || c.value}`
     })

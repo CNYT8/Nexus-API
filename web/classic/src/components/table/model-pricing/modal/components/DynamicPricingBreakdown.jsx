@@ -36,7 +36,7 @@ import {
 
 const { Text } = Typography;
 
-const VAR_LABELS = { p: '输入', c: '输出' };
+const VAR_LABELS = { p: '输入', c: '输出', len: '输入长度' };
 const OP_LABELS = { '<': '<', '<=': '≤', '>': '>', '>=': '≥' };
 const TIME_FUNC_LABELS = { hour: '小时', minute: '分钟', weekday: '星期', month: '月份', day: '日期' };
 
@@ -52,7 +52,9 @@ function formatConditionSummary(conditions, t) {
   return conditions
     .map((c) => {
       if (c.var && c.op) {
-        const varLabel = t(VAR_LABELS[c.var] || c.var);
+        const varLabel = c.var === 'len+c'
+          ? `${t('输入')} + ${t('输出')}`
+          : t(VAR_LABELS[c.var] || c.var);
         const hint = formatTokenHint(c.value);
         return `${varLabel} ${OP_LABELS[c.op] || c.op} ${hint || c.value}`;
       }

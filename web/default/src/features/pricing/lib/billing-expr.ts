@@ -229,7 +229,7 @@ export type RequestRuleGroup = {
 }
 
 export type TierCondition = {
-  var: 'p' | 'c' | 'len'
+  var: 'p' | 'c' | 'len' | 'len+c'
   op: '<' | '<=' | '>' | '>='
   value: number
 }
@@ -271,9 +271,10 @@ export function parseTiersFromExpr(exprStr: string): ParsedTier[] {
   if (!exprStr) return []
   try {
     const { body } = stripExprVersion(exprStr)
+    const conditionVar = '(?:len\\s*\\+\\s*c|p|c|len)'
     const condGroup =
-      `((?:(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)` +
-      `(?:\\s*&&\\s*(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`
+      `(?:^|:)\\s*((?:${conditionVar}\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)` +
+      `(?:\\s*&&\\s*${conditionVar}\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`
     const tierRe = new RegExp(
       // The tier body may contain one level of nested parens: call(x)
       `(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*((?:[^()]+|call\\s*\\(\\s*[\\d.eE+-]+\\s*\\))+)\\)`,
@@ -286,10 +287,10 @@ export function parseTiersFromExpr(exprStr: string): ParsedTier[] {
       const conditions: TierCondition[] = []
       if (condStr) {
         for (const cp of condStr.split(/\s*&&\s*/)) {
-          const cm = cp.trim().match(/^(p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/)
+          const cm = cp.trim().match(/^(len\s*\+\s*c|p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/)
           if (cm) {
             conditions.push({
-              var: cm[1] as TierCondition['var'],
+              var: cm[1].replace(/\s+/g, '') as TierCondition['var'],
               op: cm[2] as TierCondition['op'],
               value: Number(cm[3]),
             })

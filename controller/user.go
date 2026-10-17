@@ -1025,6 +1025,18 @@ func ManageUser(c *gin.Context) {
 			recordManageAuditFor(c, user.Id, "user.quota_add", map[string]interface{}{
 				"quota": logger.LogQuota(req.Value),
 			})
+		case "gift":
+			if req.Value <= 0 {
+				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
+				return
+			}
+			if err := model.IncreaseUserQuotaAsGift(user.Id, req.Value, c.GetInt("id")); err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			recordManageAuditFor(c, user.Id, "user.quota_gift", map[string]interface{}{
+				"quota": logger.LogQuota(req.Value),
+			})
 		case "subtract":
 			if req.Value <= 0 {
 				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
@@ -1039,7 +1051,7 @@ func ManageUser(c *gin.Context) {
 			})
 		case "override":
 			oldQuota := user.Quota
-			if err := model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("quota", req.Value).Error; err != nil {
+			if err := model.SetUserQuotaAbsolute(user.Id, req.Value); err != nil {
 				common.ApiError(c, err)
 				return
 			}

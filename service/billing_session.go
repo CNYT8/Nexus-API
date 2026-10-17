@@ -30,10 +30,26 @@ type BillingSession struct {
 	tokenConsumed    int   // 令牌额度实际扣减量
 	extraReserved    int   // 发送前补充预扣的额度（订阅退款时需要单独回滚）
 	fundingSettled   bool  // funding.Settle 已成功，资金来源已提交
-	settled          bool  // Settle 已进入终态；成功或失败都不再允许退款/重复扣费
-	settlementErr    error // 首次结算错误，供幂等重入返回相同结果
+	settled          bool  // 成功用量的不可退款屏障；持久幂等资金来源可重试失败的结算
+	actualQuota      int   // 首次结算的不可变用量；重试不能改价
+	settlementErr    error // 最近结算错误；非幂等资金来源保持首次结果
 	refunded         bool  // Refund 已调用
 	mu               sync.Mutex
+}
+
+// usageSettler is implemented by funding sources that must observe the exact
+// reserved and final usage instead of only their difference. Wallet ledger
+// settlement needs both values to consume source lots even when the delta is
+// zero.
+type usageSettler interface {
+	SettleUsage(preConsumed, actual int) error
+}
+
+// retryableFunding explicitly opts in only after a durable idempotency identity
+// exists. A difference-only wallet or subscription must never be blindly retried
+// after an ambiguous database commit.
+type retryableFunding interface {
+	CanRetrySettlement() bool
 }
 
 // Settle 根据实际消耗额度进行结算。
@@ -43,7 +59,13 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.settled {
-		return s.settlementErr
+		if actualQuota != s.actualQuota {
+			return errors.New("billing settlement retried with different actual quota")
+		}
+		retry, ok := s.funding.(retryableFunding)
+		if s.settlementErr == nil || s.fundingSettled || !ok || !retry.CanRetrySettlement() {
+			return s.settlementErr
+		}
 	}
 	if s.refunded {
 		return errors.New("billing session already refunded")
@@ -55,14 +77,31 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	// Finalization barrier: after a successful upstream response, Refund must
 	// never run even when a settlement write returns an error.
 	s.settled = true
+	s.actualQuota = actualQuota
+	s.settlementErr = nil
 	if delta == 0 {
+		// Wallet ledger settlements must still consume source lots and prove the
+		// wallet row exists even when reserved and final usage match.
+		if usage, ok := s.funding.(usageSettler); ok && !s.fundingSettled {
+			if err := usage.SettleUsage(s.preConsumedQuota, actualQuota); err != nil {
+				s.settlementErr = err
+				return err
+			}
+			s.fundingSettled = true
+		}
 		return nil
 	}
 	// 1) 调整资金来源（仅在尚未提交时执行，防止重复调用）
 	if !s.fundingSettled {
-		if err := s.funding.Settle(delta); err != nil {
-			s.settlementErr = err
-			return err
+		var settleErr error
+		if usage, ok := s.funding.(usageSettler); ok {
+			settleErr = usage.SettleUsage(s.preConsumedQuota, actualQuota)
+		} else {
+			settleErr = s.funding.Settle(delta)
+		}
+		if settleErr != nil {
+			s.settlementErr = settleErr
+			return settleErr
 		}
 		s.fundingSettled = true
 	}
@@ -152,6 +191,10 @@ func (s *BillingSession) needsRefundLocked() bool {
 		return false
 	}
 	if s.tokenConsumed > 0 {
+		return true
+	}
+	// Playground requests can reserve wallet quota without reserving a token.
+	if wallet, ok := s.funding.(*WalletFunding); ok && wallet.consumed > 0 {
 		return true
 	}
 	// 订阅可能在 tokenConsumed=0 时仍预扣了额度
@@ -248,7 +291,7 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 func (s *BillingSession) reserveFunding(delta int) error {
 	switch funding := s.funding.(type) {
 	case *WalletFunding:
-		if err := model.ReserveUserQuota(funding.userId, delta); err != nil {
+		if err := funding.ReserveMore(delta); err != nil {
 			if errors.Is(err, model.ErrInsufficientQuota) {
 				return types.NewErrorWithStatusCode(
 					fmt.Errorf("用户额度不足"),
@@ -260,7 +303,6 @@ func (s *BillingSession) reserveFunding(delta int) error {
 			}
 			return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
 		}
-		funding.consumed += delta
 		return nil
 	case *SubscriptionFunding:
 		if err := model.ReserveUserSubscriptionDelta(funding.subscriptionId, int64(delta), funding.periodStart); err != nil {
@@ -281,10 +323,8 @@ func (s *BillingSession) reserveFunding(delta int) error {
 func (s *BillingSession) rollbackFundingReserve(delta int) {
 	switch funding := s.funding.(type) {
 	case *WalletFunding:
-		if err := model.IncreaseUserQuotaDirect(funding.userId, delta); err != nil {
+		if err := funding.ReleaseReserved(delta); err != nil {
 			common.SysLog("error rolling back wallet funding reserve: " + err.Error())
-		} else {
-			funding.consumed -= delta
 		}
 	case *SubscriptionFunding:
 		if _, err := model.RefundUserSubscriptionDelta(
@@ -365,9 +405,17 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		}
 		relayInfo.UserQuota = userQuota
 
+		walletFunding := &WalletFunding{userId: relayInfo.UserId}
+		if relayInfo.RequestId != "" {
+			settlementKey, err := model.NewWalletFinalSettlementKey(relayInfo.UserId, "relay", relayInfo.RequestId)
+			if err != nil {
+				return nil, types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
+			}
+			walletFunding.settlementKey = settlementKey
+		}
 		session := &BillingSession{
 			relayInfo: relayInfo,
-			funding:   &WalletFunding{userId: relayInfo.UserId},
+			funding:   walletFunding,
 		}
 		if apiErr := session.preConsume(c, preConsumedQuota); apiErr != nil {
 			return nil, apiErr

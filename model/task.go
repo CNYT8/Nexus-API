@@ -112,6 +112,9 @@ type TaskPrivateData struct {
 	Key            string `json:"key,omitempty"`
 	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
 	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	// BillingKey 是提交前创建的服务端耐久钱包预扣身份。存在时必须优先于
+	// task.ID 派生的历史身份使用，轮询结算也依赖它精确终结同一 reservation。
+	BillingKey string `json:"billing_key,omitempty"`
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
 	BillingSource           string              `json:"billing_source,omitempty"`            // "wallet" 或 "subscription"
 	SubscriptionId          int                 `json:"subscription_id,omitempty"`           // 订阅 ID，用于订阅退款
@@ -179,6 +182,14 @@ func (p TaskPrivateData) Value() (driver.Value, error) {
 		return nil, err
 	}
 	return string(b), nil
+}
+
+// IsCanonicalWalletBillingKey reports whether key has the canonical
+// wallet-ledger identity format enforced by the reservation layer. A persisted
+// task billing key is rejected when malformed; it is never silently replaced
+// by a task-ID derived identity.
+func IsCanonicalWalletBillingKey(key string) bool {
+	return isCanonicalSHA256(key)
 }
 
 // SyncTaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段

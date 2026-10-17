@@ -63,6 +63,15 @@ func TestMain(m *testing.M) {
 		&WebRiskState{},
 		&Redemption{},
 		&EmptyResponseRecord{},
+		&WalletCreditLot{},
+		&WalletConsumptionSettlement{},
+		&WalletConsumptionAllocation{},
+		&WalletReservation{},
+		&WalletLotHold{},
+		&WalletDebtRepayment{},
+		&RebateCapBucket{},
+		&RebateSystemState{},
+		&RebateRecord{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -88,6 +97,15 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM nexus_tickets")
 		DB.Exec("DELETE FROM nexus_web_risk_states")
 		DB.Exec("DELETE FROM empty_response_records")
+		DB.Exec("DELETE FROM wallet_debt_repayments")
+		DB.Exec("DELETE FROM wallet_lot_holds")
+		DB.Exec("DELETE FROM wallet_reservations")
+		DB.Exec("DELETE FROM wallet_consumption_allocations")
+		DB.Exec("DELETE FROM wallet_consumption_settlements")
+		DB.Exec("DELETE FROM rebate_records")
+		DB.Exec("DELETE FROM rebate_cap_buckets")
+		DB.Exec("DELETE FROM wallet_credit_lots")
+		DB.Exec("DELETE FROM rebate_system_states")
 		DB.Exec("DELETE FROM users")
 		DB.Exec("DELETE FROM logs")
 		DB.Exec("DELETE FROM channels")

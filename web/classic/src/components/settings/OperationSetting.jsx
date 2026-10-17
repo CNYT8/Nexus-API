@@ -27,6 +27,7 @@ import SettingsLog from '../../pages/Setting/Operation/SettingsLog';
 import SettingsMonitoring from '../../pages/Setting/Operation/SettingsMonitoring';
 import SettingsCreditLimit from '../../pages/Setting/Operation/SettingsCreditLimit';
 import SettingsCheckin from '../../pages/Setting/Operation/SettingsCheckin';
+import SettingsRebate from '../../pages/Setting/Operation/SettingsRebate';
 import { API, showError, toBoolean } from '../../helpers';
 
 const OperationSetting = () => {
@@ -89,6 +90,22 @@ const OperationSetting = () => {
 
     /* 令牌设置 */
     'token_setting.max_user_tokens': 1000,
+
+    /* 充值返利设置 */
+    'rebate_setting.enabled': false,
+    'rebate_setting.count_during_closure': false,
+    'rebate_setting.rate_basis_points': 0,
+    'rebate_setting.payout_mode': 'immediate',
+    'rebate_setting.payout_hour': 7,
+    'rebate_setting.payout_minute': 0,
+    'rebate_setting.payout_interval_hours': 24,
+    'rebate_setting.site_timezone': 'UTC',
+    'rebate_setting.inviter_limit_period': 'monthly',
+    'rebate_setting.invitee_eligible_money_limit_micros': 0,
+    'rebate_setting.inviter_reward_limit_micros': 0,
+    'rebate_setting.inviter_eligible_money_limit_micros': 0,
+    'rebate_setting.inviter_min_paid_money_micros': 0,
+    'rebate_setting.payout_hold_hours': 0,
   });
 
   let [loading, setLoading] = useState(false);
@@ -159,6 +176,9 @@ const OperationSetting = () => {
           <SettingsCreditLimit options={inputs} refresh={onRefresh} />
         </Card>
         {/* 签到设置 */}
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsRebate options={inputs} refresh={onRefresh} />
+        </Card>
         <Card style={{ marginTop: '10px' }}>
           <SettingsCheckin options={inputs} refresh={onRefresh} />
         </Card>

@@ -51,6 +51,79 @@ export function isApiSuccess(response: ApiResponse): boolean {
   return response.success === true || response.message === 'success'
 }
 
+export type RebateOverview = {
+  enabled: boolean
+  rate_basis_points: number
+  payout_mode: string
+  payout_interval_hours: number
+  payout_hour: number
+  payout_minute: number
+  site_timezone: string
+  count_during_closure: boolean
+  pending_quota: number
+  paid_quota: number
+  pending_money_micros: number
+  paid_money_micros: number
+  discarded_money_micros: number
+  reward_count: number
+  invitee_eligible_money_micros: number
+  invitee_eligible_money_limit_micros: number
+  inviter_reward_limit_micros: number
+  inviter_eligible_money_limit_micros: number
+  inviter_limit_period: string
+  inviter_period_key: string
+  inviter_period_used_micros: number
+  inviter_period_eligible_money_micros: number
+}
+
+export type RebateRecord = {
+  id: number
+  created_at: string | number
+  invitee_id?: number
+  invitee_username?: string
+  reward_quota?: number
+  available_at?: string | number
+  paid_at?: string | number | null
+  eligible_money_micros: number
+  reward_money_micros: number
+  status:
+    | 'pending'
+    | 'held'
+    | 'paid'
+    | 'discarded'
+    | 'voided'
+    | 'failed'
+    | string
+  counted_during_closure: boolean
+  held_by_closure: boolean
+  voided_at?: string | number | null
+  void_reason?: string
+}
+
+export type RebateRecordsPage = {
+  items: RebateRecord[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export async function getUserRebate(): Promise<ApiResponse<RebateOverview>> {
+  const res = await api.get('/api/user/rebate')
+  return res.data
+}
+
+export async function getUserRebateRecords(
+  page: number,
+  pageSize: number
+): Promise<ApiResponse<RebateRecordsPage>> {
+  const params = new URLSearchParams({
+    page: String(Math.max(1, Math.floor(page))),
+    page_size: String(Math.min(100, Math.max(1, Math.floor(pageSize)))),
+  })
+  const res = await api.get(`/api/user/rebate/records?${params.toString()}`)
+  return res.data
+}
+
 /**
  * Get topup configuration info
  */

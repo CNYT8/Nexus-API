@@ -779,6 +779,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 		if err != nil {
 			return err
 		}
+		tradeNo := fmt.Sprintf("SUBBALUSR%dNO%s%d", userId, common.GetRandomString(6), time.Now().UnixNano())
 
 		var user User
 		if err := lockForUpdate(tx).Where("id = ?", userId).First(&user).Error; err != nil {
@@ -788,7 +789,21 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 			return errors.New("余额不足")
 		}
 		if requiredQuota > 0 {
-			if err := tx.Model(&User{}).Where("id = ?", userId).
+			active, err := walletCreditBaselineState(tx)
+			if err != nil {
+				return err
+			}
+			if active {
+				// Balance purchases are non-consumption debits: the durable order
+				// identity retires source lots without ever earning a rebate.
+				adjustKey, err := NewWalletAdjustmentKey(userId, "subscription_balance", tradeNo)
+				if err != nil {
+					return err
+				}
+				if err := AdjustWalletDebitTx(tx, adjustKey, userId, int64(requiredQuota)); err != nil {
+					return err
+				}
+			} else if err := tx.Model(&User{}).Where("id = ?", userId).
 				Update("quota", gorm.Expr("quota - ?", requiredQuota)).Error; err != nil {
 				return err
 			}
@@ -799,7 +814,6 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 		}
 
 		now := common.GetTimestamp()
-		tradeNo := fmt.Sprintf("SUBBALUSR%dNO%s%d", userId, common.GetRandomString(6), time.Now().UnixNano())
 		order := &SubscriptionOrder{
 			UserId:          userId,
 			PlanId:          plan.Id,

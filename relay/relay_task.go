@@ -216,11 +216,59 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		info.PriceData.Quota = quota
 	}
 
-	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
+	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，或钱包提交身份已保存在请求作用域）
 	if info.Billing == nil && !info.PriceData.FreeModel {
 		info.ForcePreConsume = true
-		if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
-			return nil, service.TaskErrorFromAPIError(apiErr)
+		ledgerActive, ledgerErr := model.WalletCreditLedgerActive(model.DB)
+		if ledgerErr != nil {
+			return nil, service.TaskErrorWrapper(ledgerErr, "wallet_ledger_check_failed", http.StatusInternalServerError)
+		}
+		switch {
+		case !ledgerActive:
+			// 账本未初始化：完全保持旧路径（PreConsumeBilling + SettleBilling）。
+			if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
+				return nil, service.TaskErrorFromAPIError(apiErr)
+			}
+		case info.QuotaClamp != nil:
+			// 账本任务路径绕过 PreConsumeBilling，必须保留其额度溢出拒绝语义。
+			return nil, service.TaskErrorFromAPIError(service.TaskWalletQuotaClampError(info.QuotaClamp))
+		case c.GetString(service.ContextKeyTaskWalletBillingKey) != "":
+			// 重试轮次：首次已持久化提交身份，绝不能重复预扣。
+		default:
+			usesSubscription, prefErr := service.TaskWalletLedgerUsesSubscription(info)
+			if prefErr != nil {
+				return nil, service.TaskErrorWrapper(prefErr, "billing_preference_check_failed", http.StatusInternalServerError)
+			}
+			if usesSubscription {
+				if taskErr := createLedgerTaskSubscriptionSession(c, info); taskErr != nil {
+					return nil, taskErr
+				}
+			} else {
+				key, reserveErr := service.ReservePendingTaskWalletQuota(info.UserId, info.PriceData.Quota)
+				if reserveErr != nil {
+					// wallet_first 在钱包不足时按 NewBillingSession 的语义回退订阅；
+					// 其它失败保持 fail-closed。
+					pref := common.NormalizeBillingPreference(info.UserSetting.BillingPreference)
+					if pref == "wallet_first" && service.IsTaskWalletInsufficientQuota(reserveErr) {
+						if taskErr := createLedgerTaskSubscriptionSession(c, info); taskErr != nil {
+							return nil, taskErr
+						}
+					} else {
+						return nil, service.TaskErrorFromAPIError(service.TaskWalletReserveError(reserveErr))
+					}
+				} else {
+					if tokenErr := service.PreConsumeTokenQuota(info, info.PriceData.Quota); tokenErr != nil {
+						if refundErr := service.RefundPendingTaskWalletQuota(key, info.UserId); refundErr != nil {
+							common.SysError("refund pending task wallet quota after token failure: " + refundErr.Error())
+						}
+						return nil, service.TaskErrorFromAPIError(service.TaskWalletTokenPreConsumeError(tokenErr))
+					}
+					c.Set(service.ContextKeyTaskWalletBillingKey, key)
+					c.Set(service.ContextKeyTaskWalletBillingQuota, info.PriceData.Quota)
+					info.BillingSource = service.BillingSourceWallet
+					info.FinalPreConsumedQuota = info.PriceData.Quota
+				}
+			}
 		}
 	}
 
@@ -269,6 +317,31 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		Platform:       platform,
 		Quota:          finalQuota,
 	}, nil
+}
+
+// createLedgerTaskSubscriptionSession builds a subscription/wallet BillingSession
+// without PreConsumeBilling's task wallet-ledger guard. That guard may only
+// block wallet-funded tasks, so subscription tasks must be able to reach
+// NewBillingSession with unchanged subscription behavior. If NewBillingSession
+// falls back to the wallet (subscription shortfall), its server-owned
+// RequestId reservation key is persisted for the task row; otherwise the
+// session settles at submit exactly as before.
+func createLedgerTaskSubscriptionSession(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
+	session, apiErr := service.NewBillingSession(c, info, info.PriceData.Quota)
+	if apiErr != nil {
+		return service.TaskErrorFromAPIError(apiErr)
+	}
+	info.Billing = session
+	// preConsume 已通过 syncRelayInfo 写入实际资金来源；非订阅即为钱包回退。
+	if info.BillingSource != service.BillingSourceSubscription {
+		key, err := model.NewWalletFinalSettlementKey(info.UserId, "relay", info.RequestId)
+		if err != nil {
+			return service.TaskErrorWrapper(err, "billing_identity_failed", http.StatusInternalServerError)
+		}
+		c.Set(service.ContextKeyTaskWalletBillingKey, key)
+		c.Set(service.ContextKeyTaskWalletBillingQuota, info.PriceData.Quota)
+	}
+	return nil
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。

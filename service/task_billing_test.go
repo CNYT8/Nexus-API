@@ -3,19 +3,306 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"math"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+// Each ledger test owns its database and restores the package globals. The
+// one-connection pool deliberately detects accidental outer-DB calls in a Tx.
+func setupTaskLedgerTest(t *testing.T) (*gorm.DB, *model.Task) {
+	t.Helper()
+	db := setupWalletSettlementTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, db.AutoMigrate(&model.Task{}, &model.Token{}, &model.Log{}, &model.Channel{}, &model.WalletReservation{}, &model.WalletLotHold{}, &model.WalletDebtRepayment{}, &model.RebateRecord{}, &model.RebateCapBucket{}))
+	originalSetting := operation_setting.GetRebateSetting()
+	originalUnit, originalBatch := common.QuotaPerUnit, common.BatchUpdateEnabled
+	common.QuotaPerUnit, common.BatchUpdateEnabled = 500000, false
+	require.NoError(t, operation_setting.UpdateRebateSetting(operation_setting.RebateSetting{Enabled: true, RateBasisPoints: 250, PayoutMode: operation_setting.RebatePayoutImmediate, PayoutHour: 7, InviterLimitPeriod: operation_setting.RebateLimitPeriodMonthly, SiteTimezone: "UTC"}))
+	t.Cleanup(func() {
+		common.QuotaPerUnit, common.BatchUpdateEnabled = originalUnit, originalBatch
+		require.NoError(t, operation_setting.UpdateRebateSetting(originalSetting))
+	})
+	require.NoError(t, db.Create(&model.RebateSystemState{Key: "wallet_credit_baseline_v1", Value: "initialized:task-test", UpdatedAt: time.Now().UTC()}).Error)
+	inviter := model.User{Username: "task-inviter", AffCode: "task-parent", Status: common.UserStatusEnabled}
+	require.NoError(t, db.Create(&inviter).Error)
+	user := model.User{Username: "task-invitee", AffCode: "task-child", InviterId: inviter.Id, Status: common.UserStatusEnabled}
+	require.NoError(t, db.Create(&user).Error)
+	credited, err := model.CreditTopUpTx(db, user.Id, "task-paid-topup", 10000)
+	require.NoError(t, err)
+	require.True(t, credited)
+	token := model.Token{UserId: user.Id, Key: "task-ledger-token", RemainQuota: 10000, Status: common.TokenStatusEnabled}
+	require.NoError(t, db.Create(&token).Error)
+	task := makeTask(user.Id, 0, 0, token.Id, BillingSourceWallet, 0)
+	task.TaskID = "same-upstream-id-is-not-an-accounting-identity"
+	require.NoError(t, db.Create(task).Error)
+	return db, task
+}
+
+func taskLedgerCount(t *testing.T, db *gorm.DB, value interface{}) int64 {
+	t.Helper()
+	var count int64
+	require.NoError(t, db.Model(value).Count(&count).Error)
+	return count
+}
+
+func markTaskSuccess(t *testing.T, db *gorm.DB, task *model.Task) {
+	t.Helper()
+	require.NoError(t, db.Model(task).UpdateColumn("status", model.TaskStatusSuccess).Error)
+	task.Status = model.TaskStatusSuccess
+}
+
+func TestTaskLedgerReserveAndSubmitFailureNeverReward(t *testing.T) {
+	db, task := setupTaskLedgerTest(t)
+	require.NoError(t, ReserveTaskWalletQuota(task, 3000))
+	require.NoError(t, ReserveTaskWalletQuota(task, 3000))
+	require.Equal(t, 7000, getUserQuota(t, task.UserId))
+	require.Equal(t, 7000, getTokenRemainQuota(t, task.PrivateData.TokenId))
+	require.Zero(t, taskLedgerCount(t, db, &model.RebateRecord{}))
+	stale := *task
+	RefundTaskQuota(context.Background(), task, "submit failed")
+	RefundTaskQuota(context.Background(), &stale, "retry submit failed")
+	require.Equal(t, 10000, getUserQuota(t, task.UserId))
+	require.Equal(t, 10000, getTokenRemainQuota(t, task.PrivateData.TokenId))
+	require.Zero(t, taskLedgerCount(t, db, &model.RebateRecord{}))
+	require.Zero(t, taskLedgerCount(t, db, &model.WalletConsumptionSettlement{}))
+	require.EqualValues(t, 1, countLogs(t))
+	require.Error(t, ReserveTaskWalletQuota(task, 3000))
+}
+
+func TestTaskLedgerFinalConsumptionIsOnceAcrossReloads(t *testing.T) {
+	for _, actual := range []int{0, 2000, 3000, 4500} {
+		t.Run(fmt.Sprint(actual), func(t *testing.T) {
+			db, task := setupTaskLedgerTest(t)
+			require.NoError(t, ReserveTaskWalletQuota(task, 3000))
+			markTaskSuccess(t, db, task)
+			stale := *task
+			RecalculateTaskQuota(context.Background(), task, actual, "completed")
+			RecalculateTaskQuota(context.Background(), &stale, actual, "stale retry")
+			var reloaded model.Task
+			require.NoError(t, db.First(&reloaded, task.ID).Error)
+			RecalculateTaskQuota(context.Background(), &reloaded, actual, "reload retry")
+			require.Equal(t, actual, reloaded.Quota)
+			require.Equal(t, 10000-actual, getUserQuota(t, task.UserId))
+			require.Equal(t, 10000-actual, getTokenRemainQuota(t, task.PrivateData.TokenId))
+			require.EqualValues(t, 1, taskLedgerCount(t, db, &model.WalletConsumptionSettlement{}))
+			expectedRewards := int64(1)
+			if actual == 0 {
+				expectedRewards = 0
+			}
+			require.Equal(t, expectedRewards, taskLedgerCount(t, db, &model.RebateRecord{}))
+			// Adjustments and an outcome reversal cannot create a second reward
+			// or refund successful consumption.
+			RecalculateTaskQuota(context.Background(), &stale, actual+500, "changed actual")
+			RefundTaskQuota(context.Background(), &stale, "late failure")
+			require.Equal(t, 10000-actual, getUserQuota(t, task.UserId))
+			require.Equal(t, 10000-actual, getTokenRemainQuota(t, task.PrivateData.TokenId))
+			require.Equal(t, expectedRewards, taskLedgerCount(t, db, &model.RebateRecord{}))
+		})
+	}
+}
+
+func TestTaskLedgerConcurrentFinalization(t *testing.T) {
+	db, task := setupTaskLedgerTest(t)
+	require.NoError(t, ReserveTaskWalletQuota(task, 3000))
+	markTaskSuccess(t, db, task)
+	var wg sync.WaitGroup
+	errs := make(chan error, 12)
+	for i := 0; i < 12; i++ {
+		copy := *task
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, err := settleTaskWalletQuota(&copy, 4500, false)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	require.Equal(t, 5500, getUserQuota(t, task.UserId))
+	require.Equal(t, 5500, getTokenRemainQuota(t, task.PrivateData.TokenId))
+	require.EqualValues(t, 1, taskLedgerCount(t, db, &model.RebateRecord{}))
+}
+
+func TestTaskLedgerFailedTokenWriteRollsBackWholeFinalization(t *testing.T) {
+	db, task := setupTaskLedgerTest(t)
+	require.NoError(t, ReserveTaskWalletQuota(task, 3000))
+	markTaskSuccess(t, db, task)
+	require.NoError(t, db.Exec("CREATE TRIGGER task_token_failure BEFORE UPDATE OF remain_quota ON tokens BEGIN SELECT RAISE(FAIL, 'injected token failure'); END").Error)
+	_, _, err := settleTaskWalletQuota(task, 4500, false)
+	require.ErrorContains(t, err, "injected token failure")
+	require.Equal(t, 7000, getUserQuota(t, task.UserId))
+	require.Equal(t, 7000, getTokenRemainQuota(t, task.PrivateData.TokenId))
+	require.Zero(t, taskLedgerCount(t, db, &model.RebateRecord{}))
+	require.Zero(t, taskLedgerCount(t, db, &model.WalletConsumptionSettlement{}))
+	require.NoError(t, db.Exec("DROP TRIGGER task_token_failure").Error)
+
+	// The token write failed after the durable finalizing barrier committed, so
+	// recovery (or an identical retry) can still replay the wallet settlement.
+	var reservation model.WalletReservation
+	key, err := TaskWalletBillingKey(task)
+	require.NoError(t, err)
+	require.NoError(t, db.Where("reservation_key = ?", key).First(&reservation).Error)
+	require.Equal(t, model.WalletReservationFinalizing, reservation.State)
+
+	applied, _, err := settleTaskWalletQuota(task, 4500, false)
+	require.NoError(t, err)
+	require.True(t, applied)
+	require.EqualValues(t, 1, taskLedgerCount(t, db, &model.RebateRecord{}))
+}
+
+func TestTaskLedgerFailedReservationDoesNotDebitWalletOrReward(t *testing.T) {
+	db, task := setupTaskLedgerTest(t)
+	require.NoError(t, db.Model(&model.Token{}).Where("id = ?", task.PrivateData.TokenId).UpdateColumn("remain_quota", 100).Error)
+	require.ErrorIs(t, ReserveTaskWalletQuota(task, 3000), model.ErrInsufficientQuota)
+	require.Equal(t, 10000, getUserQuota(t, task.UserId))
+	require.Zero(t, taskLedgerCount(t, db, &model.WalletReservation{}))
+	require.Zero(t, taskLedgerCount(t, db, &model.WalletLotHold{}))
+	require.Zero(t, taskLedgerCount(t, db, &model.RebateRecord{}))
+}
+
+func TestTaskLedgerRequiresRealIdentityAndReservation(t *testing.T) {
+	db, task := setupTaskLedgerTest(t)
+	copy := *task
+	copy.ID = 0
+	require.ErrorIs(t, ReserveTaskWalletQuota(&copy, 100), ErrWalletBillingIdentityRequired)
+	copy = *task
+	copy.ID += 1234
+	require.Error(t, ReserveTaskWalletQuota(&copy, 100))
+	markTaskSuccess(t, db, task)
+	_, _, err := settleTaskWalletQuota(task, 100, false)
+	require.Error(t, err)
+	require.Equal(t, 10000, getUserQuota(t, task.UserId))
+	require.Zero(t, taskLedgerCount(t, db, &model.RebateRecord{}))
+	// Different persisted rows with the same upstream/public ID remain distinct.
+	copy = *task
+	copy.ID, copy.Status = 0, model.TaskStatusInProgress
+	require.NoError(t, db.Create(&copy).Error)
+	key1, err := TaskWalletBillingKey(task)
+	require.NoError(t, err)
+	key2, err := TaskWalletBillingKey(&copy)
+	require.NoError(t, err)
+	require.NotEqual(t, key1, key2)
+}
+
+func TestTaskLedgerRejectsTokenOverflowAndWrongOwner(t *testing.T) {
+	for _, wrongOwner := range []bool{false, true} {
+		t.Run(fmt.Sprint(wrongOwner), func(t *testing.T) {
+			db, task := setupTaskLedgerTest(t)
+			require.NoError(t, ReserveTaskWalletQuota(task, 3000))
+			markTaskSuccess(t, db, task)
+			changes := map[string]interface{}{"used_quota": math.MaxInt}
+			if wrongOwner {
+				changes = map[string]interface{}{"user_id": task.UserId + 99}
+			}
+			require.NoError(t, db.Model(&model.Token{}).Where("id = ?", task.PrivateData.TokenId).Updates(changes).Error)
+			_, _, err := settleTaskWalletQuota(task, 4500, false)
+			require.Error(t, err)
+			require.Equal(t, 7000, getUserQuota(t, task.UserId))
+			require.Zero(t, taskLedgerCount(t, db, &model.RebateRecord{}))
+		})
+	}
+}
+
+func TestLegacyWalletLedgerFailsClosedWithoutDurableIdentity(t *testing.T) {
+	db, task := setupTaskLedgerTest(t)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{UserId: task.UserId, TokenId: task.PrivateData.TokenId, RequestId: "transient-request-is-not-a-reservation", FinalPreConsumedQuota: 3000}
+	for _, delta := range []int{-100, 0, 100} {
+		require.ErrorIs(t, PostConsumeQuota(info, delta, 3000, false), ErrWalletBillingIdentityRequired)
+	}
+	require.ErrorIs(t, SettleBilling(ctx, info, 3000), ErrWalletBillingIdentityRequired)
+	require.Equal(t, 10000, getUserQuota(t, task.UserId))
+	require.Zero(t, taskLedgerCount(t, db, &model.RebateRecord{}))
+}
+
+func TestAsyncSubmitLedgerFailsClosedBeforeDebit(t *testing.T) {
+	db, task := setupTaskLedgerTest(t)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{UserId: task.UserId, TokenId: task.PrivateData.TokenId, TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: task.TaskID}}
+	require.NotNil(t, PreConsumeBilling(ctx, 3000, info))
+	require.Nil(t, info.Billing)
+	require.ErrorIs(t, SettleBilling(ctx, info, 3000), ErrWalletBillingIdentityRequired)
+	require.Equal(t, 10000, getUserQuota(t, task.UserId))
+	require.Equal(t, 10000, getTokenRemainQuota(t, task.PrivateData.TokenId))
+	require.Zero(t, taskLedgerCount(t, db, &model.RebateRecord{}))
+
+	// A free async task has no wallet debit and must not be blocked or noisy.
+	free := &relaycommon.RelayInfo{UserId: task.UserId, TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: task.TaskID}}
+	require.NoError(t, SettleBilling(ctx, free, 0))
+}
+
+// stubPollingAdaptor implements TaskPollingAdaptor for completion-path tests.
+type stubPollingAdaptor struct {
+	adjust int
+}
+
+func (s stubPollingAdaptor) Init(*relaycommon.RelayInfo) {}
+
+func (s stubPollingAdaptor) FetchTask(string, string, map[string]any, string) (*http.Response, error) {
+	return nil, nil
+}
+
+func (s stubPollingAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskInfo, error) {
+	return nil, nil
+}
+
+func (s stubPollingAdaptor) AdjustBillingOnComplete(*model.Task, *relaycommon.TaskInfo) int {
+	return s.adjust
+}
+
+func TestTaskLedgerPollingCompletionFinalizesOnAllSuccessPaths(t *testing.T) {
+	for _, perCall := range []bool{true, false} {
+		t.Run(fmt.Sprintf("perCall=%v", perCall), func(t *testing.T) {
+			db, task := setupTaskLedgerTest(t)
+			require.NoError(t, ReserveTaskWalletQuota(task, 3000))
+			markTaskSuccess(t, db, task)
+			task.PrivateData.BillingContext.PerCallBilling = perCall
+
+			// Per-call tasks skip adjustments, and tasks without adaptor/token
+			// adjustments have no delta; both must still finalize the durable
+			// reservation exactly once instead of leaving it for TTL refund.
+			settleTaskBillingOnComplete(context.Background(), stubPollingAdaptor{}, task, &relaycommon.TaskInfo{})
+			require.Equal(t, 7000, getUserQuota(t, task.UserId))
+			require.Equal(t, 7000, getTokenRemainQuota(t, task.PrivateData.TokenId))
+			require.EqualValues(t, 1, taskLedgerCount(t, db, &model.WalletConsumptionSettlement{}))
+			require.EqualValues(t, 1, taskLedgerCount(t, db, &model.RebateRecord{}))
+
+			key, err := TaskWalletBillingKey(task)
+			require.NoError(t, err)
+			var reservation model.WalletReservation
+			require.NoError(t, db.Where("reservation_key = ?", key).First(&reservation).Error)
+			require.Equal(t, model.WalletReservationFinalized, reservation.State)
+
+			// A duplicated completion callback must not debit or reward twice.
+			settleTaskBillingOnComplete(context.Background(), stubPollingAdaptor{}, task, &relaycommon.TaskInfo{})
+			require.Equal(t, 7000, getUserQuota(t, task.UserId))
+			require.Equal(t, 7000, getTokenRemainQuota(t, task.PrivateData.TokenId))
+			require.EqualValues(t, 1, taskLedgerCount(t, db, &model.WalletConsumptionSettlement{}))
+			require.EqualValues(t, 1, taskLedgerCount(t, db, &model.RebateRecord{}))
+		})
+	}
+}
 
 func TestMain(m *testing.M) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -45,6 +332,17 @@ func TestMain(m *testing.M) {
 		&model.TopUp{},
 		&model.UserSubscription{},
 		&model.UserGroupRatioOverride{},
+		// The production schema always migrates the wallet ledger tables at
+		// startup. Legacy tests must see the same schema so an absent baseline
+		// marker means "inactive", not "missing table".
+		&model.RebateSystemState{},
+		&model.WalletCreditLot{},
+		&model.WalletConsumptionSettlement{},
+		&model.WalletConsumptionAllocation{},
+		&model.WalletReservation{},
+		&model.WalletLotHold{},
+		&model.RebateRecord{},
+		&model.RebateCapBucket{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -67,6 +365,14 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM top_ups")
 		model.DB.Exec("DELETE FROM user_subscriptions")
 		model.DB.Exec("DELETE FROM user_group_ratio_overrides")
+		model.DB.Exec("DELETE FROM wallet_credit_lots")
+		model.DB.Exec("DELETE FROM wallet_consumption_settlements")
+		model.DB.Exec("DELETE FROM wallet_consumption_allocations")
+		model.DB.Exec("DELETE FROM wallet_reservations")
+		model.DB.Exec("DELETE FROM wallet_lot_holds")
+		model.DB.Exec("DELETE FROM rebate_records")
+		model.DB.Exec("DELETE FROM rebate_cap_buckets")
+		model.DB.Exec("DELETE FROM rebate_system_states")
 	})
 }
 

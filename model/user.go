@@ -416,8 +416,15 @@ func HardDeleteUserById(id int) error {
 	return user.HardDelete()
 }
 
-func inviteUser(inviterId int) error {
-	result := DB.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]interface{}{
+func inviteUserTx(tx *gorm.DB, inviterId, inviteeId int) error {
+	if tx == nil || inviterId <= 0 || inviteeId <= 0 || common.QuotaForInviter <= 0 {
+		return nil
+	}
+	var inviter User
+	if err := lockForUpdate(tx).Select("id").First(&inviter, inviterId).Error; err != nil {
+		return err
+	}
+	result := tx.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]interface{}{
 		"aff_count":   gorm.Expr("aff_count + ?", 1),
 		"aff_quota":   gorm.Expr("aff_quota + ?", common.QuotaForInviter),
 		"aff_history": gorm.Expr("aff_history + ?", common.QuotaForInviter),
@@ -425,47 +432,93 @@ func inviteUser(inviterId int) error {
 	if result.Error != nil {
 		return result.Error
 	}
-	if result.RowsAffected == 0 {
+	if result.RowsAffected != 1 {
 		return gorm.ErrRecordNotFound
 	}
 	return nil
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {
-	// 检查quota是否小于最小额度
 	if float64(quota) < common.QuotaPerUnit {
 		return fmt.Errorf("转移额度最小为%s！", logger.LogQuota(int(common.QuotaPerUnit)))
 	}
-
-	// 开始数据库事务
-	tx := DB.Begin()
-	if tx.Error != nil {
-		return tx.Error
-	}
-	defer tx.Rollback() // 确保在函数退出时事务能回滚
-
-	// 加锁查询用户以确保数据一致性
-	err := lockForUpdate(tx).First(user, user.Id).Error
+	var active bool
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		active, err = walletCreditBaselineState(tx)
+		if err != nil {
+			return err
+		}
+		var current User
+		if err := lockForUpdate(tx).First(&current, user.Id).Error; err != nil {
+			return err
+		}
+		if current.AffQuota < quota {
+			return errors.New("邀请额度不足！")
+		}
+		if active {
+			transferredBefore := current.AffHistoryQuota - current.AffQuota
+			if transferredBefore < 0 {
+				return errors.New("邀请额度状态无效")
+			}
+			referenceID := fmt.Sprintf("%d:%d:%d", current.Id, transferredBefore, transferredBefore+quota)
+			applied, err := CreditWalletSourceTx(tx, current.Id, WalletCreditSourceAffiliate, "reward_transfer", "affiliate_transfer", referenceID, quota)
+			if err != nil {
+				return err
+			}
+			if !applied {
+				return errors.New("邀请额度转移状态异常")
+			}
+		} else if err := addUserQuotaTx(tx, current.Id, quota); err != nil {
+			return err
+		}
+		result := tx.Model(&User{}).Where("id = ? AND aff_quota >= ?", current.Id, quota).
+			Update("aff_quota", gorm.Expr("aff_quota - ?", quota))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("邀请额度状态发生变化")
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-
-	// 再次检查用户的AffQuota是否足够
-	if user.AffQuota < quota {
-		return errors.New("邀请额度不足！")
+	if active {
+		invalidateWalletCreditCache(user.Id)
+	} else if err := cacheIncrUserQuota(user.Id, int64(quota)); err != nil {
+		common.SysLog(fmt.Sprintf("failed to update affiliate quota cache for user %d: %s", user.Id, err.Error()))
 	}
+	return nil
+}
 
-	// 更新用户额度
-	user.AffQuota -= quota
-	user.Quota += quota
-
-	// 保存用户状态
-	if err := tx.Save(user).Error; err != nil {
-		return err
+// applyRegistrationCreditsTx grants the registration trial and invitation
+// credits and returns the total quota actually added to the new user's wallet,
+// so the in-memory User stays consistent with the committed balance.
+func applyRegistrationCreditsTx(tx *gorm.DB, userID, inviterID int) (int, error) {
+	granted := 0
+	if common.QuotaForNewUser > 0 {
+		if _, err := CreditWalletSourceTx(tx, userID, WalletCreditSourceTrial, "registration_trial", "registration", walletCreditReferenceID(userID), common.QuotaForNewUser); err != nil {
+			return 0, err
+		}
+		granted += common.QuotaForNewUser
 	}
-
-	// 提交事务
-	return tx.Commit().Error
+	if inviterID == 0 || !operation_setting.IsPaymentComplianceConfirmed() {
+		return granted, nil
+	}
+	if common.QuotaForInvitee > 0 {
+		if _, err := CreditWalletSourceTx(tx, userID, WalletCreditSourcePromotion, "invitee", "registration", walletCreditReferenceID(userID), common.QuotaForInvitee); err != nil {
+			return 0, err
+		}
+		granted += common.QuotaForInvitee
+	}
+	if common.QuotaForInviter > 0 {
+		if err := inviteUserTx(tx, inviterID, userID); err != nil {
+			return 0, err
+		}
+	}
+	return granted, nil
 }
 
 func (user *User) Insert(inviterId int) error {
@@ -476,58 +529,66 @@ func (user *User) Insert(inviterId int) error {
 			return err
 		}
 	}
-	user.Quota = common.QuotaForNewUser
-	//user.SetAccessToken(common.GetUUID())
+	user.Quota = 0
 	user.AffCode = common.GetRandomString(4)
 
 	if user.Group == "" {
 		user.Group = register_setting.GetDefaultGroup()
 	}
-
-	// 初始化用户设置，包括默认的边栏配置
 	if user.Setting == "" {
-		defaultSetting := dto.UserSetting{}
-		// 这里暂时不设置SidebarModules，因为需要在用户创建后根据角色设置
-		user.SetSetting(defaultSetting)
+		user.SetSetting(dto.UserSetting{})
 	}
 
-	result := DB.Create(user)
-	if result.Error != nil {
-		return result.Error
-	}
-
-	// 用户创建成功后，根据角色初始化边栏配置
-	// 需要重新获取用户以确保有正确的ID和Role
-	var createdUser User
-	if err := DB.Where("username = ?", user.Username).First(&createdUser).Error; err == nil {
-		// 生成基于角色的默认边栏配置
-		defaultSidebarConfig := generateDefaultSidebarConfigForRole(createdUser.Role)
-		if defaultSidebarConfig != "" {
-			currentSetting := createdUser.GetSetting()
-			currentSetting.SidebarModules = defaultSidebarConfig
-			createdUser.SetSetting(currentSetting)
-			if err := UpdateUserSetting(createdUser.Id, createdUser.Setting); err != nil {
-				common.SysLog("failed to initialize user sidebar setting: " + err.Error())
-			}
-			common.SysLog(fmt.Sprintf("为新用户 %s (角色: %d) 初始化边栏配置", createdUser.Username, createdUser.Role))
+	granted := 0
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(user).Error; err != nil {
+			return err
 		}
+		var creditErr error
+		granted, creditErr = applyRegistrationCreditsTx(tx, user.Id, inviterId)
+		return creditErr
+	}); err != nil {
+		return err
 	}
+	// Callers and API responses read this in-memory value; it must match the
+	// committed credit instead of the pre-credit zero.
+	user.Quota = granted
+	invalidateWalletCreditCache(user.Id)
+	initializeNewUserSidebar(user)
+	writeRegistrationLogs(user.Id, inviterId)
+	return nil
+}
 
-	if common.QuotaForNewUser > 0 {
-		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
+func initializeNewUserSidebar(user *User) {
+	var createdUser User
+	if err := DB.Where("id = ?", user.Id).First(&createdUser).Error; err != nil {
+		return
 	}
-	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
+	defaultSidebarConfig := generateDefaultSidebarConfigForRole(createdUser.Role)
+	if defaultSidebarConfig == "" {
+		return
+	}
+	currentSetting := createdUser.GetSetting()
+	currentSetting.SidebarModules = defaultSidebarConfig
+	createdUser.SetSetting(currentSetting)
+	if err := UpdateUserSetting(createdUser.Id, createdUser.Setting); err != nil {
+		common.SysLog("failed to initialize user sidebar setting: " + err.Error())
+	}
+	common.SysLog(fmt.Sprintf("为新用户 %s (角色: %d) 初始化边栏配置", createdUser.Username, createdUser.Role))
+}
+
+func writeRegistrationLogs(userID, inviterID int) {
+	if common.QuotaForNewUser > 0 {
+		RecordLog(userID, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
+	}
+	if inviterID != 0 && operation_setting.IsPaymentComplianceConfirmed() {
 		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
-			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
+			RecordLog(userID, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
 		}
 		if common.QuotaForInviter > 0 {
-			//_ = IncreaseUserQuota(inviterId, common.QuotaForInviter)
-			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
+			RecordLog(inviterID, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
 		}
 	}
-	return nil
 }
 
 // InsertWithTx inserts a new user within an existing transaction.
@@ -541,7 +602,7 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 			return err
 		}
 	}
-	user.Quota = common.QuotaForNewUser
+	user.Quota = 0
 	user.AffCode = common.GetRandomString(4)
 
 	if user.Group == "" {
@@ -558,7 +619,13 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 	if result.Error != nil {
 		return result.Error
 	}
-
+	granted, err := applyRegistrationCreditsTx(tx, user.Id, inviterId)
+	if err != nil {
+		return err
+	}
+	// Keep the caller-provided User consistent with the granted credits. The
+	// enclosing transaction either commits this value or rolls back the user.
+	user.Quota = granted
 	return nil
 }
 
@@ -580,19 +647,8 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 		}
 	}
 
-	if common.QuotaForNewUser > 0 {
-		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
-	}
-	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
-		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
-			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
-		}
-		if common.QuotaForInviter > 0 {
-			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
-		}
-	}
+	invalidateWalletCreditCache(user.Id)
+	writeRegistrationLogs(user.Id, inviterId)
 }
 
 func (user *User) Update(updatePassword bool) error {
@@ -1100,17 +1156,43 @@ func IncreaseUserQuota(id int, quota int, db bool) (err error) {
 		}
 	})
 	if !db && common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUserQuota, id, quota)
-		return nil
+		active, activeErr := WalletCreditLedgerActive(DB)
+		if activeErr != nil {
+			return activeErr
+		}
+		if !active {
+			addNewRecord(BatchUpdateTypeUserQuota, id, quota)
+			return nil
+		}
 	}
 	return increaseUserQuota(id, quota)
 }
 
+// increaseUserQuota credits the wallet through the source ledger once it is
+// initialized. Generic legacy credits are compensation-like gifts and must
+// never create a rebate-qualifying lot.
 func increaseUserQuota(id int, quota int) (err error) {
-	err = DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota + ?", quota)).Error
-	if err != nil {
-		return err
+	if quota == 0 {
+		return nil
 	}
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		active, err := walletCreditBaselineState(tx)
+		if err != nil {
+			return err
+		}
+		if !active {
+			result := tx.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota + ?", quota))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("user %d not found while increasing quota", id)
+			}
+			return nil
+		}
+		_, err = CreditWalletSourceUniqueTx(tx, id, WalletCreditSourcePromotion, "compensation", quota)
+		return err
+	})
 	return err
 }
 
@@ -1125,23 +1207,49 @@ func DecreaseUserQuota(id int, quota int, db bool) (err error) {
 		}
 	})
 	if !db && common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUserQuota, id, -quota)
-		return nil
+		active, activeErr := WalletCreditLedgerActive(DB)
+		if activeErr != nil {
+			return activeErr
+		}
+		if !active {
+			addNewRecord(BatchUpdateTypeUserQuota, id, -quota)
+			return nil
+		}
 	}
 	return decreaseUserQuota(id, quota)
 }
 
+// decreaseUserQuota retires source lots through a non-consumption adjustment
+// once the ledger is initialized, so a manual decrement can neither leave a
+// stale lot behind nor create rebate-qualifying consumption.
 func decreaseUserQuota(id int, quota int) (err error) {
-	err = DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota - ?", quota)).Error
-	if err != nil {
-		return err
+	if quota == 0 {
+		return nil
 	}
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		active, err := walletCreditBaselineState(tx)
+		if err != nil {
+			return err
+		}
+		if !active {
+			result := tx.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota - ?", quota))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("user %d not found while decreasing quota", id)
+			}
+			return nil
+		}
+		return AdjustWalletDebitUniqueTx(tx, id, int64(quota), "legacy_decrease")
+	})
 	return err
 }
 
-// ReserveUserQuota atomically reserves quota without allowing the wallet to go negative.
-// It always writes through to the database so concurrent requests and multi-instance
-// deployments share the same balance guard; cache updates happen only after DB success.
+// ReserveUserQuota atomically reserves quota without allowing the wallet to go
+// negative in the legacy path. Once the ledger is initialized the reserve is
+// recorded as a non-consumption adjustment that retires source lots; a later
+// refund becomes a fresh non-eligible compensation lot.
 func ReserveUserQuota(id int, quota int) error {
 	if id <= 0 {
 		return errors.New("invalid user id")
@@ -1152,14 +1260,34 @@ func ReserveUserQuota(id int, quota int) error {
 	if quota == 0 {
 		return nil
 	}
-	result := DB.Model(&User{}).
-		Where("id = ? AND quota >= ?", id, quota).
-		Update("quota", gorm.Expr("quota - ?", quota))
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected != 1 {
-		return ErrInsufficientQuota
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		active, err := walletCreditBaselineState(tx)
+		if err != nil {
+			return err
+		}
+		if !active {
+			result := tx.Model(&User{}).
+				Where("id = ? AND quota >= ?", id, quota).
+				Update("quota", gorm.Expr("quota - ?", quota))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return ErrInsufficientQuota
+			}
+			return nil
+		}
+		user, err := walletLockUserTx(tx, id)
+		if err != nil {
+			return err
+		}
+		if int64(user.Quota) < int64(quota) {
+			return ErrInsufficientQuota
+		}
+		return AdjustWalletDebitUniqueTx(tx, id, int64(quota), "reserve")
+	})
+	if err != nil {
+		return err
 	}
 	gopool.Go(func() {
 		if err := cacheDecrUserQuota(id, int64(quota)); err != nil {
@@ -1171,7 +1299,9 @@ func ReserveUserQuota(id int, quota int) error {
 
 // DecreaseUserQuotaDirect records a debit immediately and updates Redis only
 // after the database write succeeds. Settlement debits may make quota negative
-// so actual usage is retained as debt instead of being silently dropped.
+// so actual usage is retained as debt instead of being silently dropped. Once
+// the ledger is initialized the debit retires source lots as a
+// non-consumption adjustment, so it can never earn rebates.
 func DecreaseUserQuotaDirect(id int, quota int) error {
 	if id <= 0 {
 		return errors.New("invalid user id")
@@ -1182,14 +1312,27 @@ func DecreaseUserQuotaDirect(id int, quota int) error {
 	if quota == 0 {
 		return nil
 	}
-	result := DB.Model(&User{}).
-		Where("id = ?", id).
-		Update("quota", gorm.Expr("quota - ?", quota))
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected != 1 {
-		return fmt.Errorf("user %d not found while debiting quota", id)
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		active, err := walletCreditBaselineState(tx)
+		if err != nil {
+			return err
+		}
+		if !active {
+			result := tx.Model(&User{}).
+				Where("id = ?", id).
+				Update("quota", gorm.Expr("quota - ?", quota))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("user %d not found while debiting quota", id)
+			}
+			return nil
+		}
+		return AdjustWalletDebitUniqueTx(tx, id, int64(quota), "direct_debit")
+	})
+	if err != nil {
+		return err
 	}
 	gopool.Go(func() {
 		if err := cacheDecrUserQuota(id, int64(quota)); err != nil {
@@ -1200,7 +1343,9 @@ func DecreaseUserQuotaDirect(id int, quota int) error {
 }
 
 // IncreaseUserQuotaDirect records a refund immediately and updates Redis only
-// after the database write succeeds.
+// after the database write succeeds. Once the ledger is initialized the refund
+// becomes a fresh non-eligible compensation lot, so refunded quota can never
+// be counted as rebate-qualifying consumption.
 func IncreaseUserQuotaDirect(id int, quota int) error {
 	if id <= 0 {
 		return errors.New("invalid user id")
@@ -1211,20 +1356,89 @@ func IncreaseUserQuotaDirect(id int, quota int) error {
 	if quota == 0 {
 		return nil
 	}
-	result := DB.Model(&User{}).
-		Where("id = ?", id).
-		Update("quota", gorm.Expr("quota + ?", quota))
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected != 1 {
-		return fmt.Errorf("user %d not found while refunding quota", id)
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		active, err := walletCreditBaselineState(tx)
+		if err != nil {
+			return err
+		}
+		if !active {
+			result := tx.Model(&User{}).
+				Where("id = ?", id).
+				Update("quota", gorm.Expr("quota + ?", quota))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("user %d not found while refunding quota", id)
+			}
+			return nil
+		}
+		_, err = CreditWalletSourceUniqueTx(tx, id, WalletCreditSourcePromotion, "compensation", quota)
+		return err
+	})
+	if err != nil {
+		return err
 	}
 	gopool.Go(func() {
 		if err := cacheIncrUserQuota(id, int64(quota)); err != nil {
 			common.SysLog("failed to increase user quota cache after direct refund: " + err.Error())
 		}
 	})
+	return nil
+}
+
+// SetUserQuotaAbsolute applies an administrator override to an absolute wallet
+// balance inside one transaction. Before the wallet ledger is initialized it
+// keeps the legacy raw update; afterwards an increase becomes a non-eligible
+// administrator gift lot and a decrease retires source lots through a
+// non-consumption adjustment, so no manual change can earn rebates.
+func SetUserQuotaAbsolute(userID int, target int) error {
+	if userID <= 0 {
+		return errors.New("invalid user id")
+	}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		active, err := walletCreditBaselineState(tx)
+		if err != nil {
+			return err
+		}
+		if !active {
+			// Preserve the legacy raw override, including rows whose quota is
+			// NULL. Read first so an unchanged value stays a successful no-op
+			// even on MySQL changed-rows semantics.
+			var current int64
+			if err := tx.Model(&User{}).Select("COALESCE(quota, 0)").Where("id = ?", userID).Scan(&current).Error; err != nil {
+				return err
+			}
+			if current == int64(target) {
+				return nil
+			}
+			result := tx.Model(&User{}).Where("id = ?", userID).Update("quota", target)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return errors.New("user not found during quota override")
+			}
+			return nil
+		}
+		user, err := walletLockUserTx(tx, userID)
+		if err != nil {
+			return err
+		}
+		delta := int64(target) - int64(user.Quota)
+		if delta == 0 {
+			return nil
+		}
+		if delta > 0 {
+			_, err := CreditWalletSourceUniqueTx(tx, userID, WalletCreditSourceAdmin, "ordinary", int(delta))
+			return err
+		}
+		return AdjustWalletDebitUniqueTx(tx, userID, -delta, "admin_override")
+	})
+	if err != nil {
+		return err
+	}
+	invalidateWalletCreditCache(userID)
 	return nil
 }
 
@@ -1323,6 +1537,19 @@ func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
 func updateUserQuotaUsedQuotaAndRequestCount(id int, quota int, usedQuota int, requestCount int) {
 	if quota == 0 && usedQuota == 0 && requestCount == 0 {
 		return
+	}
+	if quota != 0 {
+		active, err := WalletCreditLedgerActive(DB)
+		if err != nil {
+			common.SysError("failed to check wallet credit baseline for batch quota update: " + err.Error())
+			quota = 0
+		} else if active {
+			common.SysError(fmt.Sprintf("refusing batch quota delta for user %d after wallet credit baseline initialization", id))
+			quota = 0
+		}
+		if quota == 0 && usedQuota == 0 && requestCount == 0 {
+			return
+		}
 	}
 
 	err := DB.Model(&User{}).Where("id = ?", id).Updates(

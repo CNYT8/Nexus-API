@@ -60,10 +60,10 @@ const UsersFilters = ({
       layout='horizontal'
       trigger='change'
       stopValidateWithError={false}
-      className='w-full md:w-auto order-1 md:order-2'
+      className='order-1 w-full min-w-0 2xl:order-2 2xl:flex-1'
     >
-      <div className='flex flex-col md:flex-row items-center gap-2 w-full md:w-auto'>
-        <div className='relative w-full md:w-64'>
+      <div className='flex w-full min-w-0 flex-col items-stretch gap-2 2xl:flex-row 2xl:items-center'>
+        <div className='relative w-full min-w-0 2xl:flex-1'>
           <Form.Input
             field='searchKeyword'
             prefix={<IconSearch />}
@@ -76,8 +76,8 @@ const UsersFilters = ({
         <div
           className={
             membershipEnabled
-              ? 'grid w-full grid-cols-2 gap-2 md:w-96'
-              : 'w-full md:w-48'
+              ? 'grid w-full min-w-0 grid-cols-2 gap-2 2xl:w-96 2xl:flex-none'
+              : 'w-full min-w-0 2xl:w-48 2xl:flex-none'
           }
         >
           <Form.Select
@@ -112,12 +112,12 @@ const UsersFilters = ({
             />
           )}
         </div>
-        <div className='flex gap-2 w-full md:w-auto'>
+        <div className='flex w-full min-w-0 gap-2 2xl:w-auto 2xl:flex-none'>
           <Button
             type='tertiary'
             htmlType='submit'
             loading={loading || searching}
-            className='flex-1 md:flex-initial md:w-auto'
+            className='min-w-0 flex-1 2xl:flex-initial 2xl:w-auto'
             size='small'
           >
             {t('查询')}
@@ -125,7 +125,7 @@ const UsersFilters = ({
           <Button
             type='tertiary'
             onClick={handleReset}
-            className='flex-1 md:flex-initial md:w-auto'
+            className='min-w-0 flex-1 2xl:flex-initial 2xl:w-auto'
             size='small'
           >
             {t('重置')}

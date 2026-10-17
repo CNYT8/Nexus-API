@@ -159,9 +159,33 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
 			return errors.New("该兑换码已过期")
 		}
-		err = tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
+		active, err := walletCreditBaselineState(tx)
 		if err != nil {
 			return err
+		}
+		if redemption.Quota > 0 {
+			if _, err := CreditWalletSourceTx(tx, userId, WalletCreditSourceRedemption, "redeemed", "redemption", walletCreditReferenceID(redemption.Id), redemption.Quota); err != nil {
+				return err
+			}
+		} else if active && redemption.Quota < 0 {
+			// A misconfigured negative code stays a debit, but it is recorded as
+			// a non-consumption adjustment that can never earn rebates.
+			adjustmentKey, err := NewWalletAdjustmentKey(userId, "redemption_debit", walletCreditReferenceID(redemption.Id))
+			if err != nil {
+				return err
+			}
+			if err := AdjustWalletDebitTx(tx, adjustmentKey, userId, int64(-redemption.Quota)); err != nil {
+				return err
+			}
+		} else if !active && redemption.Quota != 0 {
+			// Preserve the legacy quota-only update before the ledger exists.
+			result := tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return errors.New("兑换用户不存在")
+			}
 		}
 		redemption.RedeemedTime = common.GetTimestamp()
 		redemption.Status = common.RedemptionCodeStatusUsed
@@ -173,6 +197,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 		common.SysError("redemption failed: " + err.Error())
 		return 0, ErrRedeemFailed
 	}
+	invalidateWalletCreditCache(userId)
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
 	return redemption.Quota, nil
 }

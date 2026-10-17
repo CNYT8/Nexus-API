@@ -266,15 +266,19 @@ func IncreaseUserQuotaWithMembershipGrant(userId int, quota int, operatorId int)
 	}
 
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		if err := addUserQuotaTx(tx, userId, quota); err != nil {
-			return err
-		}
-		return tx.Create(&MembershipQuotaGrant{
+		grant := &MembershipQuotaGrant{
 			UserId:     userId,
 			OperatorId: operatorId,
 			Quota:      quota,
 			Amount:     amount,
-		}).Error
+		}
+		if err := tx.Create(grant).Error; err != nil {
+			return err
+		}
+		if _, err := CreditWalletSourceTx(tx, userId, WalletCreditSourceAdmin, "ordinary", "membership_grant", walletCreditReferenceID(grant.Id), quota); err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return err
@@ -284,6 +288,39 @@ func IncreaseUserQuotaWithMembershipGrant(userId int, quota int, operatorId int)
 		common.SysLog(fmt.Sprintf("failed to update user quota cache after membership grant for user %d: %s", userId, err.Error()))
 	}
 	AutoUpgradeUserMembershipAfterTopUp(userId)
+	return nil
+}
+
+// IncreaseUserQuotaAsGift credits administrator-gifted quota. The credit stays
+// non-eligible and never counts toward the membership cumulative amount; the
+// zero-amount grant row is the durable server-side identity of the credit.
+func IncreaseUserQuotaAsGift(userId int, quota int, operatorId int) error {
+	if userId <= 0 || operatorId <= 0 || quota <= 0 {
+		return errors.New("invalid membership quota gift")
+	}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		grant := &MembershipQuotaGrant{
+			UserId:     userId,
+			OperatorId: operatorId,
+			Quota:      quota,
+			Amount:     0,
+		}
+		if err := tx.Create(grant).Error; err != nil {
+			return err
+		}
+		if _, err := CreditWalletSourceTx(tx, userId, WalletCreditSourceAdmin, "gift", "membership_gift", walletCreditReferenceID(grant.Id), quota); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	if err := cacheIncrUserQuota(userId, int64(quota)); err != nil {
+		common.SysLog(fmt.Sprintf("failed to update user quota cache after membership gift for user %d: %s", userId, err.Error()))
+	}
 	return nil
 }
 

@@ -68,7 +68,7 @@ func setupTopUpQuotaTestEnv(t *testing.T) *topUpQuotaTestEnv {
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.TopUp{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.TopUp{}, &model.RebateSystemState{}, &model.WalletCreditLot{}, &model.WalletConsumptionSettlement{}, &model.WalletConsumptionAllocation{}, &model.WalletReservation{}, &model.WalletLotHold{}, &model.WalletDebtRepayment{}, &model.RebateRecord{}, &model.RebateCapBucket{}))
 	model.DB = db
 	model.LOG_DB = db
 

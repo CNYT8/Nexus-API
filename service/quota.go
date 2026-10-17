@@ -464,6 +464,24 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 	if relayInfo == nil {
 		return errors.New("relayInfo is nil")
 	}
+	if preConsumedQuota < 0 {
+		return errors.New("pre-consumed quota cannot be negative")
+	}
+	if relayInfo.BillingSource != BillingSourceSubscription && (quota != 0 || preConsumedQuota != 0) {
+		active, ledgerErr := model.WalletCreditLedgerActive(model.DB)
+		if ledgerErr != nil {
+			return ledgerErr
+		}
+		if active {
+			// This API carries a delta, not a durable billable operation. RequestId
+			// and a fresh random key cannot distinguish retries from adjustments.
+			// Use BillingSession or a persisted task reservation instead.
+			return ErrWalletBillingIdentityRequired
+		}
+	}
+	if quota == math.MinInt || (quota > 0 && preConsumedQuota > math.MaxInt-quota) {
+		return errors.New("wallet quota adjustment overflows")
+	}
 	if quota == 0 {
 		if sendEmail && preConsumedQuota != 0 {
 			checkAndSendQuotaNotify(relayInfo, quota, preConsumedQuota)
@@ -529,49 +547,65 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 }
 
 func checkAndSendQuotaNotify(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int) {
+	if relayInfo == nil {
+		return
+	}
+	// Legacy callers supply a pre-consumption snapshot and a delta. Convert it
+	// once; completion callers already have a post-settlement balance and use
+	// checkAndSendRemainingQuotaNotify directly instead.
+	if preConsumedQuota < 0 || quota < -preConsumedQuota || (quota > 0 && preConsumedQuota > math.MaxInt-quota) {
+		return
+	}
+	consumed := quota + preConsumedQuota
+	remaining := math.MinInt
+	if relayInfo.UserQuota >= math.MinInt+consumed {
+		remaining = relayInfo.UserQuota - consumed
+	}
+	info := *relayInfo
+	info.UserQuota = remaining
+	checkAndSendRemainingQuotaNotify(&info)
+}
+
+// buildRemainingQuotaNotify uses the same post-settlement balance for both
+// the threshold and message. It is pure so boundary/content tests need no
+// goroutines or real email/webhook delivery.
+func buildRemainingQuotaNotify(info *relaycommon.RelayInfo) (dto.Notify, bool) {
+	if info == nil || info.UserId <= 0 {
+		return dto.Notify{}, false
+	}
+	threshold := common.QuotaRemindThreshold
+	if info.UserSetting.QuotaWarningThreshold != 0 {
+		threshold = int(info.UserSetting.QuotaWarningThreshold)
+	}
+	if info.UserQuota >= threshold {
+		return dto.Notify{}, false
+	}
+	prompt := "您的额度即将用尽"
+	topUpLink := PaymentReturnURL("/console/topup")
+	values := []interface{}{prompt, logger.FormatQuota(info.UserQuota)}
+	var content string
+	switch info.UserSetting.NotifyType {
+	case dto.NotifyTypeBark:
+		content = "{{value}}，剩余额度：{{value}}，请及时充值"
+	case dto.NotifyTypeGotify:
+		content = "{{value}}，当前剩余额度为 {{value}}，请及时充值。"
+	default:
+		content = "{{value}}，当前剩余额度为 {{value}}，为了不影响您的使用，请及时充值。<br/>充值链接：<a href='{{value}}'>{{value}}</a>"
+		values = append(values, topUpLink, topUpLink)
+	}
+	return dto.NewNotify(dto.NotifyTypeQuotaExceed, prompt, content, values), true
+}
+
+func checkAndSendRemainingQuotaNotify(info *relaycommon.RelayInfo) {
+	notification, needed := buildRemainingQuotaNotify(info)
+	if !needed {
+		return
+	}
+	// Capture values before queueing: never observe a later mutated RelayInfo.
+	userID, email, setting := info.UserId, info.UserEmail, info.UserSetting
 	gopool.Go(func() {
-		userSetting := relayInfo.UserSetting
-		threshold := common.QuotaRemindThreshold
-		if userSetting.QuotaWarningThreshold != 0 {
-			threshold = int(userSetting.QuotaWarningThreshold)
-		}
-
-		//noMoreQuota := userCache.Quota-(quota+preConsumedQuota) <= 0
-		quotaTooLow := false
-		consumeQuota := quota + preConsumedQuota
-		if relayInfo.UserQuota-consumeQuota < threshold {
-			quotaTooLow = true
-		}
-		if quotaTooLow {
-			prompt := "您的额度即将用尽"
-			topUpLink := PaymentReturnURL("/console/topup")
-
-			// 根据通知方式生成不同的内容格式
-			var content string
-			var values []interface{}
-
-			notifyType := userSetting.NotifyType
-			if notifyType == "" {
-				notifyType = dto.NotifyTypeEmail
-			}
-
-			if notifyType == dto.NotifyTypeBark {
-				// Bark推送使用简短文本，不支持HTML
-				content = "{{value}}，剩余额度：{{value}}，请及时充值"
-				values = []interface{}{prompt, logger.FormatQuota(relayInfo.UserQuota)}
-			} else if notifyType == dto.NotifyTypeGotify {
-				content = "{{value}}，当前剩余额度为 {{value}}，请及时充值。"
-				values = []interface{}{prompt, logger.FormatQuota(relayInfo.UserQuota)}
-			} else {
-				// 默认内容格式，适用于Email和Webhook（支持HTML）
-				content = "{{value}}，当前剩余额度为 {{value}}，为了不影响您的使用，请及时充值。<br/>充值链接：<a href='{{value}}'>{{value}}</a>"
-				values = []interface{}{prompt, logger.FormatQuota(relayInfo.UserQuota), topUpLink, topUpLink}
-			}
-
-			err := NotifyUser(relayInfo.UserId, relayInfo.UserEmail, relayInfo.UserSetting, dto.NewNotify(dto.NotifyTypeQuotaExceed, prompt, content, values))
-			if err != nil {
-				common.SysError(fmt.Sprintf("failed to send quota notify to user %d: %s", relayInfo.UserId, err.Error()))
-			}
+		if err := NotifyUser(userID, email, setting, notification); err != nil {
+			common.SysError(fmt.Sprintf("failed to send quota notify to user %d: %s", userID, err.Error()))
 		}
 	})
 }

@@ -91,7 +91,7 @@ const UsersPage = () => {
           />
         }
         actionsArea={
-          <div className='flex flex-col md:flex-row justify-between items-center gap-2 w-full'>
+          <div className='flex w-full min-w-0 flex-col justify-between gap-2 2xl:flex-row 2xl:items-start'>
             <UsersActions
               setShowAddUser={setShowAddUser}
               groupOptions={groupOptions}

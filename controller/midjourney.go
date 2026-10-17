@@ -35,10 +35,12 @@ func UpdateMidjourneyTaskBulk() {
 		taskChannelM := make(map[int][]string)
 		taskM := make(map[string]*model.Midjourney)
 		nullTaskIds := make([]int, 0)
+		nullTasks := make([]*model.Midjourney, 0)
 		for _, task := range tasks {
 			if task.MjId == "" {
 				// 统计失败的未完成任务
 				nullTaskIds = append(nullTaskIds, task.Id)
+				nullTasks = append(nullTasks, task)
 				continue
 			}
 			taskM[task.MjId] = task
@@ -53,6 +55,11 @@ func UpdateMidjourneyTaskBulk() {
 				logger.LogError(ctx, fmt.Sprintf("Fix null mj_id task error: %v", err))
 			} else {
 				logger.LogInfo(ctx, fmt.Sprintf("Fix null mj_id task success: %v", nullTaskIds))
+				for _, task := range nullTasks {
+					if task.BillingKey != "" {
+						settleMidjourneyTaskBilling(ctx, task, false)
+					}
+				}
 			}
 		}
 		if len(taskChannelM) == 0 {
@@ -74,6 +81,12 @@ func UpdateMidjourneyTaskBulk() {
 				})
 				if err != nil {
 					logger.LogInfo(ctx, fmt.Sprintf("UpdateMidjourneyTask error: %v", err))
+				} else {
+					for _, mjId := range taskIds {
+						if task := taskM[mjId]; task != nil && task.BillingKey != "" {
+							settleMidjourneyTaskBilling(ctx, task, false)
+						}
+					}
 				}
 				continue
 			}
@@ -177,26 +190,74 @@ func UpdateMidjourneyTaskBulk() {
 				if err != nil {
 					logger.LogError(ctx, "UpdateMidjourneyTask task error: "+err.Error())
 				} else if won && shouldReturnQuota {
-					err = model.IncreaseUserQuota(task.UserId, task.Quota, false)
-					if err != nil {
-						logger.LogError(ctx, "fail to increase user quota: "+err.Error())
-					}
-					model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-						UserId:    task.UserId,
-						LogType:   model.LogTypeRefund,
-						Content:   "",
-						ChannelId: task.ChannelId,
-						ModelName: service.CovertMjpActionToModelName(task.Action),
-						Quota:     task.Quota,
-						Other: map[string]interface{}{
-							"task_id": task.MjId,
-							"reason":  "构图失败",
-						},
-					})
+					settleMidjourneyTaskBilling(ctx, task, false)
+				} else if won && task.Status == "SUCCESS" {
+					settleMidjourneyTaskBilling(ctx, task, true)
 				}
 			}
 		}
 	}
+}
+
+// settleMidjourneyTaskBilling terminates the billing of one Midjourney task.
+// Legacy tasks (no durable BillingKey) keep the historical refund behavior;
+// ledger wallet tasks finalize their reservation on success and refund it on
+// failure. Both ledger operations are idempotent, so duplicate terminal
+// callbacks cannot move money twice.
+func settleMidjourneyTaskBilling(ctx context.Context, task *model.Midjourney, success bool) {
+	if task == nil {
+		return
+	}
+	if task.BillingKey == "" {
+		if success {
+			return
+		}
+		if task.Quota == 0 {
+			return
+		}
+		if err := model.IncreaseUserQuota(task.UserId, task.Quota, false); err != nil {
+			logger.LogError(ctx, "fail to increase user quota: "+err.Error())
+		}
+		model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
+			UserId:    task.UserId,
+			LogType:   model.LogTypeRefund,
+			Content:   "",
+			ChannelId: task.ChannelId,
+			ModelName: service.CovertMjpActionToModelName(task.Action),
+			Quota:     task.Quota,
+			Other: map[string]interface{}{
+				"task_id": task.MjId,
+				"reason":  "构图失败",
+			},
+		})
+		return
+	}
+	if success {
+		if task.Quota <= 0 {
+			return
+		}
+		if err := service.FinalizeTaskWalletConsumption(ctx, task.BillingKey, task.UserId, task.Quota, task.Quota); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("Midjourney wallet finalize failed task %s: %v", task.MjId, err))
+			return
+		}
+		return
+	}
+	if err := model.RefundWalletReservation(model.DB, task.BillingKey, task.UserId); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("Midjourney wallet refund failed task %s: %v", task.MjId, err))
+		return
+	}
+	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
+		UserId:    task.UserId,
+		LogType:   model.LogTypeRefund,
+		Content:   "",
+		ChannelId: task.ChannelId,
+		ModelName: service.CovertMjpActionToModelName(task.Action),
+		Quota:     task.Quota,
+		Other: map[string]interface{}{
+			"task_id": task.MjId,
+			"reason":  "构图失败",
+		},
+	})
 }
 
 func checkMjTaskNeedUpdate(oldTask *model.Midjourney, newTask dto.MidjourneyDto) bool {

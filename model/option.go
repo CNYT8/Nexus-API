@@ -32,7 +32,10 @@ const (
 	outputSensitiveWordsOptionKey        = "OutputSensitiveWords"
 )
 
-var outputSensitiveUpdateMutex sync.Mutex
+var (
+	outputSensitiveUpdateMutex sync.Mutex
+	rebateOptionUpdateMutex    sync.Mutex
+)
 
 func IsOutputSensitiveOptionKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
@@ -217,6 +220,10 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticDisableStatusCodes"] = operation_setting.AutomaticDisableStatusCodesToString()
 	common.OptionMap["AutomaticRetryStatusCodes"] = operation_setting.AutomaticRetryStatusCodesToString()
 	common.OptionMap["ExposeRatioEnabled"] = strconv.FormatBool(ratio_setting.IsExposeRatioEnabled())
+	rebateConfigValues, _ := config.ConfigToMap(operation_setting.GetRebateSetting())
+	for key, value := range rebateConfigValues {
+		common.OptionMap["rebate_setting."+key] = value
+	}
 	_ = ticket_setting.GetSettings()
 
 	// 自动添加所有注册的模型配置
@@ -335,6 +342,8 @@ func hasLegacyEncryptedTicketRows() (bool, error) {
 func loadOptionsFromDatabase() {
 	outputSensitiveUpdateMutex.Lock()
 	defer outputSensitiveUpdateMutex.Unlock()
+	rebateOptionUpdateMutex.Lock()
+	defer rebateOptionUpdateMutex.Unlock()
 
 	options, err := AllOption()
 	if err != nil {
@@ -342,10 +351,15 @@ func loadOptionsFromDatabase() {
 		return
 	}
 
+	rebateUpdates := make(map[string]string)
 	outputConfig := setting.GetOutputSensitiveConfig()
 	outputConfigFound := false
 	outputConfigValid := true
 	for _, option := range options {
+		if strings.HasPrefix(option.Key, "rebate_setting.") {
+			rebateUpdates[strings.TrimPrefix(option.Key, "rebate_setting.")] = option.Value
+			continue
+		}
 		if IsOutputSensitiveOptionKey(option.Key) {
 			outputConfigFound = true
 			common.OptionMapRWMutex.Lock()
@@ -380,6 +394,20 @@ func loadOptionsFromDatabase() {
 	if outputConfigFound && outputConfigValid {
 		if err := setting.SetOutputSensitiveConfig(outputConfig); err != nil {
 			common.SysLog("failed to apply output sensitive config: " + err.Error())
+		}
+	}
+	if len(rebateUpdates) > 0 {
+		if err := operation_setting.UpdateRebateSettingFields(rebateUpdates); err != nil {
+			common.SysLog("failed to apply rebate settings from database: " + err.Error())
+		} else {
+			common.OptionMapRWMutex.Lock()
+			if common.OptionMap == nil {
+				common.OptionMap = make(map[string]string)
+			}
+			for field, value := range rebateUpdates {
+				common.OptionMap["rebate_setting."+field] = value
+			}
+			common.OptionMapRWMutex.Unlock()
 		}
 	}
 }
@@ -441,6 +469,10 @@ func UpdateOutputSensitiveConfig(configValue setting.OutputSensitiveConfig) erro
 }
 
 func UpdateOption(key string, value string) error {
+	if strings.HasPrefix(key, "rebate_setting.") {
+		rebateOptionUpdateMutex.Lock()
+		defer rebateOptionUpdateMutex.Unlock()
+	}
 	if err := validateOptionBeforeSave(key, value); err != nil {
 		return err
 	}
@@ -473,6 +505,9 @@ func validateOptionBeforeSave(key string, value string) error {
 	if strings.EqualFold(strings.TrimSpace(key), webRiskFingerprintSecretOptionKey) {
 		return errors.New("web risk fingerprint secret cannot be changed through the option API")
 	}
+	if strings.HasPrefix(key, "rebate_setting.") {
+		return operation_setting.ValidateRebateSettingField(strings.TrimPrefix(key, "rebate_setting."), value)
+	}
 	if key == "membership_setting.tiers" {
 		_, err := membership_setting.ParseTiersJSONString(value)
 		return err
@@ -503,8 +538,20 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
 	}
+	rebateUpdates := make(map[string]string)
 	for k, v := range values {
+		if strings.HasPrefix(k, "rebate_setting.") {
+			rebateUpdates[strings.TrimPrefix(k, "rebate_setting.")] = v
+			continue
+		}
 		if err := validateOptionBeforeSave(k, v); err != nil {
+			return err
+		}
+	}
+	if len(rebateUpdates) > 0 {
+		rebateOptionUpdateMutex.Lock()
+		defer rebateOptionUpdateMutex.Unlock()
+		if err := operation_setting.ValidateRebateSettingFields(rebateUpdates); err != nil {
 			return err
 		}
 	}
@@ -524,7 +571,21 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if err != nil {
 		return err
 	}
+	if len(rebateUpdates) > 0 {
+		if err := operation_setting.UpdateRebateSettingFields(rebateUpdates); err != nil {
+			return err
+		}
+	}
 	for k, v := range values {
+		if strings.HasPrefix(k, "rebate_setting.") {
+			common.OptionMapRWMutex.Lock()
+			if common.OptionMap == nil {
+				common.OptionMap = make(map[string]string)
+			}
+			common.OptionMap[k] = v
+			common.OptionMapRWMutex.Unlock()
+			continue
+		}
 		if err := updateOptionMap(k, v); err != nil {
 			return err
 		}
@@ -903,6 +964,9 @@ func updateOptionMap(key string, value string) (err error) {
 }
 
 func handleStrictConfigUpdate(key, value string) (bool, error) {
+	if strings.HasPrefix(key, "rebate_setting.") {
+		return true, operation_setting.UpdateRebateSettingField(strings.TrimPrefix(key, "rebate_setting."), value)
+	}
 	switch key {
 	case "checkin_setting.stage_rules":
 		return true, operation_setting.UpdateCheckinStageRulesByJSONString(value)

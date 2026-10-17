@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -315,7 +316,26 @@ func migrateDB() error {
 			return err
 		}
 	}
-	return nil
+	return migrateAccountingTables(DB)
+}
+
+func migrateAccountingTables(db *gorm.DB) error {
+	if db == nil {
+		return errors.New("accounting migration requires a database")
+	}
+	// Keep financial table DDL sequential. Some SQLite and MySQL deployments
+	// do not tolerate concurrent CREATE/ALTER operations on related tables.
+	return db.AutoMigrate(
+		&WalletCreditLot{},
+		&WalletConsumptionSettlement{},
+		&WalletConsumptionAllocation{},
+		&WalletReservation{},
+		&WalletLotHold{},
+		&WalletDebtRepayment{},
+		&RebateCapBucket{},
+		&RebateSystemState{},
+		&RebateRecord{},
+	)
 }
 
 func migrateDBFast() error {
@@ -391,6 +411,9 @@ func migrateDBFast() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+	if err := migrateAccountingTables(DB); err != nil {
+		return err
 	}
 	common.SysLog("database migrated")
 	return nil

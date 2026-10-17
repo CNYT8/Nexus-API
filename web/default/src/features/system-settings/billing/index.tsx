@@ -110,6 +110,20 @@ const defaultBillingSettings: BillingSettings = {
   'checkin_setting.amount_threshold': 0,
   'checkin_setting.min_quota': 1000,
   'checkin_setting.max_quota': 10000,
+  'rebate_setting.enabled': false,
+  'rebate_setting.count_during_closure': false,
+  'rebate_setting.rate_basis_points': 0,
+  'rebate_setting.payout_mode': 'immediate',
+  'rebate_setting.payout_hour': 0,
+  'rebate_setting.payout_minute': 0,
+  'rebate_setting.payout_interval_hours': 24,
+  'rebate_setting.site_timezone': 'UTC',
+  'rebate_setting.inviter_limit_period': 'monthly',
+  'rebate_setting.invitee_eligible_money_limit_micros': 0,
+  'rebate_setting.inviter_reward_limit_micros': 0,
+  'rebate_setting.inviter_eligible_money_limit_micros': 0,
+  'rebate_setting.inviter_min_paid_money_micros': 0,
+  'rebate_setting.payout_hold_hours': 0,
 }
 
 export function BillingSettings() {

@@ -546,11 +546,16 @@ func truncateBase64(s string) string {
 // 优先级：1. adaptor.AdjustBillingOnComplete 返回正数 → 使用 adaptor 计算的额度
 //
 //  2. taskResult.TotalTokens > 0 → 按 token 重算
-//  3. 都不满足 → 保持预扣额度不变
+//  3. 都不满足 → 预扣额度即最终额度
+//
+// 每个成功分支都必须调用 RecalculateTaskQuota：账本任务需要终结持久
+// reservation（消费来源 lot、释放 hold、一次性生成返利），否则成功任务
+// 的 reservation 会在 TTL 后被错误退款。legacy 差额为零时该调用是 no-op。
 func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
-	// 0. 按次计费的任务不做差额结算
+	// 0. 按次计费不做差额结算，但仍需按预扣额度终结结算
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.PerCallBilling {
-		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 按次计费，跳过差额结算", task.TaskID))
+		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 按次计费，按预扣额度终结结算", task.TaskID))
+		RecalculateTaskQuota(ctx, task, task.Quota, "按次计费结算")
 		return
 	}
 	// 1. 优先让 adaptor 决定最终额度
@@ -563,5 +568,6 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		RecalculateTaskQuotaByTokens(ctx, task, taskResult.TotalTokens)
 		return
 	}
-	// 3. 无调整，保持预扣额度
+	// 3. 无调整：预扣额度即最终额度，仍需终结账本 reservation
+	RecalculateTaskQuota(ctx, task, task.Quota, "预扣额度即最终额度")
 }

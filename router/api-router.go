@@ -123,6 +123,8 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/passkey/verify/finish", controller.PasskeyVerifyFinish)
 				selfRoute.DELETE("/passkey", controller.PasskeyDelete)
 				selfRoute.GET("/aff", controller.GetAffCode)
+				selfRoute.GET("/rebate", middleware.RebateReadRateLimit(), controller.GetUserRebateSummary)
+				selfRoute.GET("/rebate/records", middleware.RebateReadRateLimit(), controller.GetUserRebateRecords)
 				selfRoute.GET("/topup/info", controller.GetTopUpInfo)
 				selfRoute.GET("/topup/self", controller.GetUserTopUps)
 				selfRoute.POST("/topup", middleware.CriticalRateLimit(), controller.TopUp)
@@ -216,6 +218,17 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/subscription/epay/notify", controller.SubscriptionEpayNotify)
 		apiRouter.GET("/subscription/epay/return", controller.SubscriptionEpayReturn)
 		apiRouter.POST("/subscription/epay/return", anonymousRequestBodyLimit, controller.SubscriptionEpayReturn)
+		// Administrative rebate fraud response. Root-only: voiding cancels unpaid
+		// obligations and clawback debits an inviter wallet, so both are
+		// restricted to the installation owner and strictly rate limited.
+		rebateAdminRoute := apiRouter.Group("/rebate/admin")
+		rebateAdminRoute.Use(middleware.RootAuth(), middleware.CriticalRateLimit())
+		{
+			rebateAdminRoute.GET("/records", controller.AdminListUserRebates)
+			rebateAdminRoute.POST("/void", controller.VoidUserRebates)
+			rebateAdminRoute.POST("/clawback", controller.ClawbackUserRebates)
+		}
+
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())
 		{

@@ -546,8 +546,8 @@ func RelayTask(c *gin.Context) {
 	var result *relay.TaskSubmitResult
 	var taskErr *dto.TaskError
 	defer func() {
-		if taskErr != nil && relayInfo.Billing != nil {
-			relayInfo.Billing.Refund(c)
+		if taskErr != nil {
+			refundTaskWalletSubmit(c, relayInfo)
 		}
 	}()
 
@@ -617,35 +617,112 @@ func RelayTask(c *gin.Context) {
 
 	// ── 成功：结算 + 日志 + 插入任务 ──
 	if taskErr == nil {
-		if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
-			common.SysError("settle task billing error: " + settleErr.Error())
+		// 账本钱包任务在提交前已持久预扣；提交成功不能在此终结 reservation，
+		// 由轮询完成侧的 Recalculate/Refund 负责。其余路径保持 SettleBilling。
+		if c.GetString(service.ContextKeyTaskWalletBillingKey) == "" {
+			if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
+				common.SysError("settle task billing error: " + settleErr.Error())
+			}
 		}
 		service.LogTaskConsumption(c, relayInfo)
-
-		task := model.InitTask(result.Platform, relayInfo)
-		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
-		task.PrivateData.BillingSource = relayInfo.BillingSource
-		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
-		task.PrivateData.SubscriptionPeriodStart = relayInfo.SubscriptionPeriodStart
-		task.PrivateData.TokenId = relayInfo.TokenId
-		task.PrivateData.BillingContext = &model.TaskBillingContext{
-			ModelPrice:      relayInfo.PriceData.ModelPrice,
-			GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-			ModelRatio:      relayInfo.PriceData.ModelRatio,
-			OtherRatios:     relayInfo.PriceData.OtherRatios,
-			OriginModelName: relayInfo.OriginModelName,
-			PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
-		}
-		task.Quota = result.Quota
-		task.Data = result.TaskData
-		task.Action = relayInfo.Action
-		if insertErr := task.Insert(); insertErr != nil {
-			common.SysError("insert task error: " + insertErr.Error())
-		}
+		persistSubmittedTask(c, relayInfo, result)
 	}
 
 	if taskErr != nil {
 		respondTaskError(c, taskErr)
+	}
+}
+
+// refundTaskWalletSubmit releases pre-consumed funds for a failed task submit.
+// A BillingSession owns its own wallet/subscription reservation and token
+// state; the ledger wallet path owns a pending reservation key carried in the
+// request context. The two are mutually exclusive.
+func refundTaskWalletSubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
+	if relayInfo == nil {
+		return
+	}
+	if relayInfo.Billing != nil {
+		relayInfo.Billing.Refund(c)
+		return
+	}
+	key := c.GetString(service.ContextKeyTaskWalletBillingKey)
+	if key == "" {
+		return
+	}
+	if err := service.RefundPendingTaskWalletQuota(key, relayInfo.UserId); err != nil {
+		common.SysError("refund pending task wallet quota error: " + err.Error())
+	}
+	reserved := c.GetInt(service.ContextKeyTaskWalletBillingQuota)
+	if reserved > 0 && !relayInfo.IsPlayground {
+		if err := model.IncreaseTokenQuotaDirect(relayInfo.TokenId, relayInfo.TokenKey, reserved); err != nil {
+			common.SysError("refund task token quota error: " + err.Error())
+		}
+	}
+}
+
+// persistSubmittedTask builds and inserts the task row for a successful submit.
+// Ledger wallet submissions persist the durable billing key, keep task.Quota at
+// the reserved amount for the alignment CAS, then align to the final submit
+// quota. Tasks that are already terminal when persisted are settled or refunded
+// immediately so the reservation cannot hang until the TTL cleanup.
+func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, result *relay.TaskSubmitResult) *model.Task {
+	task := model.InitTask(result.Platform, relayInfo)
+	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
+	task.PrivateData.BillingSource = relayInfo.BillingSource
+	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
+	task.PrivateData.SubscriptionPeriodStart = relayInfo.SubscriptionPeriodStart
+	task.PrivateData.TokenId = relayInfo.TokenId
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		ModelPrice:      relayInfo.PriceData.ModelPrice,
+		GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+		ModelRatio:      relayInfo.PriceData.ModelRatio,
+		OtherRatios:     relayInfo.PriceData.OtherRatios,
+		OriginModelName: relayInfo.OriginModelName,
+		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+	}
+	taskWalletKey := c.GetString(service.ContextKeyTaskWalletBillingKey)
+	task.PrivateData.BillingKey = taskWalletKey
+	task.Quota = result.Quota
+	if taskWalletKey != "" {
+		// 预扣身份在提交前创建，任务行必须以预扣额度写入，才能通过
+		// ReserveTaskWalletQuota 的 CAS 对齐最终额度。
+		task.Quota = c.GetInt(service.ContextKeyTaskWalletBillingQuota)
+	}
+	task.Data = result.TaskData
+	task.Action = relayInfo.Action
+	if insertErr := task.Insert(); insertErr != nil {
+		common.SysError("insert task error: " + insertErr.Error())
+		refundTaskWalletSubmit(c, relayInfo)
+		return nil
+	}
+	if taskWalletKey == "" {
+		return task
+	}
+	if task.Quota != result.Quota {
+		if alignErr := service.ReserveTaskWalletQuota(task, result.Quota); alignErr != nil {
+			common.SysError("align task wallet quota error: " + alignErr.Error())
+		}
+	}
+	settleTerminalSubmittedTask(c, task)
+	return task
+}
+
+// settleTerminalSubmittedTask finalizes a reservation whose task row is already
+// terminal so it cannot hang until the stale-reservation TTL.
+func settleTerminalSubmittedTask(c *gin.Context, task *model.Task) {
+	if task == nil {
+		return
+	}
+	status := task.Status
+	var stored model.Task
+	if err := model.DB.Select("id", "status").First(&stored, task.ID).Error; err == nil {
+		status = stored.Status
+	}
+	switch status {
+	case model.TaskStatusSuccess:
+		service.RecalculateTaskQuota(c, task, task.Quota, "提交即终态结算")
+	case model.TaskStatusFailure:
+		service.RefundTaskQuota(c, task, "提交即终态退款")
 	}
 }
 

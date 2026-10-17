@@ -21,8 +21,12 @@ type Midjourney struct {
 	FailReason  string `json:"fail_reason"`
 	ChannelId   int    `json:"channel_id"`
 	Quota       int    `json:"quota"`
-	Buttons     string `json:"buttons"`
-	Properties  string `json:"properties"`
+	// BillingKey is the durable pending wallet reservation identity created
+	// before the upstream submit. Non-empty only for ledger wallet submissions;
+	// polling finalizes it on success and refunds it on failure.
+	BillingKey string `json:"billing_key,omitempty" gorm:"type:char(64);not null;default:'';index"`
+	Buttons    string `json:"buttons"`
+	Properties string `json:"properties"`
 }
 
 // TaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段

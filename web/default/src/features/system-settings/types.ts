@@ -287,6 +287,20 @@ export type BillingSettings = {
   'checkin_setting.amount_threshold': number
   'checkin_setting.min_quota': number
   'checkin_setting.max_quota': number
+  'rebate_setting.enabled': boolean
+  'rebate_setting.count_during_closure': boolean
+  'rebate_setting.rate_basis_points': number
+  'rebate_setting.payout_mode': string
+  'rebate_setting.payout_hour': number
+  'rebate_setting.payout_minute': number
+  'rebate_setting.payout_interval_hours': number
+  'rebate_setting.inviter_min_paid_money_micros': number
+  'rebate_setting.payout_hold_hours': number
+  'rebate_setting.site_timezone': string
+  'rebate_setting.inviter_limit_period': string
+  'rebate_setting.invitee_eligible_money_limit_micros': number
+  'rebate_setting.inviter_reward_limit_micros': number
+  'rebate_setting.inviter_eligible_money_limit_micros': number
 }
 
 export type OperationsSettings = {

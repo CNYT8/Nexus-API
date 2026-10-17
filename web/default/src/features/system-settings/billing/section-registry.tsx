@@ -22,10 +22,11 @@ import { PricingSection } from '../general/pricing-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
 import { PaymentSettingsSection } from '../integrations/payment-settings-section'
 import { RatioSettingsCard } from '../models/ratio-settings-card'
-import { TicketSettingsSection } from './ticket-settings-section'
-import { EmptyResponseSettingsSection } from './empty-response-section'
 import type { BillingSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { EmptyResponseSettingsSection } from './empty-response-section'
+import { RebateSettingsSection } from './rebate-settings-section'
+import { TicketSettingsSection } from './ticket-settings-section'
 
 const getModelDefaults = (settings: BillingSettings) => ({
   ModelPrice: settings.ModelPrice,
@@ -198,6 +199,33 @@ const BILLING_SECTIONS = [
     id: 'tickets',
     titleKey: 'Ticket Settings',
     build: () => <TicketSettingsSection />,
+  },
+  {
+    id: 'rebate',
+    titleKey: 'Recharge Rebate Settings',
+    build: (settings: BillingSettings) => (
+      <RebateSettingsSection
+        defaultValues={{
+          enabled: settings['rebate_setting.enabled'],
+          countDuringClosure: settings['rebate_setting.count_during_closure'],
+          rateBasisPoints: settings['rebate_setting.rate_basis_points'],
+          payoutMode: settings['rebate_setting.payout_mode'],
+          payoutHour: settings['rebate_setting.payout_hour'],
+          payoutMinute: settings['rebate_setting.payout_minute'],
+          payoutIntervalHours: settings['rebate_setting.payout_interval_hours'],
+          siteTimezone: settings['rebate_setting.site_timezone'],
+          inviterLimitPeriod: settings['rebate_setting.inviter_limit_period'],
+          inviteeCap:
+            settings['rebate_setting.invitee_eligible_money_limit_micros'],
+          rewardCap: settings['rebate_setting.inviter_reward_limit_micros'],
+          inviterEligibleCap:
+            settings['rebate_setting.inviter_eligible_money_limit_micros'],
+          inviterMinPaid:
+            settings['rebate_setting.inviter_min_paid_money_micros'],
+          payoutHoldHours: settings['rebate_setting.payout_hold_hours'],
+        }}
+      />
+    ),
   },
   {
     id: 'checkin',

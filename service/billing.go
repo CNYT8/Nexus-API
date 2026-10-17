@@ -1,10 +1,12 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -14,6 +16,8 @@ const (
 	BillingSourceWallet       = "wallet"
 	BillingSourceSubscription = "subscription"
 )
+
+var ErrWalletBillingIdentityRequired = errors.New("wallet billing requires a durable reservation identity")
 
 // PreConsumeBilling 根据用户计费偏好创建 BillingSession 并执行预扣费。
 // 会话存储在 relayInfo.Billing 上，供后续 Settle / Refund 使用。
@@ -33,6 +37,18 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 			http.StatusBadRequest,
 			types.ErrOptionWithSkipRetry(),
 		)
+	}
+	// Async submit currently persists its task only after the upstream response.
+	// A transient public task ID is not a durable reservation hand-off. Until
+	// that caller persists first, reject ledger-backed submit before any debit.
+	if relayInfo != nil && relayInfo.TaskRelayInfo != nil {
+		active, err := model.WalletCreditLedgerActive(model.DB)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
+		}
+		if active {
+			return types.NewError(ErrWalletBillingIdentityRequired, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+		}
 	}
 	session, apiErr := NewBillingSession(c, relayInfo, preConsumedQuota)
 	if apiErr != nil {
@@ -54,6 +70,18 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 	}
 	if actualQuota < 0 {
 		return fmt.Errorf("actual quota cannot be negative: %d", actualQuota)
+	}
+	if relayInfo.TaskRelayInfo != nil && relayInfo.BillingSource != BillingSourceSubscription &&
+		(relayInfo.FinalPreConsumedQuota > 0 || relayInfo.Billing != nil) {
+		active, err := model.WalletCreditLedgerActive(model.DB)
+		if err != nil {
+			return err
+		}
+		if active {
+			// Submission is not successful completion: never earn a reward here.
+			// Free tasks without any wallet debit are unaffected.
+			return ErrWalletBillingIdentityRequired
+		}
 	}
 	if relayInfo.Billing != nil {
 		preConsumed := relayInfo.Billing.GetPreConsumedQuota()
@@ -99,8 +127,5 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		settlementQuota = conservativeSettlementQuota(relayInfo)
 	}
 	quotaDelta := settlementQuota - relayInfo.FinalPreConsumedQuota
-	if quotaDelta != 0 {
-		return PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
-	}
-	return nil
+	return PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
 }
