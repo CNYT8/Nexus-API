@@ -1,4 +1,5 @@
 diff --git a/lib/index.js b/lib/index.js
+index a70fd6c..5f8e091 100644
 --- a/lib/index.js
 +++ b/lib/index.js
 @@ -132,7 +132,7 @@ function transformGfmAutolinkLiterals(tree) {
@@ -10,7 +11,7 @@ diff --git a/lib/index.js b/lib/index.js
      ],
      {ignore: ['link', 'linkReference']}
    )
-@@ -201,6 +201,9 @@ function findUrl(_, protocol, domain, path, match) {
+@@ -197,6 +197,9 @@ function findUrl(_, protocol, domain, path, match) {
   */
  function findEmail(_, atext, label, match) {
    if (
