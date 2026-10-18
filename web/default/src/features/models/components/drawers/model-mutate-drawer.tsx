@@ -24,6 +24,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Collapsible,
@@ -41,7 +42,6 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Select,
@@ -114,7 +114,10 @@ const extendedModelFormSchema = z.object({
 
 function getMentionKeyword(value: string): string | null {
   if (!value.includes('@')) return null
-  return value.slice(value.lastIndexOf('@') + 1).trim().toLowerCase()
+  return value
+    .slice(value.lastIndexOf('@') + 1)
+    .trim()
+    .toLowerCase()
 }
 
 type ExtendedModelFormValues = z.infer<typeof extendedModelFormSchema>
@@ -322,6 +325,7 @@ export function ModelMutateDrawer({
       DefaultUseAutoGroup: false,
       CreateCacheRatio: '',
       'group_ratio_setting.group_special_usable_group': '{}',
+      'group_ratio_setting.group_descriptions': '{}',
       'grok.violation_deduction_enabled': false,
       'grok.violation_deduction_amount': 0,
       'channel_affinity_setting.enabled': false,

@@ -445,3 +445,12 @@ func UpdateOption(c *gin.Context) {
 		"message": "",
 	})
 }
+
+func CheckDatabaseIntegrity(c *gin.Context) {
+	report := model.CheckDatabaseIntegrity()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    report,
+	})
+}

@@ -52,6 +52,7 @@ const getGroupDefaults = (settings: BillingSettings) => ({
   DefaultUseAutoGroup: settings.DefaultUseAutoGroup,
   GroupSpecialUsableGroup:
     settings['group_ratio_setting.group_special_usable_group'],
+  GroupDescriptions: settings['group_ratio_setting.group_descriptions'],
 })
 
 const BILLING_SECTIONS = [
@@ -217,7 +218,6 @@ const BILLING_SECTIONS = [
           inviterLimitPeriod: settings['rebate_setting.inviter_limit_period'],
           inviteeCap:
             settings['rebate_setting.invitee_eligible_money_limit_micros'],
-          rewardCap: settings['rebate_setting.inviter_reward_limit_micros'],
           inviterEligibleCap:
             settings['rebate_setting.inviter_eligible_money_limit_micros'],
           inviterMinPaid:

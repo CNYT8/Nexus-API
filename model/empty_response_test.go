@@ -247,3 +247,34 @@ func TestEmptyResponseScanUsesOtherInputTokensAndContinuesPastExcludedBatch(t *t
 	assert.Equal(t, int64(1), pendingCount)
 	assert.Equal(t, 70, pendingQuota)
 }
+
+func TestEmptyResponseIncludesNegativeFirstResponseTimeStreamLogs(t *testing.T) {
+	setupEmptyResponseTest(t)
+	user := User{Username: "empty-response-frt-neg", Password: "password", Status: common.UserStatusEnabled}
+	require.NoError(t, DB.Create(&user).Error)
+	now := time.Now().Unix()
+
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId:           user.Id,
+		CreatedAt:        now,
+		Type:             LogTypeConsume,
+		RequestId:        "negative-frt-error-stream",
+		ModelName:        "claude-opus-4-6",
+		PromptTokens:     350000,
+		CompletionTokens: 0,
+		Quota:            1000,
+		IsStream:         true,
+		Other: common.MapToJsonStr(map[string]interface{}{
+			"frt": -1000,
+			"stream_status": map[string]interface{}{
+				"status":     "error",
+				"end_reason": "timeout",
+			},
+		}),
+	}).Error)
+
+	pendingCount, pendingQuota, _, _, err := GetEmptyResponseStatus(user.Id, now)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), pendingCount)
+	assert.Equal(t, 700, pendingQuota)
+}

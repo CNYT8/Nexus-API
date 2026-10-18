@@ -14,6 +14,46 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func isUpstreamAPIError(apiErr *types.NewAPIError) bool {
+	if apiErr == nil {
+		return false
+	}
+	if apiErr.GetErrorType() != types.ErrorTypeNewAPIError {
+		return true
+	}
+	return isUpstreamErrorCode(string(apiErr.GetErrorCode()))
+}
+
+func isUpstreamErrorCode(errCode string) bool {
+	switch types.ErrorCode(errCode) {
+	case types.ErrorCodeDoRequestFailed,
+		types.ErrorCodeReadResponseBodyFailed,
+		types.ErrorCodeBadResponseStatusCode,
+		types.ErrorCodeBadResponse,
+		types.ErrorCodeBadResponseBody,
+		types.ErrorCodeEmptyResponse,
+		types.ErrorCodeAwsInvokeError,
+		types.ErrorCodeModelNotFound,
+		types.ErrorCodePromptBlocked,
+		types.ErrorCodeChannelAwsClientError,
+		types.ErrorCodeChannelInvalidKey,
+		types.ErrorCodeChannelResponseTimeExceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+func isUpstreamErrorLog(log *model.Log, errCode string, errType string) bool {
+	if errType != "" && errType != string(types.ErrorTypeNewAPIError) && errType != "new_api_panic" {
+		return true
+	}
+	if errCode != "" {
+		return isUpstreamErrorCode(errCode)
+	}
+	return log != nil && log.ChannelId > 0 && errType == ""
+}
+
 // ApplyErrorMask mutates *types.NewAPIError in place if any configured rule matches.
 // Higher-weight rules are checked first; equal weights retain configured order.
 // Safe to call with nil error or nil context. No-op when feature disabled.
@@ -25,9 +65,13 @@ func ApplyErrorMask(c *gin.Context, apiErr *types.NewAPIError) {
 	if !s.Enabled || len(s.Rules) == 0 {
 		return
 	}
+	isUpstream := isUpstreamAPIError(apiErr)
 	origMsg := apiErr.Error()
 	origMsgLower := strings.ToLower(origMsg)
 	for _, rule := range s.Rules {
+		if rule.UpstreamOnly && !isUpstream {
+			continue
+		}
 		if rule.Pattern != "" && !strings.Contains(origMsgLower, strings.ToLower(rule.Pattern)) {
 			continue
 		}
@@ -48,31 +92,37 @@ func ApplyErrorMask(c *gin.Context, apiErr *types.NewAPIError) {
 // that write the error response before the relay controller is reached.
 // Returns the possibly-rewritten pair; unchanged when disabled or no rule hits.
 func ApplyErrorMaskToMessage(c *gin.Context, statusCode int, message string, errCode string, errType string) (int, string) {
-	return applyErrorMaskToMessage(statusCode, message, errCode, errType, errorMaskPlaceholdersFromContext(c))
+	isUpstream := (errType != "" && errType != string(types.ErrorTypeNewAPIError) && errType != "new_api_panic") || isUpstreamErrorCode(errCode)
+	return applyErrorMaskToMessage(statusCode, message, errCode, errType, errorMaskPlaceholdersFromContext(c), isUpstream)
 }
 
 func ApplyErrorMaskToUserLogs(logs []*model.Log) {
 	for _, log := range logs {
 		if log != nil && log.Type == model.LogTypeError {
 			statusCode, errCode, errType := errorMaskInfoFromLog(log)
+			isUpstream := isUpstreamErrorLog(log, errCode, errType)
 			_, log.Content = applyErrorMaskToMessage(
 				statusCode,
 				log.Content,
 				errCode,
 				errType,
 				errorMaskPlaceholdersFromLog(log),
+				isUpstream,
 			)
 		}
 	}
 }
 
-func applyErrorMaskToMessage(statusCode int, message string, errCode string, errType string, placeholders errorMaskPlaceholders) (int, string) {
+func applyErrorMaskToMessage(statusCode int, message string, errCode string, errType string, placeholders errorMaskPlaceholders, isUpstream bool) (int, string) {
 	s := error_mask_setting.GetSetting()
 	if !s.Enabled || len(s.Rules) == 0 {
 		return statusCode, message
 	}
 	msgLower := strings.ToLower(message)
 	for _, rule := range s.Rules {
+		if rule.UpstreamOnly && !isUpstream {
+			continue
+		}
 		if rule.Pattern != "" && !strings.Contains(msgLower, strings.ToLower(rule.Pattern)) {
 			continue
 		}

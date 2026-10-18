@@ -179,12 +179,6 @@ export function RebateCard() {
               : money(overview.invitee_eligible_money_limit_micros)}
           </span>
           <span>
-            {t('Inviter reward cap')}:{' '}
-            {Number(overview.inviter_reward_limit_micros ?? 0) === 0
-              ? t('Unlimited')
-              : money(overview.inviter_reward_limit_micros)}
-          </span>
-          <span>
             {t('Direct referrals eligible spending cap')}:{' '}
             {Number(overview.inviter_eligible_money_limit_micros ?? 0) === 0
               ? t('Unlimited')
@@ -199,8 +193,10 @@ export function RebateCard() {
             {t(
               payoutLabels[overview.payout_mode as keyof typeof payoutLabels] ??
                 overview.payout_mode
-            )}{' '}
-            ({overview.payout_interval_hours}h)
+            )}
+            {overview.payout_mode === 'custom'
+              ? ` (${overview.payout_interval_hours}h)`
+              : ''}
           </span>
         </div>
         {recordsError ? (

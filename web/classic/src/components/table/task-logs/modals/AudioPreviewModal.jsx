@@ -21,6 +21,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Modal, Typography, Tag, Button } from '@douyinfe/semi-ui';
 import { IconExternalOpen, IconCopy } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
+import { copy, showError, showSuccess } from '../../../../helpers';
 
 const { Text, Title } = Typography;
 
@@ -82,7 +83,11 @@ const AudioClipCard = ({ clip }) => {
             marginBottom: '4px',
           }}
         >
-          <Text strong ellipsis={{ showTooltip: true }} style={{ fontSize: 15 }}>
+          <Text
+            strong
+            ellipsis={{ showTooltip: true }}
+            style={{ fontSize: 15 }}
+          >
             {title}
           </Text>
           {duration > 0 && (
@@ -126,7 +131,14 @@ const AudioClipCard = ({ clip }) => {
             <Button
               size='small'
               icon={<IconCopy />}
-              onClick={() => navigator.clipboard.writeText(audioUrl)}
+              onClick={async () => {
+                const ok = await copy(audioUrl);
+                if (ok) {
+                  showSuccess(t('已复制到剪贴板'));
+                } else {
+                  showError(t('无法复制到剪贴板，请手动复制'));
+                }
+              }}
             >
               {t('复制链接')}
             </Button>

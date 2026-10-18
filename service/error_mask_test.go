@@ -119,6 +119,54 @@ func TestApplyErrorMaskEqualWeightKeepsConfiguredOrder(t *testing.T) {
 	require.Equal(t, "first mask", apiErr.Error())
 }
 
+func TestApplyErrorMaskUpstreamOnlySkipsLocalSiteErrors(t *testing.T) {
+	withErrorMaskConfig(t, true, `[
+		{"pattern":"额度不足","replacement":"当前模型暂不可用，请稍后再试","status":503,"weight":10,"upstream_only":true}
+	]`)
+
+	// Local user quota error initiated by this site must NOT be masked when upstream_only is true.
+	localQuotaErr := types.NewErrorWithStatusCode(
+		errors.New("用户额度不足, 剩余额度: $0.00"),
+		types.ErrorCodeInsufficientUserQuota,
+		http.StatusForbidden,
+	)
+	ApplyErrorMask(nil, localQuotaErr)
+	require.Equal(t, "用户额度不足, 剩余额度: $0.00", localQuotaErr.Error())
+	require.Equal(t, http.StatusForbidden, localQuotaErr.StatusCode)
+
+	// Local middleware abort message must NOT be masked when upstream_only is true.
+	statusCode, msg := ApplyErrorMaskToMessage(nil, http.StatusForbidden, "用户额度不足", string(types.ErrorCodeInsufficientUserQuota), "new_api_error")
+	require.Equal(t, http.StatusForbidden, statusCode)
+	require.Equal(t, "用户额度不足", msg)
+
+	// Upstream channel quota error with identical wording MUST be masked when upstream_only is true.
+	upstreamQuotaErr := types.WithOpenAIError(types.OpenAIError{
+		Message: "用户额度不足, 剩余额度: $0.00",
+		Type:    "new_api_error",
+		Code:    "insufficient_user_quota",
+	}, http.StatusForbidden)
+	ApplyErrorMask(nil, upstreamQuotaErr)
+	require.Equal(t, "当前模型暂不可用，请稍后再试", upstreamQuotaErr.Error())
+	require.Equal(t, http.StatusServiceUnavailable, upstreamQuotaErr.StatusCode)
+
+	// User error logs: local quota error on a selected channel must NOT be masked when upstream_only is true.
+	localQuotaLog := &model.Log{
+		Type:      model.LogTypeError,
+		ChannelId: 12,
+		Content:   "用户额度不足, 剩余额度: $0.00",
+		Other:     `{"error_code":"insufficient_user_quota","error_type":"new_api_error","status_code":403}`,
+	}
+	upstreamQuotaLog := &model.Log{
+		Type:      model.LogTypeError,
+		ChannelId: 12,
+		Content:   "用户额度不足, 剩余额度: $0.00",
+		Other:     `{"error_code":"insufficient_user_quota","error_type":"openai_error","status_code":403}`,
+	}
+	ApplyErrorMaskToUserLogs([]*model.Log{localQuotaLog, upstreamQuotaLog})
+	require.Equal(t, "用户额度不足, 剩余额度: $0.00", localQuotaLog.Content)
+	require.Equal(t, "当前模型暂不可用，请稍后再试", upstreamQuotaLog.Content)
+}
+
 func withErrorMaskConfig(t *testing.T, enabled bool, rules string) {
 	t.Helper()
 

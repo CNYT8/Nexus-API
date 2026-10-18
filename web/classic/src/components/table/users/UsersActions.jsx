@@ -81,7 +81,7 @@ const UsersActions = ({ setShowAddUser, groupOptions, t }) => {
   }, [showDefaultGroup]);
 
   return (
-    <div className='flex flex-col md:flex-row md:items-center gap-2 w-full md:w-auto order-2 md:order-1'>
+    <div className='flex flex-col md:flex-row md:items-center gap-2 w-full xl:w-auto xl:shrink-0 order-2 xl:order-1'>
       <Button className='w-full md:w-auto' onClick={handleAddUser} size='small'>
         {t('添加用户')}
       </Button>

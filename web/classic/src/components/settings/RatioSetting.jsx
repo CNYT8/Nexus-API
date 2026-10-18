@@ -49,6 +49,7 @@ const RatioSetting = () => {
     CompletionRatioOverrideEnabled: true,
     UserUsableGroups: '',
     'group_ratio_setting.group_special_usable_group': '',
+    'group_ratio_setting.group_descriptions': '',
   });
 
   const [loading, setLoading] = useState(false);

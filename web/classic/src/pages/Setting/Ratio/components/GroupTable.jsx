@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
   Button,
@@ -25,9 +44,10 @@ function parseJSON(str, fallback) {
   }
 }
 
-function buildRows(groupRatioStr, userUsableGroupsStr) {
+function buildRows(groupRatioStr, userUsableGroupsStr, groupDescriptionsStr) {
   const ratioMap = parseJSON(groupRatioStr, {});
   const usableMap = parseJSON(userUsableGroupsStr, {});
+  const descMap = parseJSON(groupDescriptionsStr, {});
 
   const allNames = new Set([
     ...Object.keys(ratioMap),
@@ -39,17 +59,21 @@ function buildRows(groupRatioStr, userUsableGroupsStr) {
     name,
     ratio: ratioMap[name] ?? 1,
     selectable: name in usableMap,
-    description: usableMap[name] ?? '',
+    description: usableMap[name] || descMap[name] || '',
   }));
 }
 
 export function serializeGroupTable(rows) {
   const groupRatio = {};
   const userUsableGroups = {};
+  const groupDescriptions = {};
 
   rows.forEach((row) => {
     if (!row.name) return;
     groupRatio[row.name] = row.ratio;
+    if (row.description) {
+      groupDescriptions[row.name] = row.description;
+    }
     if (row.selectable) {
       userUsableGroups[row.name] = row.description;
     }
@@ -58,14 +82,20 @@ export function serializeGroupTable(rows) {
   return {
     GroupRatio: JSON.stringify(groupRatio, null, 2),
     UserUsableGroups: JSON.stringify(userUsableGroups, null, 2),
+    GroupDescriptions: JSON.stringify(groupDescriptions, null, 2),
   };
 }
 
-export default function GroupTable({ groupRatio, userUsableGroups, onChange }) {
+export default function GroupTable({
+  groupRatio,
+  userUsableGroups,
+  groupDescriptions,
+  onChange,
+}) {
   const { t } = useTranslation();
 
   const [rows, setRows] = useState(() =>
-    buildRows(groupRatio, userUsableGroups),
+    buildRows(groupRatio, userUsableGroups, groupDescriptions),
   );
 
   // Use functional setRows to keep updateRow/addRow/removeRow referentially

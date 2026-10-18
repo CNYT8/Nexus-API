@@ -59,6 +59,8 @@ const OtherSetting = () => {
   });
   let [loading, setLoading] = useState(false);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [showDbIntegrityModal, setShowDbIntegrityModal] = useState(false);
+  const [dbIntegrityReport, setDbIntegrityReport] = useState(null);
   const [statusState, statusDispatch] = useContext(StatusContext);
   const [latestNewApiRelease, setLatestNewApiRelease] = useState({
     tag_name: '',
@@ -115,6 +117,7 @@ const OtherSetting = () => {
     About: false,
     Footer: false,
     CheckUpdate: false,
+    CheckDbIntegrity: false,
     FrontendTheme: false,
   });
   const handleInputChange = async (value, e) => {
@@ -268,7 +271,9 @@ const OtherSetting = () => {
         ...loadingInput,
         CheckUpdate: true,
       }));
-      const nexusRelease = await fetchLatestRelease(NEXUS_API_LATEST_RELEASE_API);
+      const nexusRelease = await fetchLatestRelease(
+        NEXUS_API_LATEST_RELEASE_API,
+      );
 
       if (!nexusRelease?.tag_name) {
         throw new Error('Unexpected release payload');
@@ -291,6 +296,37 @@ const OtherSetting = () => {
       setLoadingInput((loadingInput) => ({
         ...loadingInput,
         CheckUpdate: false,
+      }));
+    }
+  };
+
+  const checkDbIntegrity = async () => {
+    try {
+      setLoadingInput((loadingInput) => ({
+        ...loadingInput,
+        CheckDbIntegrity: true,
+      }));
+      const res = await API.get('/api/option/db_integrity');
+      const { success, message, data } = res.data || {};
+      if (!success || !data) {
+        showError(message || t('数据库完整性检查失败，请稍后重试'));
+        return;
+      }
+      if (data.healthy) {
+        showSuccess(
+          `${t('数据库完整性正常')}（${data.main_dialect || 'SQL'}：${data.checked_tables || 0}/${data.total_tables || 0}）`,
+        );
+      } else {
+        setDbIntegrityReport(data);
+        setShowDbIntegrityModal(true);
+      }
+    } catch (error) {
+      console.error('Failed to check database integrity:', error);
+      showError(t('数据库完整性检查失败，请稍后重试'));
+    } finally {
+      setLoadingInput((loadingInput) => ({
+        ...loadingInput,
+        CheckDbIntegrity: false,
       }));
     }
   };
@@ -432,6 +468,26 @@ const OtherSetting = () => {
                   <Text>
                     {t('启动时间')}：{getStartTimeString()}
                   </Text>
+                </Col>
+              </Row>
+            </Form.Section>
+          </Card>
+        </Form>
+        {/* 运维设置 */}
+        <Form>
+          <Card>
+            <Form.Section text={t('运维设置')}>
+              <Row>
+                <Col span={16}>
+                  <Space>
+                    <Button
+                      type='primary'
+                      onClick={checkDbIntegrity}
+                      loading={loadingInput['CheckDbIntegrity']}
+                    >
+                      {t('检查数据库完整性')}
+                    </Button>
+                  </Space>
                 </Col>
               </Row>
             </Form.Section>
@@ -598,6 +654,68 @@ const OtherSetting = () => {
         ]}
       >
         <div dangerouslySetInnerHTML={{ __html: updateData.content }}></div>
+      </Modal>
+      <Modal
+        title={t('数据库完整性检查异常日志')}
+        visible={showDbIntegrityModal}
+        onCancel={() => setShowDbIntegrityModal(false)}
+        width={760}
+        footer={[
+          <Button
+            key='close'
+            type='primary'
+            onClick={() => setShowDbIntegrityModal(false)}
+          >
+            {t('我知道了')}
+          </Button>,
+        ]}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <Text type='danger'>
+            {t(
+              '检测到数据库连接或表结构存在以下异常（仅只读检测，未对数据库做任何修改）：',
+            )}
+          </Text>
+          {Array.isArray(dbIntegrityReport?.issues) &&
+            dbIntegrityReport.issues.length > 0 && (
+              <pre
+                style={{
+                  margin: 0,
+                  padding: '12px',
+                  maxHeight: '220px',
+                  overflowY: 'auto',
+                  backgroundColor: 'var(--semi-color-fill-0)',
+                  borderRadius: '8px',
+                  fontFamily: 'JetBrains Mono, Consolas, monospace',
+                  fontSize: '12px',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  color: 'var(--semi-color-danger)',
+                }}
+              >
+                {dbIntegrityReport.issues.join('\n')}
+              </pre>
+            )}
+          <Text strong>{t('完整检测日志')}</Text>
+          <pre
+            style={{
+              margin: 0,
+              padding: '12px',
+              maxHeight: '280px',
+              overflowY: 'auto',
+              backgroundColor: 'var(--semi-color-fill-0)',
+              borderRadius: '8px',
+              fontFamily: 'JetBrains Mono, Consolas, monospace',
+              fontSize: '12px',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            {Array.isArray(dbIntegrityReport?.logs)
+              ? dbIntegrityReport.logs.join('\n')
+              : ''}
+          </pre>
+        </div>
       </Modal>
     </Row>
   );

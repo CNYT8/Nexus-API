@@ -39,14 +39,12 @@ const defaults = {
   siteTimezone: 'UTC',
   inviterLimitPeriod: 'monthly',
   inviteeCap: 0,
-  rewardCap: 0,
   inviterEligibleCap: 0,
   inviterMinPaid: 0,
   payoutHoldHours: 0,
 };
 const moneyFields = new Set([
   'inviteeCap',
-  'rewardCap',
   'inviterEligibleCap',
   'inviterMinPaid',
 ]);
@@ -69,14 +67,12 @@ const optionKey = {
   siteTimezone: 'site_timezone',
   inviterLimitPeriod: 'inviter_limit_period',
   inviteeCap: 'invitee_eligible_money_limit_micros',
-  rewardCap: 'inviter_reward_limit_micros',
   inviterEligibleCap: 'inviter_eligible_money_limit_micros',
   inviterMinPaid: 'inviter_min_paid_money_micros',
   payoutHoldHours: 'payout_hold_hours',
 };
 const labels = {
   inviteeCap: '每个被邀请人终身消费基数上限',
-  rewardCap: '邀请人实际奖励上限',
   inviterEligibleCap: '直属下级消费基数上限',
   inviterMinPaid: '邀请人返利门槛（累计合格充值金额）',
 };
@@ -233,18 +229,20 @@ export default function SettingsRebate(props) {
                 ]}
               />
             </Col>
-            <Col xs={24} sm={12} md={8}>
-              <Form.InputNumber
-                field='payoutIntervalHours'
-                label={t('发放间隔（小时）')}
-                min={1}
-                max={720}
-                step={1}
-                onChange={(value) =>
-                  update('payoutIntervalHours', Number(value))
-                }
-              />
-            </Col>
+            {inputs.payoutMode === 'custom' && (
+              <Col xs={24} sm={12} md={8}>
+                <Form.InputNumber
+                  field='payoutIntervalHours'
+                  label={t('发放间隔（小时）')}
+                  min={1}
+                  max={720}
+                  step={1}
+                  onChange={(value) =>
+                    update('payoutIntervalHours', Number(value))
+                  }
+                />
+              </Col>
+            )}
             <Col xs={24} sm={12} md={8}>
               <Form.InputNumber
                 field='payoutHoldHours'
@@ -255,33 +253,37 @@ export default function SettingsRebate(props) {
                 onChange={(value) => update('payoutHoldHours', Number(value))}
               />
             </Col>
-            <Col xs={24} sm={12} md={8}>
-              <Form.Input
-                field='siteTimezone'
-                label={t('站点时区')}
-                onChange={(value) => update('siteTimezone', value)}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={8}>
-              <Form.InputNumber
-                field='payoutHour'
-                label={t('发放小时')}
-                min={0}
-                max={23}
-                step={1}
-                onChange={(value) => update('payoutHour', Number(value))}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={8}>
-              <Form.InputNumber
-                field='payoutMinute'
-                label={t('发放分钟')}
-                min={0}
-                max={59}
-                step={1}
-                onChange={(value) => update('payoutMinute', Number(value))}
-              />
-            </Col>
+            {inputs.payoutMode !== 'immediate' && (
+              <>
+                <Col xs={24} sm={12} md={8}>
+                  <Form.Input
+                    field='siteTimezone'
+                    label={t('站点时区')}
+                    onChange={(value) => update('siteTimezone', value)}
+                  />
+                </Col>
+                <Col xs={24} sm={12} md={8}>
+                  <Form.InputNumber
+                    field='payoutHour'
+                    label={t('发放小时')}
+                    min={0}
+                    max={23}
+                    step={1}
+                    onChange={(value) => update('payoutHour', Number(value))}
+                  />
+                </Col>
+                <Col xs={24} sm={12} md={8}>
+                  <Form.InputNumber
+                    field='payoutMinute'
+                    label={t('发放分钟')}
+                    min={0}
+                    max={59}
+                    step={1}
+                    onChange={(value) => update('payoutMinute', Number(value))}
+                  />
+                </Col>
+              </>
+            )}
             <Col xs={24} sm={12} md={8}>
               <Form.Select
                 field='inviterLimitPeriod'

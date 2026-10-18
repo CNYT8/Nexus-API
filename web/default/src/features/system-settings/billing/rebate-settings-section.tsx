@@ -41,11 +41,6 @@ const schema = z.object({
     .finite()
     .min(0)
     .max(Number.MAX_SAFE_INTEGER / 1_000_000),
-  rewardCap: z.coerce
-    .number()
-    .finite()
-    .min(0)
-    .max(Number.MAX_SAFE_INTEGER / 1_000_000),
   inviterEligibleCap: z.coerce
     .number()
     .finite()
@@ -75,7 +70,6 @@ type FieldProps = {
     | 'payoutHour'
     | 'payoutMinute'
     | 'inviteeCap'
-    | 'rewardCap'
     | 'inviterEligibleCap'
     | 'inviterMinPaid'
     | 'payoutHoldHours'
@@ -124,7 +118,6 @@ export function RebateSettingsSection({
     siteTimezone: string
     inviterLimitPeriod: string
     inviteeCap: number
-    rewardCap: number
     inviterEligibleCap: number
     inviterMinPaid: number
     payoutHoldHours: number
@@ -146,7 +139,6 @@ export function RebateSettingsSection({
       inviterLimitPeriod:
         defaultValues.inviterLimitPeriod as Values['inviterLimitPeriod'],
       inviteeCap: defaultValues.inviteeCap / MICROS,
-      rewardCap: defaultValues.rewardCap / MICROS,
       inviterEligibleCap: defaultValues.inviterEligibleCap / MICROS,
       inviterMinPaid: defaultValues.inviterMinPaid / MICROS,
       payoutHoldHours: defaultValues.payoutHoldHours,
@@ -154,6 +146,7 @@ export function RebateSettingsSection({
   })
   const { isDirty, isSubmitting } = form.formState
   const enabled = form.watch('enabled')
+  const payoutMode = form.watch('payoutMode')
 
   async function onSubmit(values: Values) {
     const updates: Array<[string, string]> = [
@@ -167,7 +160,6 @@ export function RebateSettingsSection({
       ['site_timezone', values.siteTimezone],
       ['inviter_limit_period', values.inviterLimitPeriod],
       ['invitee_eligible_money_limit_micros', toMicros(values.inviteeCap)],
-      ['inviter_reward_limit_micros', toMicros(values.rewardCap)],
       [
         'inviter_eligible_money_limit_micros',
         toMicros(values.inviterEligibleCap),
@@ -250,66 +242,6 @@ export function RebateSettingsSection({
                   max={100}
                   step='0.01'
                 />
-                <NumberField
-                  form={form}
-                  name='payoutIntervalHours'
-                  label={t('Payout interval (hours)')}
-                  min={1}
-                  max={720}
-                  step='1'
-                />
-                <NumberField
-                  form={form}
-                  name='payoutHour'
-                  label={t('Payout hour')}
-                  min={0}
-                  max={23}
-                  step='1'
-                />
-                <NumberField
-                  form={form}
-                  name='payoutMinute'
-                  label={t('Payout minute')}
-                  min={0}
-                  max={59}
-                  step='1'
-                />
-                <NumberField
-                  form={form}
-                  name='inviteeCap'
-                  label={t('Invitee lifetime spending cap')}
-                  min={0}
-                  step='0.000001'
-                />
-                <NumberField
-                  form={form}
-                  name='rewardCap'
-                  label={t('Inviter reward cap')}
-                  min={0}
-                  step='0.000001'
-                />
-                <NumberField
-                  form={form}
-                  name='inviterEligibleCap'
-                  label={t('Direct referrals spending cap')}
-                  min={0}
-                  step='0.000001'
-                />
-                <NumberField
-                  form={form}
-                  name='inviterMinPaid'
-                  label={t('Inviter rebate threshold (lifetime paid top-up)')}
-                  min={0}
-                  step='0.000001'
-                />
-                <NumberField
-                  form={form}
-                  name='payoutHoldHours'
-                  label={t('Payout risk hold (hours)')}
-                  min={0}
-                  max={720}
-                  step='1'
-                />
                 <FormField
                   control={form.control}
                   name='payoutMode'
@@ -344,6 +276,49 @@ export function RebateSettingsSection({
                     </FormItem>
                   )}
                 />
+                {payoutMode === 'custom' && (
+                  <NumberField
+                    form={form}
+                    name='payoutIntervalHours'
+                    label={t('Payout interval (hours)')}
+                    min={1}
+                    max={720}
+                    step='1'
+                  />
+                )}
+                {payoutMode !== 'immediate' && (
+                  <>
+                    <NumberField
+                      form={form}
+                      name='payoutHour'
+                      label={t('Payout hour')}
+                      min={0}
+                      max={23}
+                      step='1'
+                    />
+                    <NumberField
+                      form={form}
+                      name='payoutMinute'
+                      label={t('Payout minute')}
+                      min={0}
+                      max={59}
+                      step='1'
+                    />
+                    <FormField
+                      control={form.control}
+                      name='siteTimezone'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Site timezone')}</FormLabel>
+                          <FormControl>
+                            <Input {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </>
+                )}
                 <FormField
                   control={form.control}
                   name='inviterLimitPeriod'
@@ -373,18 +348,34 @@ export function RebateSettingsSection({
                     </FormItem>
                   )}
                 />
-                <FormField
-                  control={form.control}
-                  name='siteTimezone'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('Site timezone')}</FormLabel>
-                      <FormControl>
-                        <Input {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
+                <NumberField
+                  form={form}
+                  name='inviteeCap'
+                  label={t('Invitee lifetime spending cap')}
+                  min={0}
+                  step='0.000001'
+                />
+                <NumberField
+                  form={form}
+                  name='inviterEligibleCap'
+                  label={t('Direct referrals spending cap')}
+                  min={0}
+                  step='0.000001'
+                />
+                <NumberField
+                  form={form}
+                  name='inviterMinPaid'
+                  label={t('Inviter rebate threshold (lifetime paid top-up)')}
+                  min={0}
+                  step='0.000001'
+                />
+                <NumberField
+                  form={form}
+                  name='payoutHoldHours'
+                  label={t('Payout risk hold (hours)')}
+                  min={0}
+                  max={720}
+                  step='1'
                 />
               </div>
             </>

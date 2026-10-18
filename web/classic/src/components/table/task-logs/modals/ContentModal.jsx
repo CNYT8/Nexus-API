@@ -21,6 +21,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal, Button, Typography, Spin } from '@douyinfe/semi-ui';
 import { IconExternalOpen, IconCopy } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
+import { copy, showError, showSuccess } from '../../../../helpers';
 
 const { Text } = Typography;
 
@@ -50,8 +51,13 @@ const ContentModal = ({
     setIsLoading(false);
   };
 
-  const handleCopyUrl = () => {
-    navigator.clipboard.writeText(modalContent);
+  const handleCopyUrl = async () => {
+    const ok = await copy(modalContent);
+    if (ok) {
+      showSuccess(t('已复制到剪贴板'));
+    } else {
+      showError(t('无法复制到剪贴板，请手动复制'));
+    }
   };
 
   const handleOpenInNewTab = () => {

@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 import type {
   ConfirmPaymentComplianceResponse,
+  DatabaseIntegrityResponse,
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
   OutputSensitiveConfig,
@@ -90,6 +91,13 @@ export async function fetchUpstreamRatios(request: FetchUpstreamRatiosRequest) {
   const res = await api.post<UpstreamRatiosResponse>(
     '/api/ratio_sync/fetch',
     request
+  )
+  return res.data
+}
+
+export async function checkDatabaseIntegrity() {
+  const res = await api.get<DatabaseIntegrityResponse>(
+    '/api/option/db_integrity'
   )
   return res.data
 }

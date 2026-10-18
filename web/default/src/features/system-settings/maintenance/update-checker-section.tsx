@@ -16,8 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
-import { ExternalLinkIcon, RefreshCcwIcon } from 'lucide-react'
+import { useState } from 'react'
+import { DatabaseIcon, ExternalLinkIcon, RefreshCcwIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { formatTimestamp, formatTimestampToDate } from '@/lib/format'
@@ -38,7 +38,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Markdown } from '@/components/ui/markdown'
+import { checkDatabaseIntegrity } from '../api'
 import { SettingsSection } from '../components/settings-section'
+import type { DatabaseIntegrityReport } from '../types'
 
 type UpdateCheckerSectionProps = {
   currentVersion?: string | null
@@ -53,15 +55,14 @@ export function UpdateCheckerSection({
   const [checking, setChecking] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [release, setRelease] = useState<ReleaseInfo | null>(null)
+  const [checkingDb, setCheckingDb] = useState(false)
+  const [dbDialogOpen, setDbDialogOpen] = useState(false)
+  const [dbReport, setDbReport] = useState<DatabaseIntegrityReport | null>(null)
   const [latestNewApiRelease, setLatestNewApiRelease] =
-    useState<ReleaseInfo | null>(null)
+    useState<ReleaseInfo | null>(() => NEW_API_BASE_RELEASE)
 
   const uptime = startTime ? formatTimestamp(startTime) : t('Unknown')
   const version = currentVersion || t('Unknown')
-
-  useEffect(() => {
-    setLatestNewApiRelease(NEW_API_BASE_RELEASE)
-  }, [])
 
   const handleCheckUpdates = async () => {
     setChecking(true)
@@ -95,6 +96,29 @@ export function UpdateCheckerSection({
     )
   }
 
+  const handleCheckDbIntegrity = async () => {
+    setCheckingDb(true)
+    try {
+      const res = await checkDatabaseIntegrity()
+      if (!res?.success || !res.data) {
+        toast.error(res?.message || t('数据库完整性检查失败，请稍后重试'))
+        return
+      }
+      if (res.data.healthy) {
+        toast.success(
+          `${t('数据库完整性正常')}（${res.data.main_dialect || 'SQL'}：${res.data.checked_tables || 0}/${res.data.total_tables || 0}）`
+        )
+        return
+      }
+      setDbReport(res.data)
+      setDbDialogOpen(true)
+    } catch {
+      toast.error(t('数据库完整性检查失败，请稍后重试'))
+    } finally {
+      setCheckingDb(false)
+    }
+  }
+
   return (
     <>
       <SettingsSection title={t('System maintenance')}>
@@ -125,16 +149,26 @@ export function UpdateCheckerSection({
             </div>
           </div>
 
-          <Button onClick={handleCheckUpdates} disabled={checking}>
-            {checking ? (
-              t('Checking updates...')
-            ) : (
-              <>
-                <RefreshCcwIcon className='me-2 h-4 w-4' />
-                {t('Check for updates')}
-              </>
-            )}
-          </Button>
+          <div className='flex flex-wrap gap-3'>
+            <Button onClick={handleCheckUpdates} disabled={checking}>
+              {checking ? (
+                t('Checking updates...')
+              ) : (
+                <>
+                  <RefreshCcwIcon className='me-2 h-4 w-4' />
+                  {t('Check for updates')}
+                </>
+              )}
+            </Button>
+            <Button
+              variant='outline'
+              onClick={handleCheckDbIntegrity}
+              disabled={checkingDb}
+            >
+              <DatabaseIcon className='me-2 h-4 w-4' />
+              {t('检查数据库完整性')}
+            </Button>
+          </div>
         </div>
       </SettingsSection>
 
@@ -183,6 +217,39 @@ export function UpdateCheckerSection({
                 {t('Open release')}
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={dbDialogOpen} onOpenChange={setDbDialogOpen}>
+        <DialogContent className='max-h-[80vh] max-w-2xl overflow-y-auto'>
+          <DialogHeader>
+            <DialogTitle>{t('数据库完整性检查异常日志')}</DialogTitle>
+            <DialogDescription>
+              {t(
+                '检测到数据库连接或表结构存在以下异常（仅只读检测，未对数据库做任何修改）：'
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className='space-y-4'>
+            {Array.isArray(dbReport?.issues) && dbReport.issues.length > 0 && (
+              <pre className='bg-muted text-destructive max-h-56 overflow-y-auto rounded-lg p-3 font-mono text-xs break-words whitespace-pre-wrap'>
+                {dbReport.issues.join('\n')}
+              </pre>
+            )}
+            <div className='space-y-2'>
+              <div className='text-sm font-medium'>{t('完整检测日志')}</div>
+              <pre className='bg-muted max-h-64 overflow-y-auto rounded-lg p-3 font-mono text-xs break-words whitespace-pre-wrap'>
+                {Array.isArray(dbReport?.logs) ? dbReport.logs.join('\n') : ''}
+              </pre>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type='button' onClick={() => setDbDialogOpen(false)}>
+              {t('Close')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

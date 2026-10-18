@@ -45,6 +45,7 @@ import {
 import { IconRefresh } from '@douyinfe/semi-icons';
 import {
   API,
+  copy,
   showError,
   showSuccess,
   timestamp2string,
@@ -110,9 +111,13 @@ const ViewDetailsModal = ({ visible, onCancel, deployment, t }) => {
     }
   }, [visible, deployment?.id]);
 
-  const handleCopyId = () => {
-    navigator.clipboard.writeText(deployment?.id);
-    showSuccess(t('已复制 ID 到剪贴板'));
+  const handleCopyId = async () => {
+    const ok = await copy(deployment?.id);
+    if (ok) {
+      showSuccess(t('已复制 ID 到剪贴板'));
+    } else {
+      showError(t('无法复制到剪贴板，请手动复制'));
+    }
   };
 
   const handleRefresh = () => {

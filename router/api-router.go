@@ -248,6 +248,7 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/waffo-pancake/subscription-product", controller.CreateWaffoPancakeSubscriptionProduct)
 			optionRoute.GET("/waffo-pancake/subscription-product-options", controller.ListWaffoPancakeSubscriptionProductOptions)
 			optionRoute.POST("/waffo-pancake/subscription-product-options", controller.ListWaffoPancakeSubscriptionProductOptions)
+			optionRoute.GET("/db_integrity", middleware.DisableCache(), controller.CheckDatabaseIntegrity)
 		}
 		adminPermissionRoute := apiRouter.Group("/admin_permissions")
 		adminPermissionRoute.Use(middleware.RootAuth())

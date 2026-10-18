@@ -1,43 +1,43 @@
-import fs from 'fs'
-import path from 'path'
-import { createRequire } from 'module'
-import { fileURLToPath } from 'url'
-import { defineConfig, loadEnv } from '@rsbuild/core'
-import { pluginReact } from '@rsbuild/plugin-react'
+import fs from 'fs';
+import path from 'path';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+import { defineConfig, loadEnv } from '@rsbuild/core';
+import { pluginReact } from '@rsbuild/plugin-react';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const require = createRequire(import.meta.url)
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 const resolvePackageDir = (pkg: string, paths?: string[]) => {
-  let current = path.dirname(require.resolve(pkg, { paths }))
+  let current = path.dirname(require.resolve(pkg, { paths }));
   while (current !== path.dirname(current)) {
-    if (fs.existsSync(path.join(current, 'package.json'))) return current
-    current = path.dirname(current)
+    if (fs.existsSync(path.join(current, 'package.json'))) return current;
+    current = path.dirname(current);
   }
-  throw new Error(`Unable to locate package directory for ${pkg}`)
-}
+  throw new Error(`Unable to locate package directory for ${pkg}`);
+};
 
-const semiUiDir = resolvePackageDir('@douyinfe/semi-ui')
+const semiUiDir = resolvePackageDir('@douyinfe/semi-ui');
 const semiFoundationDir = resolvePackageDir('@douyinfe/semi-foundation', [
   semiUiDir,
-])
-const semiDateFnsDir = resolvePackageDir('date-fns', [semiFoundationDir])
+]);
+const semiDateFnsDir = resolvePackageDir('date-fns', [semiFoundationDir]);
+const lobeIconsDir = resolvePackageDir('@lobehub/icons');
+const lobeUiDir = resolvePackageDir('@lobehub/ui', [lobeIconsDir]);
 
 export default defineConfig(({ envMode }) => {
-  const env = loadEnv({ mode: envMode, prefixes: ['VITE_'] })
+  const env = loadEnv({ mode: envMode, prefixes: ['VITE_'] });
   const clientServerUrl =
     process.env.VITE_REACT_APP_SERVER_URL ||
     env.rawPublicVars.VITE_REACT_APP_SERVER_URL ||
-    ''
-  const proxyServerUrl =
-    clientServerUrl ||
-    'http://localhost:3000'
-  const isProd = envMode === 'production'
+    '';
+  const proxyServerUrl = clientServerUrl || 'http://localhost:3000';
+  const isProd = envMode === 'production';
   const devProxy = Object.fromEntries(
     (['/api', '/mj', '/pg'] as const).map((key) => [
       key,
       { target: proxyServerUrl, changeOrigin: true },
     ]),
-  ) as Record<string, { target: string; changeOrigin: boolean }>
+  ) as Record<string, { target: string; changeOrigin: boolean }>;
 
   return {
     plugins: [pluginReact()],
@@ -45,15 +45,21 @@ export default defineConfig(({ envMode }) => {
       entry: {
         index: './src/index.jsx',
       },
+      include: [
+        {
+          and: [/[\\/]node_modules[\\/]/, { not: /[\\/]core-js[\\/]/ }],
+        },
+      ],
       define: {
-        'import.meta.env.VITE_REACT_APP_SERVER_URL': JSON.stringify(
-          clientServerUrl,
-        ),
+        'import.meta.env.VITE_REACT_APP_SERVER_URL':
+          JSON.stringify(clientServerUrl),
       },
     },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
+        '@lobehub/ui$': path.resolve(__dirname, './src/compat/lobe-ui.js'),
+        '@nexus-lobe-ui': path.resolve(lobeUiDir, 'es'),
         '@douyinfe/semi-ui/dist/css/semi.css': path.resolve(
           semiUiDir,
           'dist/css/semi.css',
@@ -72,6 +78,15 @@ export default defineConfig(({ envMode }) => {
     output: {
       minify: isProd,
       target: 'web',
+      // Keep the same baseline in dev and production; market-share queries age out old iPhones.
+      overrideBrowserslist: [
+        'Chrome >= 90',
+        'Edge >= 90',
+        'Firefox >= 90',
+        'Safari >= 15',
+        'ios_saf >= 15',
+      ],
+      polyfill: 'entry',
       distPath: {
         root: 'dist',
       },
@@ -93,6 +108,15 @@ export default defineConfig(({ envMode }) => {
                 {
                   loader: 'builtin:swc-loader',
                   options: {
+                    env: {
+                      targets: [
+                        'Chrome >= 90',
+                        'Edge >= 90',
+                        'Firefox >= 90',
+                        'Safari >= 15',
+                        'ios_saf >= 15',
+                      ],
+                    },
                     jsc: {
                       parser: {
                         syntax: 'ecmascript',
@@ -114,5 +138,5 @@ export default defineConfig(({ envMode }) => {
         },
       },
     },
-  }
-})
+  };
+});

@@ -67,6 +67,7 @@ export function parseErrorMaskRules(jsonStr) {
     pattern: typeof r.pattern === 'string' ? r.pattern : '',
     replacement: typeof r.replacement === 'string' ? r.replacement : '',
     weight: normalizeRuleWeight(r.weight),
+    upstream_only: Boolean(r.upstream_only),
   }));
 }
 
@@ -77,6 +78,7 @@ export function serializeErrorMaskRules(rules) {
       pattern: r.pattern || '',
       replacement: r.replacement || '',
       weight: normalizeRuleWeight(r.weight),
+      ...(r.upstream_only ? { upstream_only: true } : {}),
     }))
     .filter((r) => r.replacement.trim() !== '');
   if (cleaned.length === 0) return '';
@@ -97,9 +99,7 @@ export default function ErrorMaskRules({ value, onChange }) {
 
   const updateRule = useCallback(
     (id, field, val) => {
-      emit(
-        rules.map((r) => (r._id === id ? { ...r, [field]: val } : r)),
-      );
+      emit(rules.map((r) => (r._id === id ? { ...r, [field]: val } : r)));
     },
     [rules, emit],
   );
@@ -118,6 +118,7 @@ export default function ErrorMaskRules({ value, onChange }) {
         pattern: '',
         replacement: '',
         weight: DEFAULT_RULE_WEIGHT,
+        upstream_only: false,
       },
     ]);
   }, [rules, emit]);
@@ -166,10 +167,23 @@ export default function ErrorMaskRules({ value, onChange }) {
             <Input
               size='small'
               value={rule.replacement}
-              placeholder={t('替换文案，支持占位符 {message} {code} {status} ...')}
+              placeholder={t(
+                '替换文案，支持占位符 {message} {code} {status} ...',
+              )}
               onChange={(v) => updateRule(rule._id, 'replacement', v)}
               style={{ flex: 2 }}
             />
+            <Button
+              size='small'
+              type={rule.upstream_only ? 'primary' : 'tertiary'}
+              theme={rule.upstream_only ? 'solid' : 'outline'}
+              onClick={() =>
+                updateRule(rule._id, 'upstream_only', !rule.upstream_only)
+              }
+              style={{ flexShrink: 0 }}
+            >
+              {t('仅对上游报错生效')}
+            </Button>
             <Popconfirm
               title={t('确认删除该规则？')}
               onConfirm={() => removeRule(rule._id)}

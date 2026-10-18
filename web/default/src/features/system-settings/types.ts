@@ -189,6 +189,7 @@ export type ModelSettings = {
   AutoGroups: string
   DefaultUseAutoGroup: boolean
   'group_ratio_setting.group_special_usable_group': string
+  'group_ratio_setting.group_descriptions': string
   'channel_affinity_setting.enabled': boolean
   'channel_affinity_setting.switch_on_success': boolean
   'channel_affinity_setting.keep_on_channel_disabled': boolean
@@ -234,6 +235,7 @@ export type BillingSettings = {
   AutoGroups: string
   DefaultUseAutoGroup: boolean
   'group_ratio_setting.group_special_usable_group': string
+  'group_ratio_setting.group_descriptions': string
   PayAddress: string
   EpayId: string
   EpayKey: string
@@ -425,4 +427,22 @@ export type UpstreamRatiosResponse = {
     differences: DifferencesMap
     test_results: TestResult[]
   }
+}
+
+export type DatabaseIntegrityReport = {
+  healthy: boolean
+  checked_at: number
+  main_dialect: string
+  log_dialect: string
+  separate_log_db: boolean
+  total_tables: number
+  checked_tables: number
+  issues: string[]
+  logs: string[]
+}
+
+export type DatabaseIntegrityResponse = {
+  success: boolean
+  message: string
+  data: DatabaseIntegrityReport
 }

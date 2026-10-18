@@ -6,6 +6,9 @@
     "default",
     "classic"
   ],
+  "patchedDependencies": {
+    "mdast-util-gfm-autolink-literal@2.0.1": "patches/mdast-util-gfm-autolink-literal@2.0.1.patch"
+  },
   "catalog": {
     "@lobehub/icons": "^5.10.0",
     "axios": "^1.16.1",

@@ -95,16 +95,16 @@ const RebateCard = ({ t, renderQuota }) => {
 
   if (loading)
     return (
-      <Card className='!rounded-lg'>
+      <Card className='!rounded-2xl shadow-sm border-0'>
         <Spin />
       </Card>
     );
   if (error)
     return (
-      <Card className='!rounded-lg'>
-        <div className='flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700'>
+      <Card className='!rounded-2xl shadow-sm border-0'>
+        <div className='flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700'>
           <span>{t('无法加载充值返利')}</span>
-          <Button size='small' onClick={loadOverview}>
+          <Button size='small' onClick={loadOverview} className='!rounded-lg'>
             {t('重试')}
           </Button>
         </div>
@@ -163,32 +163,34 @@ const RebateCard = ({ t, renderQuota }) => {
     Number(value || 0) === 0 ? t('无限制') : money(value);
 
   return (
-    <Card className='!rounded-lg shadow-sm'>
-      <div className='flex items-center gap-3 mb-4'>
-        <Avatar size='small'>
+    <Card className='!rounded-2xl shadow-sm border-0'>
+      <div className='flex items-center mb-4'>
+        <Avatar size='small' color='orange' className='mr-3 shadow-md'>
           <Coins size={16} />
         </Avatar>
         <div>
-          <Typography.Text strong>{t('充值返利')}</Typography.Text>
-          <div className='text-xs text-gray-500'>
+          <Typography.Text className='text-lg font-medium'>
+            {t('充值返利')}
+          </Typography.Text>
+          <div className='text-xs'>
             {t('仅直属邀请关系产生返利，返利奖励本身不再参与返利。')}
           </div>
         </div>
       </div>
       <div className='grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4'>
-        <Card className='!rounded-lg'>
+        <Card className='!rounded-xl'>
           <div className='text-xs text-gray-500'>{t('返利比例')}</div>
           <div className='text-lg font-semibold'>
             {(Number(overview.rate_basis_points || 0) / 100).toFixed(2)}%
           </div>
         </Card>
-        <Card className='!rounded-lg'>
+        <Card className='!rounded-xl'>
           <div className='text-xs text-gray-500'>{t('待发返利')}</div>
           <div className='text-lg font-semibold'>
             {renderQuota(overview.pending_quota || 0)}
           </div>
         </Card>
-        <Card className='!rounded-lg'>
+        <Card className='!rounded-xl'>
           <div className='text-xs text-gray-500'>{t('已发返利')}</div>
           <div className='text-lg font-semibold'>
             {renderQuota(overview.paid_quota || 0)}
@@ -199,9 +201,6 @@ const RebateCard = ({ t, renderQuota }) => {
         <div>
           {t('被邀请人终身合格消费基数上限')}:{' '}
           {cap(overview.invitee_eligible_money_limit_micros)}
-        </div>
-        <div>
-          {t('邀请人实际奖励上限')}: {cap(overview.inviter_reward_limit_micros)}
         </div>
         <div>
           {t('直属下级合格消费基数上限')}:{' '}
@@ -215,9 +214,12 @@ const RebateCard = ({ t, renderQuota }) => {
         </div>
         <div>
           {t('发放安排')}:{' '}
-          {payoutLabels[overview.payout_mode] || overview.payout_mode} (
-          {overview.payout_interval_hours || 0}h，
-          {overview.site_timezone || 'UTC'})
+          {payoutLabels[overview.payout_mode] || overview.payout_mode}
+          {overview.payout_mode === 'custom'
+            ? ` (${overview.payout_interval_hours || 0}h，${overview.site_timezone || 'UTC'})`
+            : overview.payout_mode !== 'immediate'
+              ? ` (${overview.site_timezone || 'UTC'})`
+              : ''}
         </div>
       </div>
       {recordsError ? (

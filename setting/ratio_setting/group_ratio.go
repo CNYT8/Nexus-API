@@ -36,6 +36,7 @@ type GroupRatioSetting struct {
 	GroupRatio              *types.RWMap[string, float64]            `json:"group_ratio"`
 	GroupGroupRatio         *types.RWMap[string, map[string]float64] `json:"group_group_ratio"`
 	GroupSpecialUsableGroup *types.RWMap[string, map[string]string]  `json:"group_special_usable_group"`
+	GroupDescriptions       *types.RWMap[string, string]             `json:"group_descriptions"`
 }
 
 var groupRatioSetting GroupRatioSetting
@@ -43,6 +44,7 @@ var groupRatioSetting GroupRatioSetting
 func init() {
 	groupSpecialUsableGroup := types.NewRWMap[string, map[string]string]()
 	groupSpecialUsableGroup.AddAll(defaultGroupSpecialUsableGroup)
+	groupDescriptions := types.NewRWMap[string, string]()
 
 	groupRatioMap.AddAll(defaultGroupRatio)
 	groupGroupRatioMap.AddAll(defaultGroupGroupRatio)
@@ -51,6 +53,7 @@ func init() {
 		GroupSpecialUsableGroup: groupSpecialUsableGroup,
 		GroupRatio:              groupRatioMap,
 		GroupGroupRatio:         groupGroupRatioMap,
+		GroupDescriptions:       groupDescriptions,
 	}
 
 	config.GlobalConfig.Register("group_ratio_setting", &groupRatioSetting)
@@ -60,6 +63,9 @@ func GetGroupRatioSetting() *GroupRatioSetting {
 	if groupRatioSetting.GroupSpecialUsableGroup == nil {
 		groupRatioSetting.GroupSpecialUsableGroup = types.NewRWMap[string, map[string]string]()
 		groupRatioSetting.GroupSpecialUsableGroup.AddAll(defaultGroupSpecialUsableGroup)
+	}
+	if groupRatioSetting.GroupDescriptions == nil {
+		groupRatioSetting.GroupDescriptions = types.NewRWMap[string, string]()
 	}
 	return &groupRatioSetting
 }

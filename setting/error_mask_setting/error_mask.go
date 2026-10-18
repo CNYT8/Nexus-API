@@ -16,17 +16,19 @@ const (
 )
 
 type ErrorMaskRule struct {
-	Status      int    `json:"status"`
-	Pattern     string `json:"pattern"`
-	Replacement string `json:"replacement"`
-	Weight      int    `json:"weight"`
+	Status       int    `json:"status"`
+	Pattern      string `json:"pattern"`
+	Replacement  string `json:"replacement"`
+	Weight       int    `json:"weight"`
+	UpstreamOnly bool   `json:"upstream_only,omitempty"`
 }
 
 type errorMaskRuleJSON struct {
-	Status      int    `json:"status"`
-	Pattern     string `json:"pattern"`
-	Replacement string `json:"replacement"`
-	Weight      *int   `json:"weight"`
+	Status       int    `json:"status"`
+	Pattern      string `json:"pattern"`
+	Replacement  string `json:"replacement"`
+	Weight       *int   `json:"weight"`
+	UpstreamOnly bool   `json:"upstream_only"`
 }
 
 type ErrorMaskSetting struct {
@@ -108,10 +110,11 @@ func ParseRulesJSONString(jsonStr string) ([]ErrorMaskRule, error) {
 			}
 		}
 		rules = append(rules, ErrorMaskRule{
-			Status:      rawRule.Status,
-			Pattern:     rawRule.Pattern,
-			Replacement: rawRule.Replacement,
-			Weight:      weight,
+			Status:       rawRule.Status,
+			Pattern:      rawRule.Pattern,
+			Replacement:  rawRule.Replacement,
+			Weight:       weight,
+			UpstreamOnly: rawRule.UpstreamOnly,
 		})
 	}
 	return rules, nil

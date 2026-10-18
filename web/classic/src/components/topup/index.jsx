@@ -1026,16 +1026,20 @@ const TopUp = () => {
           reloadSubscriptionSelf={getSubscriptionSelf}
           enableRedemption={topupInfo.enable_redemption !== false}
         />
-        <InvitationCard
-          t={t}
-          userState={userState}
-          renderQuota={renderQuota}
-          setOpenTransfer={setOpenTransfer}
-          affLink={affLink}
-          handleAffLinkClick={handleAffLinkClick}
-          complianceConfirmed={topupInfo.payment_compliance_confirmed !== false}
-        />
-        <RebateCard t={t} renderQuota={renderQuota} />
+        <div className='flex flex-col gap-6'>
+          <InvitationCard
+            t={t}
+            userState={userState}
+            renderQuota={renderQuota}
+            setOpenTransfer={setOpenTransfer}
+            affLink={affLink}
+            handleAffLinkClick={handleAffLinkClick}
+            complianceConfirmed={
+              topupInfo.payment_compliance_confirmed !== false
+            }
+          />
+          <RebateCard t={t} renderQuota={renderQuota} />
+        </div>
       </div>
     </div>
   );

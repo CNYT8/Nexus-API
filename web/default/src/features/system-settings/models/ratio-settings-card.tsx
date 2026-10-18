@@ -194,6 +194,15 @@ const groupSchema = z.object({
       })
     }
   }),
+  GroupDescriptions: z.string().superRefine((value, ctx) => {
+    const result = validateJsonString(value)
+    if (!result.valid) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: result.message || 'Invalid JSON',
+      })
+    }
+  }),
 })
 
 type ModelFormValues = z.infer<typeof modelSchema>
@@ -275,6 +284,7 @@ export function RatioSettingsCard({
     GroupSpecialUsableGroup: normalizeJsonString(
       groupDefaults.GroupSpecialUsableGroup
     ),
+    GroupDescriptions: normalizeJsonString(groupDefaults.GroupDescriptions),
   })
 
   const modelForm = useForm<ModelFormValues>({
@@ -310,6 +320,7 @@ export function RatioSettingsCard({
       GroupSpecialUsableGroup: formatJsonForTextarea(
         groupDefaults.GroupSpecialUsableGroup
       ),
+      GroupDescriptions: formatJsonForTextarea(groupDefaults.GroupDescriptions),
     },
   })
 
@@ -360,6 +371,7 @@ export function RatioSettingsCard({
       GroupSpecialUsableGroup: normalizeJsonString(
         groupDefaults.GroupSpecialUsableGroup
       ),
+      GroupDescriptions: normalizeJsonString(groupDefaults.GroupDescriptions),
     }
 
     groupForm.reset({
@@ -372,6 +384,7 @@ export function RatioSettingsCard({
       GroupSpecialUsableGroup: formatJsonForTextarea(
         groupDefaults.GroupSpecialUsableGroup
       ),
+      GroupDescriptions: formatJsonForTextarea(groupDefaults.GroupDescriptions),
     })
   }, [groupDefaults, groupForm])
 
@@ -387,8 +400,7 @@ export function RatioSettingsCard({
         AudioRatio: normalizeJsonString(values.AudioRatio),
         AudioCompletionRatio: normalizeJsonString(values.AudioCompletionRatio),
         ExposeRatioEnabled: values.ExposeRatioEnabled,
-        CompletionRatioOverrideEnabled:
-          values.CompletionRatioOverrideEnabled,
+        CompletionRatioOverrideEnabled: values.CompletionRatioOverrideEnabled,
         BillingMode: normalizeJsonString(values.BillingMode),
         BillingExpr: normalizeJsonString(values.BillingExpr),
       }
@@ -429,12 +441,14 @@ export function RatioSettingsCard({
         GroupSpecialUsableGroup: normalizeJsonString(
           values.GroupSpecialUsableGroup
         ),
+        GroupDescriptions: normalizeJsonString(values.GroupDescriptions),
       }
 
       // Map form field names to API keys (most are 1:1, except GroupSpecialUsableGroup)
       const apiKeyMap: Record<string, string> = {
         GroupSpecialUsableGroup:
           'group_ratio_setting.group_special_usable_group',
+        GroupDescriptions: 'group_ratio_setting.group_descriptions',
       }
 
       const updates = (

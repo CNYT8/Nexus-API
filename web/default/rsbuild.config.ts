@@ -54,6 +54,11 @@ export default defineConfig(({ envMode }) => {
       entry: {
         index: './src/main.tsx',
       },
+      include: [
+        {
+          and: [/[\\/]node_modules[\\/]/, { not: /[\\/]core-js[\\/]/ }],
+        },
+      ],
     },
     resolve: {
       alias: {
@@ -72,6 +77,15 @@ export default defineConfig(({ envMode }) => {
       // Production optimizations
       minify: isProd,
       target: 'web',
+      // JS baseline only: Tailwind 4 still requires newer browsers for full CSS support.
+      overrideBrowserslist: [
+        'Chrome >= 90',
+        'Edge >= 90',
+        'Firefox >= 90',
+        'Safari >= 15',
+        'ios_saf >= 15',
+      ],
+      polyfill: 'entry',
       distPath: {
         root: 'dist',
       },

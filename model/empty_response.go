@@ -89,6 +89,23 @@ func positiveOtherValue(otherMap map[string]interface{}, keys ...string) bool {
 	return false
 }
 
+func isUnreceivedFirstResponseLog(otherMap map[string]interface{}) bool {
+	value, ok := otherMap["frt"]
+	if !ok {
+		return false
+	}
+	switch number := value.(type) {
+	case float64:
+		return number < 0
+	case int:
+		return number < 0
+	case int64:
+		return number < 0
+	default:
+		return false
+	}
+}
+
 func isExcludedEmptyResponseLog(other string) bool {
 	otherMap, err := common.StrToMap(other)
 	if err != nil || otherMap == nil {
@@ -138,11 +155,13 @@ func isExcludedEmptyResponseLog(other string) bool {
 		}
 	}
 	if streamStatus, ok := otherMap["stream_status"].(map[string]interface{}); ok {
-		if status, _ := streamStatus["status"].(string); status == "error" {
-			return true
-		}
-		if positiveOtherValue(streamStatus, "error_count") {
-			return true
+		if !isUnreceivedFirstResponseLog(otherMap) {
+			if status, _ := streamStatus["status"].(string); status == "error" {
+				return true
+			}
+			if positiveOtherValue(streamStatus, "error_count") {
+				return true
+			}
 		}
 	}
 	return false
