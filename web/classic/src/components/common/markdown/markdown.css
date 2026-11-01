@@ -451,24 +451,22 @@ pre:hover .copy-code-button {
   border-radius: 0 6px 6px 0;
 }
 
+/* 流式文字只做轻量透明度过渡，避免逐词位移/缩放/模糊造成闪烁和掉帧 */
 @keyframes fade-in {
-  0% {
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-    filter: blur(3px);
+  from {
+    opacity: 0.55;
   }
-  60% {
-    opacity: 0.85;
-    filter: blur(0.5px);
-  }
-  100% {
+  to {
     opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0);
   }
 }
 
 .animate-fade-in {
-  animation: fade-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
-  will-change: opacity, transform;
+  animation: fade-in 160ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in {
+    animation: none;
+  }
 }

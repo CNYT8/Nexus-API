@@ -22,6 +22,7 @@ import type {
   DatabaseIntegrityResponse,
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
+  InitializeWalletLedgerResponse,
   OutputSensitiveConfig,
   OutputSensitiveConfigResponse,
   SystemOptionsResponse,
@@ -97,7 +98,17 @@ export async function fetchUpstreamRatios(request: FetchUpstreamRatiosRequest) {
 
 export async function checkDatabaseIntegrity() {
   const res = await api.get<DatabaseIntegrityResponse>(
-    '/api/option/db_integrity'
+    '/api/option/db_integrity',
+    { disableDuplicate: true }
+  )
+  return res.data
+}
+
+export async function initializeWalletLedger() {
+  const res = await api.post<InitializeWalletLedgerResponse>(
+    '/api/option/wallet_ledger/init',
+    undefined,
+    { skipBusinessError: true, skipErrorHandler: true }
   )
   return res.data
 }

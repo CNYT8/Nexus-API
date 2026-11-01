@@ -5,10 +5,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -452,5 +456,78 @@ func CheckDatabaseIntegrity(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data":    report,
+	})
+}
+
+var walletLedgerInitMu sync.Mutex
+
+func InitializeWalletLedger(c *gin.Context) {
+	if !walletLedgerInitMu.TryLock() {
+		common.ApiErrorMsg(c, "钱包账本初始化正在执行中，请勿重复提交")
+		return
+	}
+	defer walletLedgerInitMu.Unlock()
+
+	if model.DB == nil {
+		common.ApiErrorMsg(c, "主数据库未初始化")
+		return
+	}
+
+	active, err := model.WalletCreditLedgerActive(model.DB)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if active {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "钱包账本此前已完成初始化，无需重复操作",
+			"data": gin.H{
+				"already_initialized": true,
+				"initialized":         true,
+			},
+		})
+		return
+	}
+
+	service.SetRebateMaintenancePaused(true)
+	defer service.SetRebateMaintenancePaused(false)
+	middleware.BeginWalletMaintenanceGate(3 * time.Second)
+	defer middleware.EndWalletMaintenanceGate()
+	service.WaitForRebateTasksIdle(2 * time.Second)
+
+	if err := model.InitializeWalletCreditBaseline(model.DB); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	afterUserID := 0
+	const batchSize = 2000
+	var mismatches int
+	for {
+		batch, next, done, recErr := model.ReconcileWalletCreditBatch(model.DB, afterUserID, batchSize)
+		if recErr != nil {
+			common.ApiError(c, recErr)
+			return
+		}
+		mismatches += len(batch)
+		if done {
+			break
+		}
+		afterUserID = next
+	}
+
+	recordManageAudit(c, "option.wallet_ledger_init", map[string]interface{}{
+		"mismatches": mismatches,
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "钱包账本初始化成功",
+		"data": gin.H{
+			"already_initialized": false,
+			"initialized":         true,
+			"mismatches":          mismatches,
+		},
 	})
 }

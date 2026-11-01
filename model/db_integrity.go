@@ -163,10 +163,13 @@ func inspectDBTarget(
 		}
 	}
 
-	actualColumnsByTable, err := loadDatabaseTableColumnsReadOnly(db, dialect)
+	actualColumnsByTable, engineIssues, err := loadDatabaseTableColumnsReadOnly(db, dialect)
 	if err != nil {
 		addIssue(fmt.Sprintf("%s (%s): 读取数据库元数据表结构失败: %v", label, dialect, err))
 		return
+	}
+	for _, engIssue := range engineIssues {
+		addIssue(fmt.Sprintf("%s (%s): %s", label, dialect, engIssue))
 	}
 
 	expectedTables := make(map[string]struct{}, len(specs))
@@ -196,14 +199,16 @@ func inspectDBTarget(
 			colSet = make(map[string]string)
 		}
 
-		// Check missing columns against GORM schema
+		// Check missing columns AND unrecognized extra columns against GORM schema
 		var missingCols []string
 		var selectCols []string
+		expectedCols := make(map[string]struct{}, len(s.Fields))
 		for _, field := range s.Fields {
 			if field.DBName == "" {
 				continue
 			}
 			colLower := strings.ToLower(field.DBName)
+			expectedCols[colLower] = struct{}{}
 			selectCols = append(selectCols, quoteIdentifierReadOnly(dialect, field.DBName))
 			if len(colSet) > 0 {
 				if _, ok := colSet[colLower]; !ok {
@@ -215,6 +220,18 @@ func inspectDBTarget(
 		}
 		if len(missingCols) > 0 {
 			addIssue(fmt.Sprintf("%s: 表 `%s` (模型 %s) 缺失字段: [%s]", label, tableName, spec.Name, strings.Join(missingCols, ", ")))
+			continue
+		}
+
+		var unknownCols []string
+		for actualColLower := range colSet {
+			if _, ok := expectedCols[actualColLower]; !ok {
+				unknownCols = append(unknownCols, actualColLower)
+			}
+		}
+		sort.Strings(unknownCols)
+		if len(unknownCols) > 0 {
+			addIssue(fmt.Sprintf("%s: 表 `%s` (模型 %s) 存在系统无法识别的冗余/未知字段: [%s]", label, tableName, spec.Name, strings.Join(unknownCols, ", ")))
 			continue
 		}
 
@@ -231,6 +248,19 @@ func inspectDBTarget(
 			continue
 		}
 		_ = rows.Close()
+
+		// Dialect-specific physical / metadata corruption check (strictly read-only)
+		if dialect == "mysql" {
+			if checkErr := checkMySQLTableReadOnly(db, quotedTable); checkErr != nil {
+				addIssue(fmt.Sprintf("%s: 表 `%s` (模型 %s) MySQL CHECK TABLE 检测到表或索引损坏: %v", label, tableName, spec.Name, checkErr))
+				continue
+			}
+		} else if dialect == "postgres" {
+			if checkErr := checkPostgresTableReadOnly(db, tableName); checkErr != nil {
+				addIssue(fmt.Sprintf("%s: 表 `%s` (模型 %s) PostgreSQL 索引/约束完整性异常: %v", label, tableName, spec.Name, checkErr))
+				continue
+			}
+		}
 
 		// Dialect-specific column type compatibility checks (read-only)
 		if tableName == "tokens" && (dialect == "mysql" || dialect == "postgres") {
@@ -276,6 +306,54 @@ func inspectDBTarget(
 	if len(unknownTables) > 0 {
 		addIssue(fmt.Sprintf("%s: 发现非本系统原生的数据表 (%d 个): [%s]", label, len(unknownTables), strings.Join(unknownTables, ", ")))
 	}
+
+	if db == DB {
+		inspectWalletLedgerReadOnly(db, label, addInfo, addIssue)
+	}
+}
+
+func inspectWalletLedgerReadOnly(
+	db *gorm.DB,
+	label string,
+	addInfo func(string),
+	addIssue func(string),
+) {
+	active, err := WalletCreditLedgerActive(db)
+	if err != nil {
+		addIssue(fmt.Sprintf("%s: 读取钱包账本初始化状态失败: %v", label, err))
+		return
+	}
+	if !active {
+		addInfo(fmt.Sprintf("%s: 钱包账本基线尚未初始化 (可在运维设置中点击“钱包账本初始化”)", label))
+		return
+	}
+
+	afterUserID := 0
+	const batchSize = 2000
+	var mismatchCount int
+	var sampleUsers []string
+	for {
+		batch, next, done, recErr := ReconcileWalletCreditBatch(db, afterUserID, batchSize)
+		if recErr != nil {
+			addIssue(fmt.Sprintf("%s: 钱包账本只读对账检查失败: %v", label, recErr))
+			return
+		}
+		for _, item := range batch {
+			mismatchCount++
+			if len(sampleUsers) < 5 {
+				sampleUsers = append(sampleUsers, fmt.Sprintf("user=%d(quota=%d,expected=%d)", item.UserID, item.Quota, item.ExpectedQuota))
+			}
+		}
+		if done {
+			break
+		}
+		afterUserID = next
+	}
+	if mismatchCount > 0 {
+		addIssue(fmt.Sprintf("%s: 钱包账本存在 %d 个用户余额与来源批次不一致: [%s]", label, mismatchCount, strings.Join(sampleUsers, ", ")))
+		return
+	}
+	addInfo(fmt.Sprintf("%s: 钱包账本基线已初始化且全部用户余额与账本批次一致", label))
 }
 
 var syncMapPool sync.Map
@@ -289,8 +367,9 @@ func quoteIdentifierReadOnly(dialect, ident string) string {
 	return "`" + safe + "`"
 }
 
-func loadDatabaseTableColumnsReadOnly(db *gorm.DB, dialect string) (map[string]map[string]string, error) {
+func loadDatabaseTableColumnsReadOnly(db *gorm.DB, dialect string) (map[string]map[string]string, []string, error) {
 	result := make(map[string]map[string]string)
+	var engineIssues []string
 
 	switch dialect {
 	case "mysql":
@@ -304,10 +383,13 @@ func loadDatabaseTableColumnsReadOnly(db *gorm.DB, dialect string) (map[string]m
 		if err := db.Raw(`SELECT TABLE_NAME, ENGINE, TABLE_COMMENT
 			FROM information_schema.TABLES
 			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'`).Scan(&tableRows).Error; err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, tr := range tableRows {
 			tblLower := strings.ToLower(tr.TableName)
+			if tr.Engine == nil || strings.TrimSpace(*tr.Engine) == "" {
+				engineIssues = append(engineIssues, fmt.Sprintf("表 `%s` 存储引擎为空或已损坏 (%s)", tr.TableName, tr.TableComment))
+			}
 			if _, ok := result[tblLower]; !ok {
 				result[tblLower] = make(map[string]string)
 			}
@@ -322,7 +404,7 @@ func loadDatabaseTableColumnsReadOnly(db *gorm.DB, dialect string) (map[string]m
 		if err := db.Raw(`SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE
 			FROM information_schema.COLUMNS
 			WHERE TABLE_SCHEMA = DATABASE()`).Scan(&colRows).Error; err != nil {
-			return nil, err
+			return nil, engineIssues, err
 		}
 		for _, cr := range colRows {
 			tblLower := strings.ToLower(cr.TableName)
@@ -331,7 +413,7 @@ func loadDatabaseTableColumnsReadOnly(db *gorm.DB, dialect string) (map[string]m
 			}
 			result[tblLower][strings.ToLower(cr.ColumnName)] = cr.ColumnType
 		}
-		return result, nil
+		return result, engineIssues, nil
 
 	case "postgres":
 		type pgTableRow struct {
@@ -341,7 +423,7 @@ func loadDatabaseTableColumnsReadOnly(db *gorm.DB, dialect string) (map[string]m
 		if err := db.Raw(`SELECT table_name
 			FROM information_schema.tables
 			WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'`).Scan(&tableRows).Error; err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, tr := range tableRows {
 			tblLower := strings.ToLower(tr.TableName)
@@ -359,7 +441,7 @@ func loadDatabaseTableColumnsReadOnly(db *gorm.DB, dialect string) (map[string]m
 		if err := db.Raw(`SELECT table_name, column_name, data_type
 			FROM information_schema.columns
 			WHERE table_schema = current_schema()`).Scan(&colRows).Error; err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, cr := range colRows {
 			tblLower := strings.ToLower(cr.TableName)
@@ -368,7 +450,7 @@ func loadDatabaseTableColumnsReadOnly(db *gorm.DB, dialect string) (map[string]m
 			}
 			result[tblLower][strings.ToLower(cr.ColumnName)] = cr.DataType
 		}
-		return result, nil
+		return result, nil, nil
 
 	case "sqlite":
 		type sqliteMasterRow struct {
@@ -376,7 +458,7 @@ func loadDatabaseTableColumnsReadOnly(db *gorm.DB, dialect string) (map[string]m
 		}
 		var tables []sqliteMasterRow
 		if err := db.Raw(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`).Scan(&tables).Error; err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, t := range tables {
 			tblLower := strings.ToLower(t.Name)
@@ -387,15 +469,86 @@ func loadDatabaseTableColumnsReadOnly(db *gorm.DB, dialect string) (map[string]m
 			}
 			safeName := strings.ReplaceAll(t.Name, "`", "")
 			if err := db.Raw("PRAGMA table_info(`" + safeName + "`)").Scan(&cols).Error; err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			for _, c := range cols {
 				result[tblLower][strings.ToLower(c.Name)] = c.Type
 			}
 		}
-		return result, nil
+		return result, nil, nil
 
 	default:
-		return result, nil
+		return result, nil, nil
 	}
+}
+
+func checkMySQLTableReadOnly(db *gorm.DB, quotedTable string) error {
+	type checkTableRow struct {
+		Table   string `gorm:"column:Table"`
+		Op      string `gorm:"column:Op"`
+		MsgType string `gorm:"column:Msg_type"`
+		MsgText string `gorm:"column:Msg_text"`
+	}
+	var rows []checkTableRow
+	if err := db.Raw(fmt.Sprintf("CHECK TABLE %s FAST QUICK", quotedTable)).Scan(&rows).Error; err != nil {
+		return err
+	}
+	for _, r := range rows {
+		msgType := strings.ToLower(strings.TrimSpace(r.MsgType))
+		msgText := strings.TrimSpace(r.MsgText)
+		if msgType == "error" || (msgType == "status" && !strings.EqualFold(msgText, "ok") && !strings.Contains(strings.ToLower(msgText), "already up to date")) {
+			return fmt.Errorf("%s: %s", r.MsgType, msgText)
+		}
+	}
+	return nil
+}
+
+func checkPostgresTableReadOnly(db *gorm.DB, tableName string) error {
+	type invalidIndexRow struct {
+		IndexName string `gorm:"column:index_name"`
+	}
+	var invalidIndexes []invalidIndexRow
+	if err := db.Raw(`
+		SELECT c2.relname AS index_name
+		FROM pg_index i
+		JOIN pg_class c1 ON c1.oid = i.indrelid
+		JOIN pg_class c2 ON c2.oid = i.indexrelid
+		JOIN pg_namespace n ON n.oid = c1.relnamespace
+		WHERE n.nspname = current_schema()
+		  AND LOWER(c1.relname) = LOWER(?)
+		  AND (NOT i.indisvalid OR NOT i.indisready)
+	`, tableName).Scan(&invalidIndexes).Error; err != nil {
+		return err
+	}
+	if len(invalidIndexes) > 0 {
+		names := make([]string, 0, len(invalidIndexes))
+		for _, idx := range invalidIndexes {
+			names = append(names, idx.IndexName)
+		}
+		return fmt.Errorf("存在失效或未就绪的索引: [%s]", strings.Join(names, ", "))
+	}
+
+	type invalidConstraintRow struct {
+		ConName string `gorm:"column:conname"`
+	}
+	var invalidConstraints []invalidConstraintRow
+	if err := db.Raw(`
+		SELECT con.conname AS conname
+		FROM pg_constraint con
+		JOIN pg_class rel ON rel.oid = con.conrelid
+		JOIN pg_namespace n ON n.oid = rel.relnamespace
+		WHERE n.nspname = current_schema()
+		  AND LOWER(rel.relname) = LOWER(?)
+		  AND NOT con.convalidated
+	`, tableName).Scan(&invalidConstraints).Error; err != nil {
+		return err
+	}
+	if len(invalidConstraints) > 0 {
+		names := make([]string, 0, len(invalidConstraints))
+		for _, c := range invalidConstraints {
+			names = append(names, c.ConName)
+		}
+		return fmt.Errorf("存在未验证的约束: [%s]", strings.Join(names, ", "))
+	}
+	return nil
 }

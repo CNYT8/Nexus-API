@@ -17,7 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState } from 'react'
-import { DatabaseIcon, ExternalLinkIcon, RefreshCcwIcon } from 'lucide-react'
+import {
+  DatabaseIcon,
+  ExternalLinkIcon,
+  RefreshCcwIcon,
+  WalletIcon,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { formatTimestamp, formatTimestampToDate } from '@/lib/format'
@@ -38,7 +43,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Markdown } from '@/components/ui/markdown'
-import { checkDatabaseIntegrity } from '../api'
+import { checkDatabaseIntegrity, initializeWalletLedger } from '../api'
 import { SettingsSection } from '../components/settings-section'
 import type { DatabaseIntegrityReport } from '../types'
 
@@ -58,6 +63,8 @@ export function UpdateCheckerSection({
   const [checkingDb, setCheckingDb] = useState(false)
   const [dbDialogOpen, setDbDialogOpen] = useState(false)
   const [dbReport, setDbReport] = useState<DatabaseIntegrityReport | null>(null)
+  const [walletInitConfirmOpen, setWalletInitConfirmOpen] = useState(false)
+  const [initializingWallet, setInitializingWallet] = useState(false)
   const [latestNewApiRelease, setLatestNewApiRelease] =
     useState<ReleaseInfo | null>(() => NEW_API_BASE_RELEASE)
 
@@ -119,6 +126,41 @@ export function UpdateCheckerSection({
     }
   }
 
+  const handleInitWalletLedger = async () => {
+    setInitializingWallet(true)
+    try {
+      const res = await initializeWalletLedger()
+      if (!res?.success) {
+        toast.error(
+          (res?.message ? t(res.message) : '') ||
+            t('钱包账本初始化失败，请稍后重试')
+        )
+        return
+      }
+      setWalletInitConfirmOpen(false)
+      if (res.data?.already_initialized) {
+        toast.success(t('钱包账本此前已完成初始化，无需重复操作'))
+      } else {
+        toast.success(t('钱包账本初始化成功'))
+      }
+    } catch (error) {
+      const serverMsg =
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof (error as { response?: { data?: { message?: string } } })
+          .response?.data?.message === 'string'
+          ? (error as { response?: { data?: { message?: string } } }).response
+              ?.data?.message
+          : undefined
+      toast.error(
+        (serverMsg ? t(serverMsg) : '') || t('钱包账本初始化失败，请稍后重试')
+      )
+    } finally {
+      setInitializingWallet(false)
+    }
+  }
+
   return (
     <>
       <SettingsSection title={t('System maintenance')}>
@@ -149,7 +191,7 @@ export function UpdateCheckerSection({
             </div>
           </div>
 
-          <div className='flex flex-wrap gap-3'>
+          <div className='flex flex-wrap items-center gap-3'>
             <Button onClick={handleCheckUpdates} disabled={checking}>
               {checking ? (
                 t('Checking updates...')
@@ -160,6 +202,9 @@ export function UpdateCheckerSection({
                 </>
               )}
             </Button>
+          </div>
+
+          <div className='flex flex-wrap items-center gap-3 border-t pt-5'>
             <Button
               variant='outline'
               onClick={handleCheckDbIntegrity}
@@ -167,6 +212,14 @@ export function UpdateCheckerSection({
             >
               <DatabaseIcon className='me-2 h-4 w-4' />
               {t('检查数据库完整性')}
+            </Button>
+            <Button
+              variant='outline'
+              onClick={() => setWalletInitConfirmOpen(true)}
+              disabled={initializingWallet}
+            >
+              <WalletIcon className='me-2 h-4 w-4' />
+              {t('钱包账本初始化')}
             </Button>
           </div>
         </div>
@@ -249,6 +302,41 @@ export function UpdateCheckerSection({
           <DialogFooter>
             <Button type='button' onClick={() => setDbDialogOpen(false)}>
               {t('Close')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={walletInitConfirmOpen}
+        onOpenChange={(open) => {
+          if (!initializingWallet) setWalletInitConfirmOpen(open)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('钱包账本初始化')}</DialogTitle>
+            <DialogDescription>
+              {t(
+                '初始化钱包账本期间将短暂暂停服务请求，把存量正余额登记为历史基础额度（不改变任何用户余额）。是否确认开始初始化？'
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type='button'
+              variant='secondary'
+              disabled={initializingWallet}
+              onClick={() => setWalletInitConfirmOpen(false)}
+            >
+              {t('取消')}
+            </Button>
+            <Button
+              type='button'
+              disabled={initializingWallet}
+              onClick={handleInitWalletLedger}
+            >
+              {t('确认初始化')}
             </Button>
           </DialogFooter>
         </DialogContent>

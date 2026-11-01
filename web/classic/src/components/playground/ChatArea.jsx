@@ -29,17 +29,14 @@ import {
 } from '@douyinfe/semi-ui';
 import {
   ArrowDown,
-  BarChart,
-  Box,
   Camera,
-  CodeSquare,
+  Check,
+  ChevronsUpDown,
   Cpu,
   FileText,
   Globe,
-  GraduationCap,
   Image as ImageIcon,
   Layers,
-  NotepadText,
   Paperclip,
   ScreenShare,
   Send,
@@ -48,13 +45,54 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-const SUGGESTION_ITEMS = [
-  { icon: BarChart, text: 'Analyze data', color: '#76d0eb' },
-  { icon: Box, text: 'Surprise me', color: '#76d0eb' },
-  { icon: NotepadText, text: 'Summarize text', color: '#ea8444' },
-  { icon: CodeSquare, text: 'Code', color: '#6c71ff' },
-  { icon: GraduationCap, text: 'Get advice', color: '#76d0eb' },
-];
+// 与新版一致：触发按钮只显示分组名，描述与倍率仅在展开项中展示。
+const playgroundGroupOptions = (groups) =>
+  groups.map((group) => ({
+    ...group,
+    label: group.value || '用户分组',
+    description: group.fullLabel || group.description || group.desc || '',
+  }));
+
+const renderGroupOption = ({
+  description,
+  ratio,
+  label,
+  className,
+  style,
+  onClick,
+  onMouseEnter,
+  selected,
+}) => (
+  <div
+    className={className}
+    style={{ ...style, padding: '8px 12px' }}
+    onClick={onClick}
+    onMouseEnter={onMouseEnter}
+  >
+    <div className='flex items-center justify-between gap-4'>
+      <div className='min-w-0'>
+        <div className='truncate text-xs font-medium'>{label}</div>
+        {(description || ratio) && (
+          <div
+            className='truncate text-[11px] leading-5'
+            style={{ color: 'var(--semi-color-text-2)' }}
+          >
+            {[description, ratio ? `倍率 ${ratio}` : '']
+              .filter(Boolean)
+              .join(' · ')}
+          </div>
+        )}
+      </div>
+      {selected && (
+        <Check
+          size={14}
+          className='shrink-0'
+          style={{ color: 'var(--semi-color-primary)' }}
+        />
+      )}
+    </div>
+  </div>
+);
 
 const ChatArea = ({
   message = [],
@@ -75,35 +113,92 @@ const ChatArea = ({
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const scrollContainerRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
+  const scrollFrameRef = useRef(null);
+  const programmaticScrollRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
+
+  const handleWheel = useCallback(() => {
+    programmaticScrollRef.current = false;
+  }, []);
+
+  const handleTouchStart = useCallback(() => {
+    programmaticScrollRef.current = false;
+  }, []);
+
+  const updateScrollAffordance = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const nearBottom = distanceFromBottom <= 80;
+    setShowScrollBottom(!nearBottom && el.scrollHeight > el.clientHeight + 120);
+  }, []);
 
   const checkScrollPosition = useCallback(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const nearBottom = distanceFromBottom <= 80;
-    shouldAutoScrollRef.current = nearBottom;
-    setShowScrollBottom(!nearBottom && el.scrollHeight > el.clientHeight + 120);
-  }, []);
-
-  const scrollToBottom = useCallback((smooth = true) => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    shouldAutoScrollRef.current = true;
-    setShowScrollBottom(false);
-    el.scrollTo({
-      top: el.scrollHeight,
-      behavior: smooth ? 'smooth' : 'auto',
-    });
-  }, []);
-
-  // 消息更新时自动滚动到底部
-  useEffect(() => {
-    if (shouldAutoScrollRef.current) {
-      scrollToBottom(false);
-    } else {
-      checkScrollPosition();
+    if (el.scrollTop < lastScrollTopRef.current && !nearBottom) {
+      // 即使用户在系统平滑滚动途中上滑，也立即交还滚动控制权并暂停跟随。
+      programmaticScrollRef.current = false;
+      shouldAutoScrollRef.current = false;
+    } else if (nearBottom) {
+      shouldAutoScrollRef.current = true;
     }
-  }, [message, scrollToBottom, checkScrollPosition]);
+    lastScrollTopRef.current = el.scrollTop;
+    updateScrollAffordance();
+  }, [updateScrollAffordance]);
+
+  const scrollToBottom = useCallback(
+    (smooth = true) => {
+      const el = scrollContainerRef.current;
+      if (!el) return;
+      shouldAutoScrollRef.current = true;
+      setShowScrollBottom(false);
+      programmaticScrollRef.current = true;
+      el.scrollTo({
+        top: el.scrollHeight,
+        behavior: smooth ? 'smooth' : 'auto',
+      });
+      // 用户在此期间主动滚动，以用户操作为准。
+      window.setTimeout(
+        () => {
+          programmaticScrollRef.current = false;
+          if (scrollContainerRef.current) {
+            lastScrollTopRef.current = scrollContainerRef.current.scrollTop;
+          }
+        },
+        smooth ? 400 : 0,
+      );
+    },
+    [updateScrollAffordance],
+  );
+
+  // 流式消息可能一帧更新多次，滚动只按显示帧合并执行，避免连续跳动。
+  useEffect(() => {
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current);
+    }
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      if (shouldAutoScrollRef.current) {
+        const el = scrollContainerRef.current;
+        if (el) {
+          programmaticScrollRef.current = true;
+          el.scrollTop = el.scrollHeight;
+          lastScrollTopRef.current = el.scrollTop;
+          programmaticScrollRef.current = false;
+        }
+      }
+      updateScrollAffordance();
+    });
+    return () => {
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
+  }, [message, updateScrollAffordance]);
 
   const handleSubmit = useCallback(() => {
     const trimmed = inputText.trim();
@@ -118,12 +213,6 @@ const ChatArea = ({
       e.preventDefault();
       handleSubmit();
     }
-  };
-
-  const handleSuggestionClick = (suggestionText) => {
-    if (isGenerating) return;
-    shouldAutoScrollRef.current = true;
-    onMessageSend(suggestionText);
   };
 
   const handleDevFeatureToast = (featureName) => {
@@ -145,7 +234,9 @@ const ChatArea = ({
       <div
         ref={scrollContainerRef}
         onScroll={checkScrollPosition}
-        className='flex-1 overflow-y-auto'
+        onWheel={handleWheel}
+        onTouchStart={handleTouchStart}
+        className='flex-1 overflow-y-auto overscroll-contain'
       >
         <div className='mx-auto w-full max-w-4xl px-4 py-6 space-y-6'>
           {message.map((msg, index) => {
@@ -202,7 +293,7 @@ const ChatArea = ({
 
       {/* 回到底部悬浮按钮 */}
       {showScrollBottom && (
-        <div className='absolute bottom-44 left-1/2 -translate-x-1/2 z-10'>
+        <div className='absolute bottom-40 left-1/2 -translate-x-1/2 z-10'>
           <div className='nexus-reveal'>
             <Button
               theme='solid'
@@ -249,9 +340,9 @@ const ChatArea = ({
             />
           </div>
 
-          {/* 底部工具条：左侧附件/搜索/清空，右侧模型/分组选择与发送按钮 */}
-          <div className='flex flex-wrap items-center justify-between gap-2 px-3 py-2'>
-            <div className='flex items-center gap-1.5'>
+          {/* 底部工具条：辅助操作与主操作自然留白，不再挤在两侧 */}
+          <div className='playground-input-toolbar flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2'>
+            <div className='flex items-center gap-2'>
               <Dropdown
                 trigger='click'
                 position='topLeft'
@@ -323,40 +414,42 @@ const ChatArea = ({
               )}
             </div>
 
-            <div className='flex flex-wrap items-center gap-1.5 sm:gap-2'>
-              {/* 模型选择器 */}
-              <Select
-                filter
-                size='small'
-                placeholder={t('选择模型')}
-                value={inputs.model}
-                optionList={models}
-                disabled={isGenerating || models.length === 0}
-                onChange={(val) => onInputChange('model', val)}
-                prefix={<Cpu size={13} className='ml-1.5 opacity-70' />}
-                className='!rounded-lg'
-                style={{
-                  minWidth: styleState.isMobile ? 128 : 180,
-                  maxWidth: styleState.isMobile ? 165 : 240,
-                }}
-                dropdownStyle={{ maxWidth: 320 }}
-              />
+            <div className='playground-input-primary flex flex-wrap items-center gap-2'>
+              <div className='playground-selector-group flex items-center gap-2'>
+                {/* 分组名只放在按钮上，描述与倍率留在展开项 */}
+                <Select
+                  filter
+                  size='small'
+                  placeholder={t('Group')}
+                  value={inputs.group}
+                  optionList={playgroundGroupOptions(groups)}
+                  disabled={isGenerating || groups.length === 0}
+                  onChange={(val) => onInputChange('group', val)}
+                  renderSelectedItem={(option) => option.value || t('Group')}
+                  prefix={<Layers size={14} />}
+                  renderOptionItem={renderGroupOption}
+                  arrowIcon={<ChevronsUpDown size={14} />}
+                  dropdownMatchSelectWidth={false}
+                  dropdownStyle={{ width: 240, maxWidth: '80vw' }}
+                  className='playground-selector !rounded-lg'
+                />
 
-              {/* 分组选择器 */}
-              <Select
-                size='small'
-                placeholder={t('选择分组')}
-                value={inputs.group}
-                optionList={groups}
-                disabled={isGenerating || groups.length === 0}
-                onChange={(val) => onInputChange('group', val)}
-                prefix={<Layers size={13} className='ml-1.5 opacity-70' />}
-                className='!rounded-lg'
-                style={{
-                  minWidth: styleState.isMobile ? 105 : 135,
-                  maxWidth: styleState.isMobile ? 140 : 190,
-                }}
-              />
+                {/* 模型按钮按内容宽度伸缩，保留搜索 */}
+                <Select
+                  filter
+                  size='small'
+                  placeholder={t('Model')}
+                  value={inputs.model}
+                  optionList={models}
+                  disabled={isGenerating || models.length === 0}
+                  onChange={(val) => onInputChange('model', val)}
+                  prefix={<Cpu size={14} />}
+                  arrowIcon={<ChevronsUpDown size={14} />}
+                  className='playground-selector playground-model-selector !rounded-lg'
+                  dropdownMatchSelectWidth={false}
+                  dropdownStyle={{ width: 300, maxWidth: '85vw' }}
+                />
+              </div>
 
               {/* 发送 / 停止按钮 */}
               {isGenerating ? (
@@ -385,30 +478,6 @@ const ChatArea = ({
               )}
             </div>
           </div>
-        </div>
-
-        {/* 底部快捷提示气泡行（对齐新版 Suggestions） */}
-        <div className='flex items-center gap-2 overflow-x-auto pt-2.5 pb-0.5 no-scrollbar'>
-          {SUGGESTION_ITEMS.map(({ icon: Icon, text: itemText, color }) => (
-            <Button
-              key={itemText}
-              size='small'
-              theme='outline'
-              type='tertiary'
-              disabled={isGenerating}
-              onClick={() => handleSuggestionClick(t(itemText))}
-              className='!rounded-xl shrink-0 !px-3'
-              style={{
-                backgroundColor: 'var(--semi-color-bg-1)',
-                borderColor: 'var(--semi-color-border)',
-              }}
-            >
-              <span className='inline-flex items-center gap-1.5 text-xs'>
-                {Icon && <Icon size={14} style={{ color }} />}
-                <Typography.Text size='small'>{t(itemText)}</Typography.Text>
-              </span>
-            </Button>
-          ))}
         </div>
       </div>
     </div>

@@ -118,6 +118,7 @@ const OtherSetting = () => {
     Footer: false,
     CheckUpdate: false,
     CheckDbIntegrity: false,
+    InitWalletLedger: false,
     FrontendTheme: false,
   });
   const handleInputChange = async (value, e) => {
@@ -331,6 +332,48 @@ const OtherSetting = () => {
     }
   };
 
+  const confirmInitWalletLedger = () => {
+    Modal.confirm({
+      title: t('钱包账本初始化'),
+      content: t(
+        '初始化钱包账本期间将短暂暂停服务请求，把存量正余额登记为历史基础额度（不改变任何用户余额）。是否确认开始初始化？',
+      ),
+      okText: t('确认初始化'),
+      cancelText: t('取消'),
+      onOk: async () => {
+        try {
+          setLoadingInput((loadingInput) => ({
+            ...loadingInput,
+            InitWalletLedger: true,
+          }));
+          const res = await API.post('/api/option/wallet_ledger/init');
+          const { success, message, data } = res.data || {};
+          if (!success) {
+            showError(t(message) || t('钱包账本初始化失败，请稍后重试'));
+            return;
+          }
+          if (data?.already_initialized) {
+            showSuccess(t('钱包账本此前已完成初始化，无需重复操作'));
+          } else {
+            showSuccess(t('钱包账本初始化成功'));
+          }
+        } catch (error) {
+          console.error('Failed to initialize wallet ledger:', error);
+          const serverMsg = error?.response?.data?.message;
+          showError(
+            (serverMsg ? t(serverMsg) : '') ||
+              t('钱包账本初始化失败，请稍后重试'),
+          );
+        } finally {
+          setLoadingInput((loadingInput) => ({
+            ...loadingInput,
+            InitWalletLedger: false,
+          }));
+        }
+      },
+    });
+  };
+
   const switchToDefaultFrontend = () => {
     if (!NEXUS_DEFAULT_FRONTEND_ENABLED) {
       Modal.info({
@@ -417,7 +460,7 @@ const OtherSetting = () => {
           marginTop: '10px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '10px',
+          gap: '16px',
         }}
       >
         {/* 版本信息 */}
@@ -477,19 +520,22 @@ const OtherSetting = () => {
         <Form>
           <Card>
             <Form.Section text={t('运维设置')}>
-              <Row>
-                <Col span={16}>
-                  <Space>
-                    <Button
-                      type='primary'
-                      onClick={checkDbIntegrity}
-                      loading={loadingInput['CheckDbIntegrity']}
-                    >
-                      {t('检查数据库完整性')}
-                    </Button>
-                  </Space>
-                </Col>
-              </Row>
+              <div className='flex flex-wrap items-center gap-3 pb-1 pt-4'>
+                <Button
+                  type='primary'
+                  onClick={checkDbIntegrity}
+                  loading={loadingInput['CheckDbIntegrity']}
+                >
+                  {t('检查数据库完整性')}
+                </Button>
+                <Button
+                  type='secondary'
+                  onClick={confirmInitWalletLedger}
+                  loading={loadingInput['InitWalletLedger']}
+                >
+                  {t('钱包账本初始化')}
+                </Button>
+              </div>
             </Form.Section>
           </Card>
         </Form>

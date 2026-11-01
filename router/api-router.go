@@ -249,6 +249,7 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.GET("/waffo-pancake/subscription-product-options", controller.ListWaffoPancakeSubscriptionProductOptions)
 			optionRoute.POST("/waffo-pancake/subscription-product-options", controller.ListWaffoPancakeSubscriptionProductOptions)
 			optionRoute.GET("/db_integrity", middleware.DisableCache(), controller.CheckDatabaseIntegrity)
+			optionRoute.POST("/wallet_ledger/init", middleware.DisableCache(), controller.InitializeWalletLedger)
 		}
 		adminPermissionRoute := apiRouter.Group("/admin_permissions")
 		adminPermissionRoute.Use(middleware.RootAuth())

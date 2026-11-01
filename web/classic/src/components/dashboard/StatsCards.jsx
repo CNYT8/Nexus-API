@@ -49,14 +49,14 @@ const StatsCards = ({
               {group.items.map((item, itemIdx) => (
                 <div
                   key={itemIdx}
-                  className={`nexus-stat-row flex items-center justify-between ${
+                  className={`nexus-stat-row flex flex-wrap items-center justify-between gap-x-3 gap-y-1 ${
                     item.onClick
                       ? 'nexus-pressable nexus-hover-fill cursor-pointer'
                       : ''
                   }`}
                   onClick={item.onClick}
                 >
-                  <div className='flex items-center min-w-0'>
+                  <div className='nexus-stat-primary flex items-center min-w-0'>
                     <span
                       className='nexus-stat-icon mr-3'
                       style={{
@@ -76,11 +76,7 @@ const StatsCards = ({
                             <Skeleton.Paragraph
                               active
                               rows={1}
-                              style={{
-                                width: '65px',
-                                height: '24px',
-                                marginTop: '4px',
-                              }}
+                              style={{ width: '65px' }}
                             />
                           }
                         >
@@ -102,9 +98,9 @@ const StatsCards = ({
                       {t('充值')}
                     </Tag>
                   ) : (
-                    (loading ||
-                      (item.trendData && item.trendData.length > 0)) && (
-                      <div className='w-24 h-10'>
+                    item.trendData &&
+                    item.trendData.length > 0 && (
+                      <div className='nexus-stat-trend hidden md:block w-24 h-10'>
                         <VChart
                           key={`dashboard-stat-${chartThemeKey}-${idx}-${itemIdx}`}
                           spec={getTrendSpec(item.trendData, item.trendColor)}

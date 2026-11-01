@@ -62,6 +62,9 @@ func StartRebateRecoveryTask() {
 }
 
 func runStaleReservationExpiryOnce() {
+	if rebateMaintenancePaused.Load() {
+		return
+	}
 	refunded, err := model.ExpireStaleWalletReservations(model.DB, time.Now().UTC().Add(-rebateStaleReservationTTL), rebateReservationExpiryBatch)
 	if err != nil {
 		logger.LogWarn(context.Background(), fmt.Sprintf("rebate stale reservation expiry failed: %v", err))
@@ -73,12 +76,18 @@ func runStaleReservationExpiryOnce() {
 }
 
 func runRebateRecoveryOnce() {
+	if rebateMaintenancePaused.Load() {
+		return
+	}
 	if !rebateRecoveryRunning.CompareAndSwap(false, true) {
 		return
 	}
 	defer rebateRecoveryRunning.Store(false)
 
 	for {
+		if rebateMaintenancePaused.Load() {
+			return
+		}
 		processed, err := model.RecoverFinalizingWalletSettlements(model.DB, rebateRecoveryBatchSize)
 		if err != nil {
 			logger.LogWarn(context.Background(), fmt.Sprintf("rebate settlement recovery task failed: %v", err))

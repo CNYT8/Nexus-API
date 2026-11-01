@@ -20,9 +20,25 @@ const (
 )
 
 var (
-	rebatePayoutOnce    sync.Once
-	rebatePayoutRunning atomic.Bool
+	rebatePayoutOnce        sync.Once
+	rebatePayoutRunning     atomic.Bool
+	rebateMaintenancePaused atomic.Bool
 )
+
+// SetRebateMaintenancePaused pauses or resumes background rebate payout and
+// recovery tasks during wallet ledger baseline initialization.
+func SetRebateMaintenancePaused(paused bool) {
+	rebateMaintenancePaused.Store(paused)
+}
+
+// WaitForRebateTasksIdle waits up to maxWait for any in-flight payout or
+// recovery iteration to finish once maintenance pause is enabled.
+func WaitForRebateTasksIdle(maxWait time.Duration) {
+	deadline := time.Now().Add(maxWait)
+	for (rebatePayoutRunning.Load() || rebateRecoveryRunning.Load()) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+}
 
 // StartRebatePayoutTask processes due scheduled invitation rebates. Immediate
 // payouts are committed with their settlement and never reach this task.
@@ -45,12 +61,18 @@ func StartRebatePayoutTask() {
 }
 
 func runRebatePayoutOnce() {
+	if rebateMaintenancePaused.Load() {
+		return
+	}
 	if !rebatePayoutRunning.CompareAndSwap(false, true) {
 		return
 	}
 	defer rebatePayoutRunning.Store(false)
 
 	for {
+		if rebateMaintenancePaused.Load() {
+			return
+		}
 		paid, err := model.PayDueWalletRebates(model.DB, time.Now().UTC(), rebatePayoutBatchSize)
 		if err != nil {
 			logger.LogWarn(context.Background(), fmt.Sprintf("rebate payout task failed: %v", err))

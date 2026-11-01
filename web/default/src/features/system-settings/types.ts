@@ -446,3 +446,13 @@ export type DatabaseIntegrityResponse = {
   message: string
   data: DatabaseIntegrityReport
 }
+
+export type InitializeWalletLedgerResponse = {
+  success: boolean
+  message: string
+  data?: {
+    already_initialized?: boolean
+    initialized?: boolean
+    mismatches?: number
+  }
+}

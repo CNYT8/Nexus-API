@@ -25,6 +25,9 @@ body.sidebar-collapsed {
 }
 
 :root {
+  /* Semi Design body 字体行高 */
+  --font-line_height-default: 1.5;
+
   /* 统一的减速曲线与时长：反馈要快，过渡要自然 */
   --nexus-ease-out: cubic-bezier(0.2, 0, 0, 1);
   --nexus-duration-press: 120ms;
@@ -508,6 +511,7 @@ body[theme-mode='warm'] .sidebar-nav-item-selected {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   margin-right: 10px;
   transition: color var(--nexus-duration-fast) var(--nexus-ease-out);
 }
@@ -535,6 +539,7 @@ body[theme-mode='warm'] .sidebar-nav-item-selected {
   color: var(--semi-color-text-2);
   font-size: 12px;
   font-weight: 500;
+  line-height: 18px;
   letter-spacing: 0;
   opacity: 0.85;
 }
@@ -1468,19 +1473,52 @@ html.dark .with-pastel-balls::before {
   font-size: 16px;
 }
 
+.nexus-stat-primary {
+  flex: 1 1 auto;
+}
+
 .nexus-stat-label {
   font-size: 12px;
   line-height: 1.4;
   color: var(--semi-color-text-2);
 }
 
+.nexus-stat-value,
+.nexus-stat-value .semi-skeleton,
+.nexus-stat-value .semi-skeleton-paragraph {
+  /* 重置 Semi Skeleton 默认行高，加载与加载后共用同一高度 */
+  height: 24px;
+  line-height: 24px;
+}
+
 .nexus-stat-value {
+  overflow: hidden;
   font-size: 18px;
   font-weight: 600;
-  line-height: 1.3;
+  white-space: nowrap;
   letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
   color: var(--semi-color-text-0);
+}
+
+.nexus-stat-value .semi-skeleton-paragraph > li {
+  margin: 0;
+}
+
+.nexus-stat-trend {
+  flex-shrink: 0;
+}
+
+@media (max-width: 767px) {
+  /* 手机不预留空的趋势图列，避免挤压余额并产生高度跳变 */
+  .nexus-stat-row {
+    flex-wrap: nowrap;
+  }
+
+  .nexus-stat-primary {
+    flex: 1 1 0;
+    min-width: 0;
+  }
 }
 
 /* 列表行悬停：跟随主题，不再写死白色 */
@@ -1533,6 +1571,97 @@ html.dark .with-pastel-balls::before {
 
   .nexus-reveal {
     animation: nexus-reveal-fade 120ms linear both;
+  }
+}
+
+/* 操练场输入工具栏：轻量选择器、图标与文字的稳定间距 */
+.playground-selector.semi-select {
+  width: auto;
+  min-width: 0;
+  max-width: 220px;
+  min-height: 32px;
+  padding: 3px 9px;
+  border: 1px solid var(--semi-color-border);
+  background: var(--semi-color-bg-1);
+  box-shadow: none;
+}
+
+.playground-selector.semi-select:hover,
+.playground-selector.semi-select:focus {
+  background: var(--semi-color-fill-0);
+  border-color: var(--semi-color-border);
+}
+
+.playground-selector .semi-select-arrow {
+  width: 14px;
+  margin-left: 7px;
+  color: var(--semi-color-text-2);
+}
+
+.playground-selector .semi-select-selection-text {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playground-selector .semi-select-prefix {
+  margin-right: 0;
+}
+
+.playground-selector .semi-select-suffix {
+  margin-left: 0;
+}
+
+.playground-model-selector.semi-select {
+  max-width: 260px;
+}
+
+.playground-input-toolbar .semi-button {
+  min-height: 32px;
+}
+
+.playground-input-toolbar .semi-button .semi-button-content {
+  gap: 6px;
+}
+
+.playground-input-toolbar .semi-button .semi-icon {
+  flex-shrink: 0;
+}
+
+@media (min-width: 640px) {
+  .playground-selector .semi-select-arrow {
+    margin-left: 8px;
+  }
+
+  .playground-selector .semi-select-prefix {
+    display: none;
+  }
+}
+
+@media (max-width: 639px) {
+  .playground-input-primary,
+  .playground-selector-group {
+    flex: 1 1 100%;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+
+  .playground-selector.semi-select {
+    flex: 1 1 0;
+    width: 0;
+    max-width: none;
+  }
+
+  .playground-selector .semi-select-arrow {
+    margin-left: 5px;
+  }
+
+  .playground-input-primary > .semi-button {
+    flex-shrink: 0;
+    padding-right: 10px;
+    padding-left: 10px;
   }
 }
 
