@@ -111,7 +111,6 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			return
 		}
 		started = true
-		sendResponsesStreamData(c, streamResponse, data)
 
 		// Preserve the distinction between explicit rejection and an empty or
 		// interrupted success. Record a soft error even if the scanner already
@@ -173,6 +172,17 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				}
 				toolCounts[responsesBuiltInTool(kind)]++
 			}
+		}
+
+		if data != "" {
+			if err := helper.ResponseChunkData(c, streamResponse, data); err != nil {
+				sr.Stop(err)
+				return
+			}
+		}
+		if (streamResponse.Type == "response.completed" || streamResponse.Type == "response.done") &&
+			streamResponse.Response != nil && responsesStatusIsCompleted(streamResponse.Response.Status) {
+			sr.Done()
 		}
 	})
 
@@ -301,4 +311,15 @@ func responsesStatusIsFailed(status json.RawMessage) bool {
 		return false
 	}
 	return value == "failed"
+}
+
+func responsesStatusIsCompleted(status json.RawMessage) bool {
+	if len(status) == 0 {
+		return false
+	}
+	var value string
+	if err := common.Unmarshal(status, &value); err != nil {
+		return false
+	}
+	return value == "completed"
 }

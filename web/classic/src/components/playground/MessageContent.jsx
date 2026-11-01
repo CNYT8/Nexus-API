@@ -77,7 +77,10 @@ const MessageContent = ({
           >
             <div className='flex items-center gap-2'>
               <AlertTriangle size={16} className='text-orange-500 shrink-0' />
-              <Typography.Text strong className='!text-[var(--semi-color-text-0)]'>
+              <Typography.Text
+                strong
+                className='!text-[var(--semi-color-text-0)]'
+              >
                 {t('模型价格未配置')}
               </Typography.Text>
             </div>
@@ -93,7 +96,9 @@ const MessageContent = ({
                 theme='light'
                 type='warning'
                 icon={<Settings size={14} />}
-                onClick={() => window.open('/console/setting?tab=ratio', '_blank')}
+                onClick={() =>
+                  window.open('/console/setting?tab=ratio', '_blank')
+                }
               >
                 {t('前往设置')}
               </Button>
@@ -104,8 +109,20 @@ const MessageContent = ({
     }
 
     return (
-      <div className={`${className}`}>
-        <Typography.Text className='text-white'>{errorText}</Typography.Text>
+      <div
+        className={`${className || ''} rounded-lg p-3`}
+        style={{
+          backgroundColor: 'var(--semi-color-danger-light-default)',
+          border: '1px solid var(--semi-color-danger)',
+          color: 'var(--semi-color-danger)',
+        }}
+      >
+        <div className='flex items-start gap-2'>
+          <AlertTriangle size={16} className='shrink-0 mt-0.5' />
+          <Typography.Text style={{ color: 'var(--semi-color-danger)' }}>
+            {errorText}
+          </Typography.Text>
+        </div>
       </div>
     );
   }
@@ -212,15 +229,15 @@ const MessageContent = ({
       finalDisplayableFinalContent.trim() === '')
   ) {
     return (
-      <div
-        className={`${className} flex items-center gap-2 sm:gap-4 bg-gradient-to-r from-purple-50 to-indigo-50`}
-      >
-        <div className='w-5 h-5 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center shadow-lg'>
-          <Loader2
-            className='animate-spin text-white'
-            size={styleState.isMobile ? 16 : 20}
-          />
-        </div>
+      <div className={`${className || ''} flex items-center gap-2 py-2`}>
+        <Loader2
+          className='animate-spin shrink-0'
+          style={{ color: 'var(--semi-color-primary)' }}
+          size={16}
+        />
+        <Typography.Text type='tertiary' size='small'>
+          {t('思考中...')}
+        </Typography.Text>
       </div>
     );
   }
@@ -256,7 +273,7 @@ const MessageContent = ({
       )}
 
       {isEditing ? (
-        <div className='space-y-3'>
+        <div className='space-y-2.5'>
           <TextArea
             value={editValue}
             onChange={(value) => onEditValueChange(value)}
@@ -266,28 +283,26 @@ const MessageContent = ({
               resize: 'vertical',
               fontSize: styleState.isMobile ? '14px' : '15px',
               lineHeight: '1.6',
+              backgroundColor: 'var(--semi-color-bg-0)',
             }}
-            className='!border-blue-200 focus:!border-blue-400 !bg-blue-50/50'
           />
-          <div className='flex items-center gap-2 w-full'>
+          <div className='flex items-center justify-end gap-2'>
             <Button
               size='small'
-              type='danger'
+              type='tertiary'
               theme='light'
               icon={<X size={14} />}
               onClick={onEditCancel}
-              className='flex-1'
             >
               {t('取消')}
             </Button>
             <Button
               size='small'
-              type='warning'
+              type='primary'
               theme='solid'
               icon={<Check size={14} />}
               onClick={onEditSave}
               disabled={!editValue || editValue.trim() === ''}
-              className='flex-1'
             >
               {t('保存')}
             </Button>
@@ -335,13 +350,11 @@ const MessageContent = ({
                   typeof textContent.text === 'string' &&
                   textContent.text.trim() !== '' && (
                     <div
-                      className={`playground-message prose prose-sm prose-gray max-w-none overflow-x-auto text-sm leading-relaxed sm:leading-7 ${message.role === 'user' ? 'user-message' : 'assistant-message font-serif'}`}
+                      className={`playground-message prose prose-sm prose-gray max-w-none overflow-x-auto text-sm leading-relaxed sm:leading-7 ${message.role === 'user' ? '' : 'assistant-message font-serif'}`}
                     >
                       <MarkdownRenderer
                         content={textContent.text}
-                        className={
-                          message.role === 'user' ? 'user-message' : ''
-                        }
+                        className=''
                         animated={false}
                         previousContentLength={0}
                       />
@@ -389,11 +402,11 @@ const MessageContent = ({
             } else {
               return (
                 <div
-                  className={`playground-message prose prose-sm prose-gray max-w-none overflow-x-auto text-sm leading-relaxed sm:leading-7 ${message.role === 'user' ? 'user-message' : 'assistant-message font-serif'}`}
+                  className={`playground-message prose prose-sm prose-gray max-w-none overflow-x-auto text-sm leading-relaxed sm:leading-7 ${message.role === 'user' ? '' : 'assistant-message font-serif'}`}
                 >
                   <MarkdownRenderer
                     content={message.content}
-                    className={message.role === 'user' ? 'user-message' : ''}
+                    className=''
                     animated={false}
                     previousContentLength={0}
                   />

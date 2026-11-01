@@ -41,7 +41,7 @@ const ApiInfoPanel = ({
   return (
     <Card
       {...CARD_PROPS}
-      className='bg-gray-50 border-0 !rounded-2xl'
+      className='nexus-reveal !rounded-2xl'
       title={
         <div className={FLEX_CENTER_GAP2}>
           <Server size={16} />
@@ -54,7 +54,7 @@ const ApiInfoPanel = ({
         {apiInfoData.length > 0 ? (
           apiInfoData.map((api) => (
             <React.Fragment key={api.id}>
-              <div className='flex p-2 hover:bg-white rounded-lg transition-colors cursor-pointer'>
+              <div className='nexus-hover-fill flex p-2 rounded-xl cursor-pointer'>
                 <div className='flex-shrink-0 mr-3'>
                   {isNexusHongKongCloudflarePreset(api.color) ? (
                     <NexusApiPresetIcon size={32} />
@@ -66,7 +66,10 @@ const ApiInfoPanel = ({
                 </div>
                 <div className='flex-1'>
                   <div className='flex flex-wrap items-center justify-between mb-1 w-full gap-2'>
-                    <span className='text-sm font-medium text-gray-900 !font-bold break-all'>
+                    <span
+                      className='text-sm font-semibold break-all'
+                      style={{ color: 'var(--semi-color-text-0)' }}
+                    >
                       {api.route}
                     </span>
                     <div className='flex items-center gap-1 mt-1 lg:mt-0'>
@@ -103,11 +106,14 @@ const ApiInfoPanel = ({
                     </span>
                     <Copy
                       size={14}
-                      className='flex-shrink-0 text-gray-400 hover:text-semi-color-primary cursor-pointer transition-colors'
+                      className='flex-shrink-0 hover:text-semi-color-primary cursor-pointer transition-colors'
+                      style={{ color: 'var(--semi-color-text-2)' }}
                       onClick={() => handleCopyUrl(api.url)}
                     />
                   </div>
-                  <div className='text-gray-500'>{api.description}</div>
+                  <div style={{ color: 'var(--semi-color-text-2)' }}>
+                    {api.description}
+                  </div>
                 </div>
               </div>
               <Divider />

@@ -24,11 +24,24 @@ body.sidebar-collapsed {
   --sidebar-current-width: var(--sidebar-width-collapsed);
 }
 
+:root {
+  /* 统一的减速曲线与时长：反馈要快，过渡要自然 */
+  --nexus-ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --nexus-duration-press: 120ms;
+  --nexus-duration-fast: 160ms;
+  --nexus-duration-base: 220ms;
+}
+
 body {
-  font-family: Lato, 'Helvetica Neue', Arial, Helvetica, 'Microsoft YaHei',
-    sans-serif;
+  /* 苹果设备优先使用系统字体（SF / 苹方），其他平台保持原有字体顺序 */
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'PingFang SC', Lato, 'Helvetica Neue',
+    Arial, Helvetica, 'Microsoft YaHei', sans-serif;
   color: var(--semi-color-text-0);
   background-color: var(--semi-color-bg-0);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 html.theme-switching *,
@@ -165,7 +178,9 @@ html.theme-switching *::after {
   opacity: 0.1;
 }
 
-@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+@supports not (
+  (-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))
+) {
   .nexus-frosted-glass-layer {
     background: var(--classic-header-frosted-fallback);
   }
@@ -354,8 +369,8 @@ body.classic-home-embed .semi-layout-footer footer {
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  font-family:
+    source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
 }
 
 /* ==================== 布局相关样式 ==================== */
@@ -430,7 +445,7 @@ code {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  transition: width 0.3s ease;
+  transition: width var(--nexus-duration-base) var(--nexus-ease-out);
   background: var(--semi-color-bg-0);
 }
 
@@ -454,29 +469,36 @@ code {
 
 /* 侧边栏导航项样式 */
 .sidebar-nav-item {
-  border-radius: 6px;
+  border-radius: 10px;
   margin: 3px 8px;
-  transition: all 0.15s ease;
+  transition:
+    background-color var(--nexus-duration-fast) var(--nexus-ease-out),
+    color var(--nexus-duration-fast) var(--nexus-ease-out),
+    transform var(--nexus-duration-press) var(--nexus-ease-out);
   padding: 8px 12px;
 }
 
 .sidebar-nav-item:hover {
-  background-color: rgba(var(--semi-blue-0), 0.08);
+  background-color: rgba(var(--semi-blue-0), 0.06);
   color: var(--semi-color-primary);
 }
 
+.sidebar-nav-item:active {
+  transform: scale(0.98);
+}
+
 .sidebar-nav-item-selected {
-  background-color: rgba(var(--semi-blue-0), 0.12);
+  background-color: rgba(var(--semi-blue-0), 0.09);
   color: var(--semi-color-primary);
   font-weight: 500;
 }
 
 body[theme-mode='warm'] .sidebar-nav-item:hover {
-  background-color: rgba(217, 119, 6, 0.1);
+  background-color: rgba(217, 119, 6, 0.08);
 }
 
 body[theme-mode='warm'] .sidebar-nav-item-selected {
-  background-color: rgba(217, 119, 6, 0.14);
+  background-color: rgba(217, 119, 6, 0.11);
 }
 
 /* 图标容器样式 */
@@ -487,7 +509,7 @@ body[theme-mode='warm'] .sidebar-nav-item-selected {
   align-items: center;
   justify-content: center;
   margin-right: 10px;
-  transition: all 0.2s ease;
+  transition: color var(--nexus-duration-fast) var(--nexus-ease-out);
 }
 
 .sidebar-sub-icon-container {
@@ -498,7 +520,7 @@ body[theme-mode='warm'] .sidebar-nav-item-selected {
   justify-content: center;
   margin-right: 10px;
   margin-left: 1px;
-  transition: all 0.2s ease;
+  transition: color var(--nexus-duration-fast) var(--nexus-ease-out);
 }
 
 /* 分割线样式 */
@@ -512,9 +534,9 @@ body[theme-mode='warm'] .sidebar-nav-item-selected {
   padding: 4px 15px 8px;
   color: var(--semi-color-text-2);
   font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  opacity: 0.8;
+  font-weight: 500;
+  letter-spacing: 0;
+  opacity: 0.85;
 }
 
 /* 底部折叠按钮 */
@@ -542,12 +564,18 @@ body[theme-mode='warm'] .sidebar-nav-item-selected {
   align-items: center;
   justify-content: center;
   background-color: var(--semi-color-fill-0);
-  transition: all 0.2s ease;
+  transition:
+    background-color var(--nexus-duration-fast) var(--nexus-ease-out),
+    transform var(--nexus-duration-press) var(--nexus-ease-out);
+}
+
+.sidebar-collapse-button:active .sidebar-collapse-button-inner {
+  transform: scale(0.92);
 }
 
 .sidebar-collapse-icon-container {
   display: inline-block;
-  transition: transform 0.3s ease;
+  transition: transform var(--nexus-duration-base) var(--nexus-ease-out);
 }
 
 /* 侧边栏区域容器 */
@@ -645,8 +673,9 @@ body[theme-mode='warm'] .sidebar-nav-item-selected {
 /* ==================== 组件特定样式 ==================== */
 /* DashboardHeader */
 .dashboard-greeting-title {
-  font-family: ui-serif, Georgia, Cambria, 'Times New Roman', Times,
-    'Noto Serif SC', 'Songti SC', STSong, serif;
+  font-family:
+    ui-serif, Georgia, Cambria, 'Times New Roman', Times, 'Noto Serif SC',
+    'Songti SC', STSong, serif;
   color: var(--semi-color-text-0);
 }
 
@@ -718,7 +747,9 @@ body[theme-mode='warm'] .sidebar-nav-item-selected {
   line-height: 1;
   background-color: var(--semi-color-fill-0);
   color: var(--semi-color-text-2);
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .sbg-badge-active {
@@ -1172,11 +1203,8 @@ html:not(.dark) .blur-ball-teal {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background: radial-gradient(
-      circle at -5% -10%,
-      var(--pb1) 0%,
-      transparent 60%
-    ),
+  background:
+    radial-gradient(circle at -5% -10%, var(--pb1) 0%, transparent 60%),
     radial-gradient(circle at 105% -10%, var(--pb2) 0%, transparent 55%),
     radial-gradient(circle at 5% 110%, var(--pb3) 0%, transparent 55%),
     radial-gradient(circle at 105% 110%, var(--pb4) 0%, transparent 50%);
@@ -1250,7 +1278,8 @@ html.dark .with-pastel-balls::before {
     max-width: 80px;
   }
 
-  .semi-input-prefix-text, .semi-input-suffix-text {
+  .semi-input-prefix-text,
+  .semi-input-suffix-text {
     margin: 0;
   }
 
@@ -1388,4 +1417,125 @@ html.dark .with-pastel-balls::before {
   }
 }
 
-.ec-dbcd0a3c01b55203 { forced-color-adjust: auto; }
+/* ==================== 质感细节：按压反馈 / 卡片 / 数字 / 进场 ==================== */
+/* 按下瞬间给反馈，不等松手 */
+.semi-button {
+  transition:
+    background-color var(--nexus-duration-fast) var(--nexus-ease-out),
+    border-color var(--nexus-duration-fast) var(--nexus-ease-out),
+    color var(--nexus-duration-fast) var(--nexus-ease-out),
+    box-shadow var(--nexus-duration-fast) var(--nexus-ease-out),
+    transform var(--nexus-duration-press) var(--nexus-ease-out);
+}
+
+.semi-button:not(.semi-button-disabled):active {
+  transform: scale(0.97);
+}
+
+.nexus-pressable {
+  transition:
+    background-color var(--nexus-duration-fast) var(--nexus-ease-out),
+    transform var(--nexus-duration-press) var(--nexus-ease-out);
+}
+
+.nexus-pressable:active {
+  transform: scale(0.985);
+}
+
+/* 统计卡片：中性底色 + 细边框，颜色只留给图标 */
+.nexus-stat-card {
+  background-color: var(--semi-color-bg-1);
+}
+
+.nexus-stat-row {
+  margin: -6px;
+  padding: 6px;
+  border-radius: 12px;
+}
+
+.nexus-stat-row:hover {
+  background-color: var(--semi-color-fill-0);
+}
+
+.nexus-stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  font-size: 16px;
+}
+
+.nexus-stat-label {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--semi-color-text-2);
+}
+
+.nexus-stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--semi-color-text-0);
+}
+
+/* 列表行悬停：跟随主题，不再写死白色 */
+.nexus-hover-fill {
+  transition: background-color var(--nexus-duration-fast) var(--nexus-ease-out);
+}
+
+.nexus-hover-fill:hover {
+  background-color: var(--semi-color-fill-0);
+}
+
+/* 轻量进场：淡入 + 轻微上移 */
+@keyframes nexus-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.nexus-reveal {
+  animation: nexus-reveal var(--nexus-duration-base) var(--nexus-ease-out) both;
+}
+
+/* 系统开启“减弱动态效果”时：去掉位移和缩放，只保留短淡入 */
+@media (prefers-reduced-motion: reduce) {
+  .semi-button:not(.semi-button-disabled):active,
+  .nexus-pressable:active,
+  .sidebar-nav-item:active,
+  .sidebar-collapse-button:active .sidebar-collapse-button-inner {
+    transform: none;
+  }
+
+  .sidebar-container,
+  .sidebar-collapse-icon-container {
+    transition-duration: 0.01ms;
+  }
+
+  @keyframes nexus-reveal-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .nexus-reveal {
+    animation: nexus-reveal-fade 120ms linear both;
+  }
+}
+
+.ec-dbcd0a3c01b55203 {
+  forced-color-adjust: auto;
+}
