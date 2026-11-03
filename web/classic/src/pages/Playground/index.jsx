@@ -206,9 +206,9 @@ const Playground = () => {
         // 处理最后一个用户消息的图片
         for (let i = messages.length - 1; i >= 0; i--) {
           if (messages[i].role === MESSAGE_ROLES.USER) {
-            if (inputs.imageEnabled && inputs.imageUrls) {
+            if (inputs.imageUrls) {
               const validImageUrls = inputs.imageUrls.filter(
-                (url) => url.trim() !== '',
+                (url) => url && url.trim() !== '',
               );
               if (validImageUrls.length > 0) {
                 const textContent = getTextContent(messages[i]) || '示例消息';
@@ -264,12 +264,14 @@ const Playground = () => {
       }
     }
 
-    // 默认模式
-    const validImageUrls = inputs.imageUrls.filter((url) => url.trim() !== '');
+    // 默认模式：只要存在有效图片就直接附加，不再用 imageEnabled 做门控
+    const validImageUrls = inputs.imageUrls.filter(
+      (url) => url && url.trim() !== '',
+    );
     const messageContent = buildMessageContent(
       content,
       validImageUrls,
-      inputs.imageEnabled,
+      validImageUrls.length > 0,
     );
     const userMessageWithImages = createMessage(
       MESSAGE_ROLES.USER,
@@ -287,10 +289,11 @@ const Playground = () => {
       );
       sendRequest(payload, inputs.stream);
 
-      // 禁用图片模式
-      if (inputs.imageEnabled) {
+      // 发送后清空已附加的图片，避免下一轮对话重复带上上一轮的图片；
+      // 不再关闭 imageEnabled（该开关已不可达）。
+      if (validImageUrls.length > 0) {
         setTimeout(() => {
-          handleInputChange('imageEnabled', false);
+          handleInputChange('imageUrls', []);
         }, 100);
       }
 
@@ -434,17 +437,13 @@ const Playground = () => {
     setTimeout(() => saveMessagesImmediately([]), 0);
   }, [setMessage, saveMessagesImmediately]);
 
-  // 处理粘贴图片
+  // 处理粘贴图片：不再受不可达的 imageEnabled 开关限制
   const handlePasteImage = useCallback(
     (base64Data) => {
-      if (!inputs.imageEnabled) {
-        return;
-      }
-      // 添加图片到 imageUrls 数组
       const newUrls = [...(inputs.imageUrls || []), base64Data];
       handleInputChange('imageUrls', newUrls);
     },
-    [inputs.imageEnabled, inputs.imageUrls, handleInputChange],
+    [inputs.imageUrls, handleInputChange],
   );
 
   const isAnyMessageGenerating = message.some(

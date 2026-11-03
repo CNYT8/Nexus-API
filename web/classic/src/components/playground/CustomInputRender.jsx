@@ -44,14 +44,6 @@ const CustomInputRender = (props) => {
 
           if (file) {
             try {
-              if (!imageEnabled) {
-                Toast.warning({
-                  content: t('请先在设置中启用图片功能'),
-                  duration: 3,
-                });
-                return;
-              }
-
               const reader = new FileReader();
               reader.onload = (event) => {
                 const base64 = event.target.result;

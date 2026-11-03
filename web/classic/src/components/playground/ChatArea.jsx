@@ -278,15 +278,12 @@ const ChatArea = ({
   };
 
   // 图片附件：纯前端读成 data URL，走既有 image_url 多模态通道。
+  // 不再依赖 imageEnabled 开关：该开关所在设置侧栏已随新版布局重构移除，
+  // 用户无法到达，若继续用它做门控会导致上传图片永远不可用。
   const handleImageFilesSelected = async (event) => {
     const files = Array.from(event.target.files || []);
     event.target.value = '';
     if (files.length === 0) return;
-
-    if (!inputs.imageEnabled) {
-      Toast.warning({ content: t('请先在设置中启用图片功能'), duration: 3 });
-      return;
-    }
 
     setParsingAttachment(true);
     try {
@@ -323,6 +320,53 @@ const ChatArea = ({
 
   const removeAttachment = (id) => {
     setAttachments((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  // 粘贴图片：直接从剪贴板读为 data URL 附加，同样不经过服务器。
+  const handlePasteImageEvent = async (event) => {
+    const items = event?.clipboardData?.items;
+    if (!items || items.length === 0) return;
+
+    const imageFiles = [];
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      if (item && item.type && item.type.indexOf('image') !== -1) {
+        const file = item.getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+    if (imageFiles.length === 0) return;
+
+    event.preventDefault();
+    setParsingAttachment(true);
+    try {
+      const nextUrls = (inputs.imageUrls || []).filter(
+        (url) => url && url.trim() !== '',
+      );
+      for (const file of imageFiles) {
+        if (file.size > MAX_IMAGE_FILE_BYTES) {
+          Toast.warning({
+            content: `${t('图片过大，已跳过')}: ${t('上限')} ${formatFileSize(MAX_IMAGE_FILE_BYTES)}`,
+            duration: 3,
+          });
+          continue;
+        }
+        const result = await parseImageAttachment(file);
+        if (!result.ok) {
+          Toast.warning({
+            content: t('仅支持图片文件（PNG、JPEG、WebP、GIF、BMP）'),
+            duration: 3,
+          });
+          continue;
+        }
+        nextUrls.push(result.dataUrl);
+      }
+      if (nextUrls.length > 0) {
+        onInputChange('imageUrls', nextUrls);
+      }
+    } finally {
+      setParsingAttachment(false);
+    }
   };
 
   const handleDevFeatureToast = (featureName) => {
@@ -469,6 +513,7 @@ const ChatArea = ({
               value={inputText}
               onChange={(val) => setInputText(val)}
               onKeyDown={handleKeyDown}
+              onPaste={handlePasteImageEvent}
               disabled={isGenerating}
               autosize={{ minRows: 2, maxRows: 7 }}
               placeholder={t('Ask anything')}
