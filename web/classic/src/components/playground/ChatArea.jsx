@@ -42,8 +42,19 @@ import {
   Send,
   Square,
   Trash2,
+  X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import {
+  IMAGE_FILE_ACCEPT,
+  MAX_IMAGE_FILE_BYTES,
+  MAX_TEXT_FILE_BYTES,
+  TEXT_FILE_ACCEPT,
+  buildAttachmentTextBlock,
+  formatFileSize,
+  parseImageAttachment,
+  parseTextAttachment,
+} from '../../helpers/playgroundAttachments';
 
 // 与新版一致：触发按钮只显示分组名，描述与倍率仅在展开项中展示。
 const playgroundGroupOptions = (groups) =>
@@ -71,10 +82,10 @@ const renderGroupOption = ({
   >
     <div className='flex items-center justify-between gap-4'>
       <div className='min-w-0'>
-        <div className='truncate text-xs font-medium'>{label}</div>
+        <div className='text-xs font-medium break-words'>{label}</div>
         {(description || ratio) && (
           <div
-            className='truncate text-[11px] leading-5'
+            className='text-[11px] leading-5 break-words'
             style={{ color: 'var(--semi-color-text-2)' }}
           >
             {[description, ratio ? `倍率 ${ratio}` : '']
@@ -110,6 +121,10 @@ const ChatArea = ({
 }) => {
   const { t } = useTranslation();
   const [inputText, setInputText] = useState('');
+  const [attachments, setAttachments] = useState([]);
+  const [parsingAttachment, setParsingAttachment] = useState(false);
+  const fileInputRef = useRef(null);
+  const imageInputRef = useRef(null);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const scrollContainerRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
@@ -202,17 +217,112 @@ const ChatArea = ({
 
   const handleSubmit = useCallback(() => {
     const trimmed = inputText.trim();
-    if (!trimmed || isGenerating) return;
+    const attachmentText = buildAttachmentTextBlock(attachments);
+    const combined = [attachmentText, trimmed].filter(Boolean).join('\n\n');
+    if (!combined || isGenerating) return;
     shouldAutoScrollRef.current = true;
-    onMessageSend(trimmed);
+    onMessageSend(combined);
     setInputText('');
-  }, [inputText, isGenerating, onMessageSend]);
+    setAttachments([]);
+  }, [inputText, attachments, isGenerating, onMessageSend]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent?.isComposing) {
       e.preventDefault();
       handleSubmit();
     }
+  };
+
+  // 文本附件：纯前端读取，内容直接拼进消息正文，服务端不落盘。
+  const handleTextFilesSelected = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (files.length === 0) return;
+
+    setParsingAttachment(true);
+    try {
+      for (const file of files) {
+        if (file.size > MAX_TEXT_FILE_BYTES) {
+          Toast.warning({
+            content: `${t('文件过大，已跳过')}: ${file.name}（${t('上限')} ${formatFileSize(MAX_TEXT_FILE_BYTES)}）`,
+            duration: 3,
+          });
+          continue;
+        }
+
+        const result = await parseTextAttachment(file);
+        if (!result.ok) {
+          Toast.warning({
+            content:
+              result.reason === 'too_large'
+                ? `${t('文件过大，已跳过')}: ${result.name}`
+                : `${t('仅支持文本文件（.md、.txt 等）')}: ${result.name}`,
+            duration: 3,
+          });
+          continue;
+        }
+
+        setAttachments((prev) => [
+          ...prev,
+          {
+            id: `${Date.now()}-${result.name}`,
+            name: result.name,
+            size: result.size,
+            text: result.text,
+          },
+        ]);
+      }
+    } finally {
+      setParsingAttachment(false);
+    }
+  };
+
+  // 图片附件：纯前端读成 data URL，走既有 image_url 多模态通道。
+  const handleImageFilesSelected = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (files.length === 0) return;
+
+    if (!inputs.imageEnabled) {
+      Toast.warning({ content: t('请先在设置中启用图片功能'), duration: 3 });
+      return;
+    }
+
+    setParsingAttachment(true);
+    try {
+      for (const file of files) {
+        if (file.size > MAX_IMAGE_FILE_BYTES) {
+          Toast.warning({
+            content: `${t('图片过大，已跳过')}: ${file.name}（${t('上限')} ${formatFileSize(MAX_IMAGE_FILE_BYTES)}）`,
+            duration: 3,
+          });
+          continue;
+        }
+
+        const result = await parseImageAttachment(file);
+        if (!result.ok) {
+          Toast.warning({
+            content:
+              result.reason === 'too_large'
+                ? `${t('图片过大，已跳过')}: ${result.name}`
+                : `${t('仅支持图片文件（PNG、JPEG、WebP、GIF、BMP）')}: ${result.name}`,
+            duration: 3,
+          });
+          continue;
+        }
+
+        onInputChange('imageUrls', [
+          ...(inputs.imageUrls || []).filter((url) => url && url.trim() !== ''),
+          result.dataUrl,
+        ]);
+      }
+    } finally {
+      setParsingAttachment(false);
+    }
+  };
+
+  const removeAttachment = (id) => {
+    setAttachments((prev) => prev.filter((item) => item.id !== id));
   };
 
   const handleDevFeatureToast = (featureName) => {
@@ -322,6 +432,38 @@ const ChatArea = ({
             boxShadow: '0 8px 30px rgba(0, 0, 0, 0.06)',
           }}
         >
+          {attachments.length > 0 && (
+            <div className='flex flex-wrap gap-2 px-3 pt-2.5'>
+              {attachments.map((item) => (
+                <div
+                  key={item.id}
+                  className='flex max-w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs'
+                  style={{
+                    backgroundColor: 'var(--semi-color-fill-0)',
+                    border: '1px solid var(--semi-color-border)',
+                    color: 'var(--semi-color-text-0)',
+                  }}
+                  title={item.name}
+                >
+                  <FileText size={12} className='shrink-0 opacity-70' />
+                  <span className='max-w-[14rem] truncate'>{item.name}</span>
+                  <span style={{ color: 'var(--semi-color-text-2)' }}>
+                    {formatFileSize(item.size)}
+                  </span>
+                  <button
+                    type='button'
+                    onClick={() => removeAttachment(item.id)}
+                    disabled={isGenerating}
+                    className='ml-0.5 shrink-0 rounded p-0.5 hover:opacity-70'
+                    style={{ color: 'var(--semi-color-text-2)' }}
+                    aria-label={t('移除附件')}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div className='px-3 pt-2.5 pb-1'>
             <TextArea
               value={inputText}
@@ -343,6 +485,22 @@ const ChatArea = ({
           {/* 底部工具条：辅助操作与主操作自然留白，不再挤在两侧 */}
           <div className='playground-input-toolbar flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2'>
             <div className='flex items-center gap-2'>
+              <input
+                ref={fileInputRef}
+                type='file'
+                multiple
+                accept={TEXT_FILE_ACCEPT}
+                className='hidden'
+                onChange={handleTextFilesSelected}
+              />
+              <input
+                ref={imageInputRef}
+                type='file'
+                multiple
+                accept={IMAGE_FILE_ACCEPT}
+                className='hidden'
+                onChange={handleImageFilesSelected}
+              />
               <Dropdown
                 trigger='click'
                 position='topLeft'
@@ -350,13 +508,13 @@ const ChatArea = ({
                   <Dropdown.Menu>
                     <Dropdown.Item
                       icon={<FileText size={15} />}
-                      onClick={() => handleDevFeatureToast(t('上传文件'))}
+                      onClick={() => fileInputRef.current?.click()}
                     >
                       {t('上传文件')}
                     </Dropdown.Item>
                     <Dropdown.Item
                       icon={<ImageIcon size={15} />}
-                      onClick={() => handleDevFeatureToast(t('上传图片'))}
+                      onClick={() => imageInputRef.current?.click()}
                     >
                       {t('上传图片')}
                     </Dropdown.Item>
@@ -379,7 +537,8 @@ const ChatArea = ({
                   theme='outline'
                   type='tertiary'
                   size='small'
-                  disabled={isGenerating}
+                  disabled={isGenerating || parsingAttachment}
+                  loading={parsingAttachment}
                   icon={<Paperclip size={14} />}
                   className='!rounded-lg'
                 >
@@ -430,7 +589,7 @@ const ChatArea = ({
                   renderOptionItem={renderGroupOption}
                   arrowIcon={<ChevronsUpDown size={14} />}
                   dropdownMatchSelectWidth={false}
-                  dropdownStyle={{ width: 240, maxWidth: '80vw' }}
+                  dropdownStyle={{ minWidth: 240, maxWidth: '80vw' }}
                   className='playground-selector !rounded-lg'
                 />
 
@@ -447,7 +606,7 @@ const ChatArea = ({
                   arrowIcon={<ChevronsUpDown size={14} />}
                   className='playground-selector playground-model-selector !rounded-lg'
                   dropdownMatchSelectWidth={false}
-                  dropdownStyle={{ width: 300, maxWidth: '85vw' }}
+                  dropdownStyle={{ minWidth: 300, maxWidth: '85vw' }}
                 />
               </div>
 

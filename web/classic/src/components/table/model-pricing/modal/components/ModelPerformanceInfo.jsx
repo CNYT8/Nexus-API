@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Avatar, Empty, Spin, Table, Tag, Typography } from '@douyinfe/semi-ui';
+import { Avatar, Empty, Table, Tag, Typography } from '@douyinfe/semi-ui';
 import { IconPulse } from '@douyinfe/semi-icons';
 import { VChart } from '@visactor/react-vchart';
 
@@ -236,14 +236,138 @@ function MetricItem({ label, value }) {
   );
 }
 
+function MetricItemSkeleton() {
+  return (
+    <div
+      className='rounded-lg'
+      style={{
+        padding: '10px 12px',
+        border: '1px solid var(--semi-color-border)',
+        background: 'var(--semi-color-fill-0)',
+      }}
+    >
+      <div
+        className='mb-1'
+        style={{
+          height: 12,
+          width: '48%',
+          borderRadius: 4,
+          background: 'var(--semi-color-fill-1)',
+        }}
+      />
+      <div
+        style={{
+          height: 20,
+          width: '68%',
+          borderRadius: 4,
+          background: 'var(--semi-color-fill-1)',
+        }}
+      />
+    </div>
+  );
+}
+
+// 骨架屏结构与真实内容一一对应，避免加载完成后高度跳变
+function ModelPerformanceSkeleton() {
+  return (
+    <div className='space-y-4' aria-hidden='true'>
+      <div className='grid grid-cols-1 sm:grid-cols-3 gap-2'>
+        <MetricItemSkeleton />
+        <MetricItemSkeleton />
+        <MetricItemSkeleton />
+      </div>
+
+      <div>
+        <div
+          style={{
+            height: 14,
+            width: 120,
+            marginBottom: 8,
+            borderRadius: 4,
+            background: 'var(--semi-color-fill-1)',
+          }}
+        />
+        <div
+          className='rounded-lg'
+          style={{
+            height: 180,
+            border: '1px solid var(--semi-color-border)',
+            background: 'var(--semi-color-fill-0)',
+            padding: 8,
+          }}
+        />
+      </div>
+
+      <div>
+        <div
+          style={{
+            height: 14,
+            width: 88,
+            marginBottom: 8,
+            borderRadius: 4,
+            background: 'var(--semi-color-fill-1)',
+          }}
+        />
+        <div
+          className='rounded-lg'
+          style={{
+            border: '1px solid var(--semi-color-border)',
+            overflow: 'hidden',
+          }}
+        >
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div
+              key={index}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                height: 37,
+                padding: '0 12px',
+                borderTop:
+                  index === 0 ? 'none' : '1px solid var(--semi-color-border)',
+              }}
+            >
+              <div
+                style={{
+                  height: 12,
+                  width: 84,
+                  borderRadius: 4,
+                  background: 'var(--semi-color-fill-1)',
+                }}
+              />
+              <div
+                style={{
+                  height: 12,
+                  flex: 1,
+                  borderRadius: 4,
+                  background: 'var(--semi-color-fill-1)',
+                }}
+              />
+              <div
+                style={{
+                  height: 12,
+                  width: 56,
+                  borderRadius: 4,
+                  background: 'var(--semi-color-fill-1)',
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const ModelPerformanceInfo = ({ modelData, t }) => {
   const actualTheme = useActualTheme();
   const chartThemeKey = useDashboardChartTheme(actualTheme);
   const modelName = modelData?.model_name || modelData?.modelName || '';
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [groups, setGroups] = useState(
-    () => normalizeGroups(getCachedModelPerformanceMetrics(modelName)),
+  const [groups, setGroups] = useState(() =>
+    normalizeGroups(getCachedModelPerformanceMetrics(modelName)),
   );
 
   useEffect(() => {
@@ -306,11 +430,7 @@ const ModelPerformanceInfo = ({ modelData, t }) => {
       100,
       Math.max(
         0,
-        weightedAverage(
-          groups,
-          (group) => group.success_rate,
-          Number.isFinite,
-        ),
+        weightedAverage(groups, (group) => group.success_rate, Number.isFinite),
       ),
     );
 
@@ -390,11 +510,7 @@ const ModelPerformanceInfo = ({ modelData, t }) => {
         </div>
       </div>
 
-      {loading && (
-        <div className='flex justify-center items-center py-8'>
-          <Spin size='middle' />
-        </div>
-      )}
+      {loading && <ModelPerformanceSkeleton />}
 
       {!loading && (failed || groups.length === 0) && (
         <div

@@ -28,11 +28,18 @@ import type {
 /**
  * Create a new message version
  */
-export function createMessageVersion(content: string): MessageVersion {
-  return {
+export function createMessageVersion(
+  content: string,
+  images?: string[]
+): MessageVersion {
+  const version: MessageVersion = {
     id: nanoid(),
     content,
   }
+  if (Array.isArray(images) && images.length > 0) {
+    version.images = images
+  }
+  return version
 }
 
 /**
@@ -59,11 +66,11 @@ export function updateCurrentVersionContent(
 /**
  * Create a user message
  */
-export function createUserMessage(content: string): Message {
+export function createUserMessage(content: string, images?: string[]): Message {
   return {
     key: nanoid(),
     from: MESSAGE_ROLES.USER,
-    versions: [createMessageVersion(content)],
+    versions: [createMessageVersion(content, images)],
   }
 }
 
@@ -131,6 +138,24 @@ export function getTextContent(content: string | ContentPart[]): string {
  */
 export function formatMessageForAPI(message: Message): ChatCompletionMessage {
   const currentVersion = getCurrentVersion(message)
+  const images = Array.isArray(currentVersion.images)
+    ? currentVersion.images.filter((url) => url && url.trim() !== '')
+    : []
+
+  if (images.length > 0) {
+    const parts: ContentPart[] = [
+      { type: 'text', text: currentVersion.content || '' },
+      ...images.map((url) => ({
+        type: 'image_url' as const,
+        image_url: { url: url.trim() },
+      })),
+    ]
+    return {
+      role: message.from,
+      content: parts,
+    }
+  }
+
   return {
     role: message.from,
     content: currentVersion.content,

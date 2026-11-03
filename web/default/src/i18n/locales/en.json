@@ -4,7 +4,8 @@
     "数据库完整性正常": "Database integrity is normal",
     "数据库完整性检查失败，请稍后重试": "Failed to check database integrity, please try again later",
     "数据库完整性检查异常日志": "Database Integrity Check Issues",
-    "检测到数据库连接或表结构存在以下异常（仅只读检测，未对数据库做任何修改）：": "Detected the following database connection or schema issues (read-only check, no modifications made):",
+    "检测到数据库存在以下异常（仅只读检测，未对数据库做任何修改）：": "Detected the following database issues (read-only check, no modifications made):",
+    "版本兼容提示（不影响运行）": "Version compatibility notices (does not affect operation)",
     "完整检测日志": "Full Inspection Log",
     "钱包账本初始化": "Initialize Wallet Ledger",
     "初始化钱包账本期间将短暂暂停服务请求，把存量正余额登记为历史基础额度（不改变任何用户余额）。是否确认开始初始化？": "Service requests will be briefly paused during wallet ledger initialization while existing positive balances are recorded as legacy baseline credits (without changing any user balances). Confirm to start initialization?",
@@ -4915,6 +4916,13 @@
     "Site timezone": "Site timezone",
     "Permanent": "Permanent",
     "Invalid rebate setting value": "Invalid rebate setting value",
-    "Save recharge rebate settings": "Save recharge rebate settings"
+    "Save recharge rebate settings": "Save recharge rebate settings",
+    "Limit": "limit",
+    "Parsing...": "Parsing...",
+    "File is too large and was skipped": "File is too large and was skipped",
+    "Image is too large and was skipped": "Image is too large and was skipped",
+    "Only text files are supported (.md, .txt, etc.)": "Only text files are supported (.md, .txt, etc.)",
+    "Only image files are supported (PNG, JPEG, WebP, GIF, BMP)": "Only image files are supported (PNG, JPEG, WebP, GIF, BMP)",
+    "Please enable the image feature in settings first": "Please enable the image feature in settings first"
   }
 }

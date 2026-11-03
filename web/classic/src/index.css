@@ -1578,7 +1578,8 @@ html.dark .with-pastel-balls::before {
 .playground-selector.semi-select {
   width: auto;
   min-width: 0;
-  max-width: 220px;
+  /* 不再限宽：模型/分组名称较长时也要完整展示，靠工具栏 flex-wrap 换行自适应 */
+  max-width: none;
   min-height: 32px;
   padding: 3px 9px;
   border: 1px solid var(--semi-color-border);
@@ -1599,11 +1600,12 @@ html.dark .with-pastel-balls::before {
 }
 
 .playground-selector .semi-select-selection-text {
-  overflow: hidden;
   font-size: 12px;
   font-weight: 500;
-  text-overflow: ellipsis;
+  /* 名称完整显示，不做省略号截断 */
+  overflow: visible;
   white-space: nowrap;
+  text-overflow: clip;
 }
 
 .playground-selector .semi-select-prefix {
@@ -1615,7 +1617,7 @@ html.dark .with-pastel-balls::before {
 }
 
 .playground-model-selector.semi-select {
-  max-width: 260px;
+  max-width: none;
 }
 
 .playground-input-toolbar .semi-button {

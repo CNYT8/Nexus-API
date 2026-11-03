@@ -313,11 +313,15 @@ const OtherSetting = () => {
         showError(message || t('数据库完整性检查失败，请稍后重试'));
         return;
       }
+      const warningCount = Array.isArray(data.warnings)
+        ? data.warnings.length
+        : 0;
       if (data.healthy) {
         showSuccess(
-          `${t('数据库完整性正常')}（${data.main_dialect || 'SQL'}：${data.checked_tables || 0}/${data.total_tables || 0}）`,
+          `${t('数据库完整性正常')}（${data.main_dialect || 'SQL'}：${data.checked_tables || 0}/${data.total_tables || 0}）${warningCount > 0 ? `，${warningCount} 条版本兼容提示` : ''}`,
         );
-      } else {
+      }
+      if (!data.healthy || warningCount > 0) {
         setDbIntegrityReport(data);
         setShowDbIntegrityModal(true);
       }
@@ -529,7 +533,7 @@ const OtherSetting = () => {
                   {t('检查数据库完整性')}
                 </Button>
                 <Button
-                  type='secondary'
+                  type='primary'
                   onClick={confirmInitWalletLedger}
                   loading={loadingInput['InitWalletLedger']}
                 >
@@ -719,7 +723,7 @@ const OtherSetting = () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <Text type='danger'>
             {t(
-              '检测到数据库连接或表结构存在以下异常（仅只读检测，未对数据库做任何修改）：',
+              '检测到数据库存在以下异常（仅只读检测，未对数据库做任何修改）：',
             )}
           </Text>
           {Array.isArray(dbIntegrityReport?.issues) &&
@@ -741,6 +745,29 @@ const OtherSetting = () => {
               >
                 {dbIntegrityReport.issues.join('\n')}
               </pre>
+            )}
+          {Array.isArray(dbIntegrityReport?.warnings) &&
+            dbIntegrityReport.warnings.length > 0 && (
+              <>
+                <Text strong>{t('版本兼容提示（不影响运行）')}</Text>
+                <pre
+                  style={{
+                    margin: 0,
+                    padding: '12px',
+                    maxHeight: '200px',
+                    overflowY: 'auto',
+                    backgroundColor: 'var(--semi-color-fill-0)',
+                    borderRadius: '8px',
+                    fontFamily: 'JetBrains Mono, Consolas, monospace',
+                    fontSize: '12px',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    color: 'var(--semi-color-warning)',
+                  }}
+                >
+                  {dbIntegrityReport.warnings.join('\n')}
+                </pre>
+              </>
             )}
           <Text strong>{t('完整检测日志')}</Text>
           <pre

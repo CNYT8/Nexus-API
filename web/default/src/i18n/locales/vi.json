@@ -4,7 +4,8 @@
     "数据库完整性正常": "Tính toàn vẹn cơ sở dữ liệu bình thường",
     "数据库完整性检查失败，请稍后重试": "Kiểm tra tính toàn vẹn cơ sở dữ liệu thất bại, vui lòng thử lại sau",
     "数据库完整性检查异常日志": "Nhật ký bất thường tính toàn vẹn cơ sở dữ liệu",
-    "检测到数据库连接或表结构存在以下异常（仅只读检测，未对数据库做任何修改）：": "Phát hiện các bất thường sau trong kết nối hoặc cấu trúc cơ sở dữ liệu (chỉ đọc, không sửa đổi dữ liệu):",
+    "检测到数据库存在以下异常（仅只读检测，未对数据库做任何修改）：": "Phát hiện các vấn đề sau của cơ sở dữ liệu (chỉ đọc, không sửa đổi dữ liệu):",
+    "版本兼容提示（不影响运行）": "Lưu ý tương thích phiên bản (không ảnh hưởng hoạt động)",
     "完整检测日志": "Nhật ký kiểm tra đầy đủ",
     "钱包账本初始化": "Khởi tạo sổ cái ví",
     "初始化钱包账本期间将短暂暂停服务请求，把存量正余额登记为历史基础额度（不改变任何用户余额）。是否确认开始初始化？": "Các yêu cầu dịch vụ sẽ tạm dừng ngắn trong quá trình khởi tạo sổ cái ví để ghi nhận số dư dương hiện có làm hạn mức cơ sở lịch sử (không làm thay đổi số dư của người dùng). Xác nhận bắt đầu khởi tạo?",
@@ -4918,6 +4919,13 @@
     "Site timezone": "Múi giờ trang web",
     "Permanent": "Vĩnh viễn",
     "Invalid rebate setting value": "Giá trị cài đặt hoàn tiền không hợp lệ",
-    "Save recharge rebate settings": "Lưu cài đặt hoàn tiền"
+    "Save recharge rebate settings": "Lưu cài đặt hoàn tiền",
+    "Limit": "giới hạn",
+    "Parsing...": "Đang phân tích...",
+    "File is too large and was skipped": "Tệp quá lớn, đã bỏ qua",
+    "Image is too large and was skipped": "Hình ảnh quá lớn, đã bỏ qua",
+    "Only text files are supported (.md, .txt, etc.)": "Chỉ hỗ trợ tệp văn bản (.md, .txt, v.v.)",
+    "Only image files are supported (PNG, JPEG, WebP, GIF, BMP)": "Chỉ hỗ trợ tệp hình ảnh (PNG, JPEG, WebP, GIF, BMP)",
+    "Please enable the image feature in settings first": "Vui lòng bật tính năng hình ảnh trong cài đặt trước"
   }
 }

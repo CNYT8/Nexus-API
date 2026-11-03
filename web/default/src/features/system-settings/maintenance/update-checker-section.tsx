@@ -111,14 +111,18 @@ export function UpdateCheckerSection({
         toast.error(res?.message || t('数据库完整性检查失败，请稍后重试'))
         return
       }
+      const warningCount = Array.isArray(res.data.warnings)
+        ? res.data.warnings.length
+        : 0
       if (res.data.healthy) {
         toast.success(
-          `${t('数据库完整性正常')}（${res.data.main_dialect || 'SQL'}：${res.data.checked_tables || 0}/${res.data.total_tables || 0}）`
+          `${t('数据库完整性正常')}（${res.data.main_dialect || 'SQL'}：${res.data.checked_tables || 0}/${res.data.total_tables || 0}）${warningCount > 0 ? `，${warningCount} 条版本兼容提示` : ''}`
         )
-        return
       }
-      setDbReport(res.data)
-      setDbDialogOpen(true)
+      if (!res.data.healthy || warningCount > 0) {
+        setDbReport(res.data)
+        setDbDialogOpen(true)
+      }
     } catch {
       toast.error(t('数据库完整性检查失败，请稍后重试'))
     } finally {
@@ -280,7 +284,7 @@ export function UpdateCheckerSection({
             <DialogTitle>{t('数据库完整性检查异常日志')}</DialogTitle>
             <DialogDescription>
               {t(
-                '检测到数据库连接或表结构存在以下异常（仅只读检测，未对数据库做任何修改）：'
+                '检测到数据库存在以下异常（仅只读检测，未对数据库做任何修改）：'
               )}
             </DialogDescription>
           </DialogHeader>
@@ -291,6 +295,17 @@ export function UpdateCheckerSection({
                 {dbReport.issues.join('\n')}
               </pre>
             )}
+            {Array.isArray(dbReport?.warnings) &&
+              dbReport.warnings.length > 0 && (
+                <div className='space-y-2'>
+                  <div className='text-sm font-medium'>
+                    {t('版本兼容提示（不影响运行）')}
+                  </div>
+                  <pre className='bg-muted text-muted-foreground max-h-40 overflow-y-auto rounded-lg p-3 font-mono text-xs break-words whitespace-pre-wrap'>
+                    {dbReport.warnings.join('\n')}
+                  </pre>
+                </div>
+              )}
             <div className='space-y-2'>
               <div className='text-sm font-medium'>{t('完整检测日志')}</div>
               <pre className='bg-muted max-h-64 overflow-y-auto rounded-lg p-3 font-mono text-xs break-words whitespace-pre-wrap'>

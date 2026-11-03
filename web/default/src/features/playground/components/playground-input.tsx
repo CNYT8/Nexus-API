@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import {
   PaperclipIcon,
   FileIcon,
@@ -26,6 +26,7 @@ import {
   GlobeIcon,
   SendIcon,
   SquareIcon,
+  XIcon,
   BarChartIcon,
   BoxIcon,
   NotepadTextIcon,
@@ -50,10 +51,20 @@ import {
 } from '@/components/ai-elements/prompt-input'
 import { Suggestion, Suggestions } from '@/components/ai-elements/suggestion'
 import { ModelGroupSelector } from '@/components/model-group-selector'
+import {
+  IMAGE_FILE_ACCEPT,
+  MAX_IMAGE_FILE_BYTES,
+  MAX_TEXT_FILE_BYTES,
+  TEXT_FILE_ACCEPT,
+  buildAttachmentTextBlock,
+  formatFileSize,
+  parseImageAttachment,
+  parseTextAttachment,
+} from '../lib/attachments'
 import type { ModelOption, GroupOption } from '../types'
 
 interface PlaygroundInputProps {
-  onSubmit: (text: string) => void
+  onSubmit: (text: string, images?: string[]) => void
   onStop?: () => void
   disabled?: boolean
   isGenerating?: boolean
@@ -64,6 +75,12 @@ interface PlaygroundInputProps {
   groups: GroupOption[]
   groupValue: string
   onGroupChange: (value: string) => void
+  /** Inline images (data URLs) currently attached to the prompt. */
+  imageUrls?: string[]
+  onImageUrlsChange?: (urls: string[]) => void
+  /** Whether the image channel is enabled in playground settings. */
+  imageEnabled?: boolean
+  showToast?: (message: string, level?: 'error' | 'warning' | 'success') => void
 }
 
 const suggestions = [
@@ -87,24 +104,126 @@ export function PlaygroundInput({
   groups,
   groupValue,
   onGroupChange,
+  imageUrls = [],
+  onImageUrlsChange,
+  imageEnabled = false,
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
+  const [attachments, setAttachments] = useState<
+    Array<{ id: string; name: string; size: number; text: string }>
+  >([])
+  const [parsingAttachment, setParsingAttachment] = useState(false)
+  const [pendingImages, setPendingImages] = useState<string[]>(() =>
+    imageUrls.filter((url) => url && url.trim() !== '')
+  )
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
 
   const isModelSelectDisabled =
     disabled || isModelLoading || models.length === 0
   const isGroupSelectDisabled = disabled || groups.length === 0
 
   const handleSubmit = (message: PromptInputMessage) => {
-    if (!message.text?.trim() || disabled) return
-    onSubmit(message.text)
+    const attachmentText = buildAttachmentTextBlock(attachments)
+    const combined = [attachmentText, (message.text ?? '').trim()]
+      .filter(Boolean)
+      .join('\n\n')
+    if (!combined || disabled) return
+    onSubmit(combined, pendingImages.length > 0 ? pendingImages : undefined)
     setText('')
+    setAttachments([])
+    setPendingImages([])
   }
 
-  const handleFileAction = (action: string) => {
-    toast.info(t('Feature in development'), {
-      description: action,
-    })
+  // Text files are decoded in the browser and inlined into the prompt.
+  // Nothing is uploaded, so the server never stores user files.
+  const handleTextFilesSelected = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (files.length === 0) return
+
+    setParsingAttachment(true)
+    try {
+      for (const file of files) {
+        if (file.size > MAX_TEXT_FILE_BYTES) {
+          toast.warning(
+            `${t('File is too large and was skipped')}: ${file.name} (${t('Limit')} ${formatFileSize(MAX_TEXT_FILE_BYTES)})`
+          )
+          continue
+        }
+
+        const result = await parseTextAttachment(file)
+        if (!result.ok) {
+          toast.warning(
+            result.reason === 'too_large'
+              ? `${t('File is too large and was skipped')}: ${result.name}`
+              : `${t('Only text files are supported (.md, .txt, etc.)')}: ${result.name}`
+          )
+          continue
+        }
+
+        setAttachments((prev) => [
+          ...prev,
+          {
+            id: `${Date.now()}-${result.name}`,
+            name: result.name,
+            size: result.size,
+            text: result.text,
+          },
+        ])
+      }
+    } finally {
+      setParsingAttachment(false)
+    }
+  }
+
+  // Images are converted to data URLs and sent via the existing image_url
+  // content part; the relay already supports `data:image/...;base64,`.
+  const handleImageFilesSelected = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (files.length === 0) return
+
+    if (!imageEnabled) {
+      toast.warning(t('Please enable the image feature in settings first'))
+      return
+    }
+
+    setParsingAttachment(true)
+    try {
+      const nextUrls = [...pendingImages]
+      for (const file of files) {
+        if (file.size > MAX_IMAGE_FILE_BYTES) {
+          toast.warning(
+            `${t('Image is too large and was skipped')}: ${file.name} (${t('Limit')} ${formatFileSize(MAX_IMAGE_FILE_BYTES)})`
+          )
+          continue
+        }
+
+        const result = await parseImageAttachment(file)
+        if (!result.ok) {
+          toast.warning(
+            result.reason === 'too_large'
+              ? `${t('Image is too large and was skipped')}: ${result.name}`
+              : `${t('Only image files are supported (PNG, JPEG, WebP, GIF, BMP)')}: ${result.name}`
+          )
+          continue
+        }
+
+        nextUrls.push(result.dataUrl)
+      }
+      if (nextUrls.length > pendingImages.length) {
+        setPendingImages(nextUrls)
+        onImageUrlsChange?.(nextUrls)
+      }
+    } finally {
+      setParsingAttachment(false)
+    }
   }
 
   const handleSuggestionClick = (suggestion: string) => {
@@ -114,6 +233,52 @@ export function PlaygroundInput({
   return (
     <div className='grid shrink-0 gap-4 px-1 md:pb-4'>
       <PromptInput groupClassName='rounded-xl' onSubmit={handleSubmit}>
+        <input
+          ref={fileInputRef}
+          type='file'
+          multiple
+          accept={TEXT_FILE_ACCEPT}
+          className='hidden'
+          onChange={handleTextFilesSelected}
+        />
+        <input
+          ref={imageInputRef}
+          type='file'
+          multiple
+          accept={IMAGE_FILE_ACCEPT}
+          className='hidden'
+          onChange={handleImageFilesSelected}
+        />
+        {attachments.length > 0 && (
+          <div className='flex flex-wrap gap-2 px-4 pt-3'>
+            {attachments.map((item) => (
+              <div
+                key={item.id}
+                className='bg-muted flex max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs'
+                title={item.name}
+              >
+                <FileIcon className='size-3 shrink-0 opacity-70' />
+                <span className='max-w-[14rem] truncate'>{item.name}</span>
+                <span className='text-muted-foreground'>
+                  {formatFileSize(item.size)}
+                </span>
+                <button
+                  type='button'
+                  onClick={() =>
+                    setAttachments((prev) =>
+                      prev.filter((entry) => entry.id !== item.id)
+                    )
+                  }
+                  disabled={disabled}
+                  className='hover:text-foreground text-muted-foreground ml-0.5 shrink-0 rounded p-0.5'
+                  aria-label={t('Remove attachment')}
+                >
+                  <XIcon className='size-3' />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <PromptInputTextarea
           autoComplete='off'
           autoCorrect='off'
@@ -139,30 +304,38 @@ export function PlaygroundInput({
                 }
               >
                 <PaperclipIcon size={16} />
-                <span className='hidden sm:inline'>{t('Attach')}</span>
+                <span className='hidden sm:inline'>
+                  {parsingAttachment ? t('Parsing...') : t('Attach')}
+                </span>
                 <span className='sr-only sm:hidden'>{t('Attach')}</span>
               </DropdownMenuTrigger>
               <DropdownMenuContent align='start'>
-                <DropdownMenuItem
-                  onClick={() => handleFileAction('upload-file')}
-                >
+                <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
                   <FileIcon className='mr-2' size={16} />
                   {t('Upload file')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => handleFileAction('upload-photo')}
+                  onClick={() => imageInputRef.current?.click()}
                 >
                   <ImageIcon className='mr-2' size={16} />
                   {t('Upload photo')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => handleFileAction('take-screenshot')}
+                  onClick={() =>
+                    toast.info(t('Feature in development'), {
+                      description: 'take-screenshot',
+                    })
+                  }
                 >
                   <ScreenShareIcon className='mr-2' size={16} />
                   {t('Take screenshot')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => handleFileAction('take-photo')}
+                  onClick={() =>
+                    toast.info(t('Feature in development'), {
+                      description: 'take-photo',
+                    })
+                  }
                 >
                   <CameraIcon className='mr-2' size={16} />
                   {t('Take photo')}
@@ -182,7 +355,7 @@ export function PlaygroundInput({
             </PromptInputButton>
           </PromptInputTools>
 
-          <div className='flex items-center gap-1.5 md:gap-2'>
+          <div className='flex flex-wrap items-center gap-1.5 md:gap-2'>
             <ModelGroupSelector
               selectedModel={modelValue}
               models={models}

@@ -128,8 +128,7 @@ function toLatencySeries(groups: PerformanceGroup[]) {
     .map(([ts, value]) => ({
       timestamp: new Date(ts * 1000).toISOString(),
       group: 'latency',
-      ttft_ms:
-        value.weight > 0 ? Math.round(value.sum / value.weight) : 0,
+      ttft_ms: value.weight > 0 ? Math.round(value.sum / value.weight) : 0,
     }))
 }
 
@@ -180,28 +179,45 @@ function toGroupUptimeSeries(group: PerformanceGroup): UptimeDayPoint[] {
   })
 }
 
+// 骨架屏与真实内容结构一一对应（表格 + 两个图表），避免加载完成后高度跳变
 function PerformanceDetailsSkeleton() {
   return (
     <div className='space-y-4' aria-hidden='true'>
-      <div className='rounded-lg border p-3'>
-        <div className='mb-3 flex items-center gap-2'>
-          <div className='bg-muted h-3.5 w-3.5 rounded-full' />
-          <div className='bg-muted h-3 w-36 rounded' />
+      <section>
+        <div className='mb-2 flex items-center gap-2'>
+          <div className='bg-muted h-3.5 w-3.5 shrink-0 rounded-full' />
+          <div className='bg-muted h-3.5 w-36 rounded' />
         </div>
-        <div className='space-y-2'>
+        <div className='overflow-hidden rounded-lg border'>
+          <div className='bg-muted/40 h-10 border-b' />
           {Array.from({ length: 3 }).map((_, index) => (
             <div
               key={index}
-              className='grid grid-cols-[96px_1fr_88px] items-center gap-3'
+              className='grid grid-cols-[96px_1fr_88px] items-center gap-3 border-b px-3 py-3 last:border-b-0'
             >
-              <div className='bg-muted h-6 rounded' />
+              <div className='bg-muted h-4 rounded' />
               <div className='bg-muted h-2 rounded' />
               <div className='bg-muted h-4 rounded' />
             </div>
           ))}
         </div>
-      </div>
-      <div className='bg-muted/60 h-44 rounded-lg border' />
+      </section>
+
+      <section>
+        <div className='mb-2 flex items-center gap-2'>
+          <div className='bg-muted h-3.5 w-3.5 shrink-0 rounded-full' />
+          <div className='bg-muted h-3.5 w-40 rounded' />
+        </div>
+        <div className='bg-muted/60 h-64 rounded-lg sm:h-72' />
+      </section>
+
+      <section>
+        <div className='mb-2 flex items-center gap-2'>
+          <div className='bg-muted h-3.5 w-3.5 shrink-0 rounded-full' />
+          <div className='bg-muted h-3.5 w-44 rounded' />
+        </div>
+        <div className='bg-muted/60 h-56 rounded-lg sm:h-64' />
+      </section>
     </div>
   )
 }

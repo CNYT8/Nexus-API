@@ -111,7 +111,19 @@ export function loadMessages(): Message[] | null {
  */
 export function saveMessages(messages: Message[]): void {
   try {
-    localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(messages))
+    // Inline base64 images can be several MB each; writing them into
+    // localStorage would blow the quota and silently lose all history.
+    const sanitized = messages.map((message) => {
+      const versions = Array.isArray(message.versions)
+        ? message.versions.map((version) =>
+            Array.isArray(version.images) && version.images.length > 0
+              ? { ...version, images: [] }
+              : version
+          )
+        : message.versions
+      return { ...message, versions }
+    })
+    localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(sanitized))
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save messages:', error)

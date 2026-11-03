@@ -21,6 +21,7 @@ import {
   STORAGE_KEYS,
   DEFAULT_CONFIG,
 } from '../../constants/playground.constants';
+import { stripInlineImageDataForStorage } from '../../helpers/playgroundAttachments';
 
 const MESSAGES_STORAGE_KEY = 'playground_messages';
 
@@ -46,8 +47,10 @@ export const saveConfig = (config) => {
  */
 export const saveMessages = (messages) => {
   try {
+    // 内联 base64 图片体积很大（单张可达数 MB），直接写入 localStorage 会撑爆配额
+    // 导致整个历史记录保存失败；存入前先剔除图片数据，仅保留占位标记。
     const messagesToSave = {
-      messages,
+      messages: stripInlineImageDataForStorage(messages),
       timestamp: new Date().toISOString(),
     };
     localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(messagesToSave));

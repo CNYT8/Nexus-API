@@ -20,6 +20,7 @@ type DatabaseIntegrityReport struct {
 	TotalTables   int      `json:"total_tables"`
 	CheckedTables int      `json:"checked_tables"`
 	Issues        []string `json:"issues"`
+	Warnings      []string `json:"warnings"`
 	Logs          []string `json:"logs"`
 }
 
@@ -92,6 +93,7 @@ func CheckDatabaseIntegrity() DatabaseIntegrityReport {
 		Healthy:   true,
 		CheckedAt: now,
 		Issues:    make([]string, 0),
+		Warnings:  make([]string, 0),
 		Logs:      make([]string, 0),
 	}
 
@@ -99,6 +101,10 @@ func CheckDatabaseIntegrity() DatabaseIntegrityReport {
 		report.Healthy = false
 		report.Issues = append(report.Issues, msg)
 		report.Logs = append(report.Logs, "[ERROR] "+msg)
+	}
+	addWarning := func(msg string) {
+		report.Warnings = append(report.Warnings, msg)
+		report.Logs = append(report.Logs, "[WARN] "+msg)
 	}
 	addInfo := func(msg string) {
 		report.Logs = append(report.Logs, "[OK] "+msg)
@@ -118,9 +124,9 @@ func CheckDatabaseIntegrity() DatabaseIntegrityReport {
 		report.LogDialect = report.MainDialect
 	}
 
-	inspectDBTarget(DB, "主数据库 (SQL_DSN)", primaryDBModelSpecs(), &report, addInfo, addIssue)
+	inspectDBTarget(DB, "主数据库 (SQL_DSN)", primaryDBModelSpecs(), &report, addInfo, addIssue, addWarning)
 	if separateLogDB {
-		inspectDBTarget(LOG_DB, "日志数据库 (LOG_SQL_DSN)", logDBModelSpecs(), &report, addInfo, addIssue)
+		inspectDBTarget(LOG_DB, "日志数据库 (LOG_SQL_DSN)", logDBModelSpecs(), &report, addInfo, addIssue, addWarning)
 	}
 
 	return report
@@ -133,6 +139,7 @@ func inspectDBTarget(
 	report *DatabaseIntegrityReport,
 	addInfo func(string),
 	addIssue func(string),
+	addWarning func(string),
 ) {
 	dialect := db.Dialector.Name()
 	sqlDB, err := db.DB()
@@ -231,8 +238,12 @@ func inspectDBTarget(
 		}
 		sort.Strings(unknownCols)
 		if len(unknownCols) > 0 {
-			addIssue(fmt.Sprintf("%s: 表 `%s` (模型 %s) 存在系统无法识别的冗余/未知字段: [%s]", label, tableName, spec.Name, strings.Join(unknownCols, ", ")))
-			continue
+			// Extra columns are usually schema written by a NEWER version of this
+			// project (or by an upstream release this build predates). They are a
+			// version-compatibility notice, NOT corruption: reads still work because
+			// every column this build needs exists. Only truly unreadable or
+			// physically broken structures are reported as errors.
+			addWarning(fmt.Sprintf("%s: 表 `%s` (模型 %s) 存在本版本未使用的额外字段（通常由更新版本写入，不影响读写）: [%s]", label, tableName, spec.Name, strings.Join(unknownCols, ", ")))
 		}
 
 		// Read-only probe query: verify table storage engine is not corrupted and all model columns are readable
@@ -304,7 +315,7 @@ func inspectDBTarget(
 	}
 	sort.Strings(unknownTables)
 	if len(unknownTables) > 0 {
-		addIssue(fmt.Sprintf("%s: 发现非本系统原生的数据表 (%d 个): [%s]", label, len(unknownTables), strings.Join(unknownTables, ", ")))
+		addWarning(fmt.Sprintf("%s: 发现非本系统原生的数据表 (%d 个)（可能属于其他版本或第三方插件，本系统不会读写，不影响运行）: [%s]", label, len(unknownTables), strings.Join(unknownTables, ", ")))
 	}
 
 	if db == DB {

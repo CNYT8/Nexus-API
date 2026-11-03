@@ -109,7 +109,8 @@
     "数据库完整性正常": "L'intégrité de la base de données est normale",
     "数据库完整性检查失败，请稍后重试": "Échec de la vérification de l'intégrité de la base de données, veuillez réessayer",
     "数据库完整性检查异常日志": "Journal des anomalies d'intégrité de la base de données",
-    "检测到数据库连接或表结构存在以下异常（仅只读检测，未对数据库做任何修改）：": "Anomalies détectées dans la connexion ou la structure de la base de données (lecture seule, aucune modification effectuée) :",
+    "检测到数据库存在以下异常（仅只读检测，未对数据库做任何修改）：": "Problèmes de base de données détectés (lecture seule, aucune modification effectuée) :",
+    "版本兼容提示（不影响运行）": "Avis de compatibilité de version (aucun impact sur le fonctionnement)",
     "完整检测日志": "Journal complet d'inspection",
     "钱包账本初始化": "Initialiser le grand livre du portefeuille",
     "初始化钱包账本期间将短暂暂停服务请求，把存量正余额登记为历史基础额度（不改变任何用户余额）。是否确认开始初始化？": "Les requêtes seront brièvement suspendues pendant l'initialisation du grand livre du portefeuille afin d'enregistrer les soldes positifs existants comme crédits de base historiques (sans modifier les soldes des utilisateurs). Confirmer l'initialisation ?",
@@ -4290,6 +4291,15 @@
     "每日": "Quotidien",
     "永久": "Permanent",
     "保存返利设置": "Enregistrer les paramètres de bonus",
-    "返利设置数值无效": "Valeur de paramètre de bonus invalide"
+    "返利设置数值无效": "Valeur de paramètre de bonus invalide",
+    "Group": "Groupe",
+    "停止": "Arrêter",
+    "清空对话": "Effacer la conversation",
+    "移除附件": "Supprimer la pièce jointe",
+    "上限": "limite",
+    "文件过大，已跳过": "Fichier trop volumineux, ignoré",
+    "图片过大，已跳过": "Image trop volumineuse, ignorée",
+    "仅支持文本文件（.md、.txt 等）": "Seuls les fichiers texte sont pris en charge (.md, .txt, etc.)",
+    "仅支持图片文件（PNG、JPEG、WebP、GIF、BMP）": "Seules les images sont prises en charge (PNG, JPEG, WebP, GIF, BMP)"
   }
 }

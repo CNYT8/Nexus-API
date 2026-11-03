@@ -24,6 +24,8 @@ export type MessageStatus = 'loading' | 'streaming' | 'complete' | 'error'
 export interface MessageVersion {
   id: string
   content: string
+  /** Inline images (data URLs) attached to this version of the ask. */
+  images?: string[]
 }
 
 export interface Message {

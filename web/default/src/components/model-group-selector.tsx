@@ -101,7 +101,7 @@ const ModelTriggerButton = React.forwardRef<
     {...props}
   >
     <CpuIcon className='text-muted-foreground block size-4 sm:hidden' />
-    <span className='text-muted-foreground sm:text-foreground hidden truncate text-xs sm:block'>
+    <span className='text-muted-foreground sm:text-foreground hidden text-xs whitespace-nowrap sm:block'>
       {currentLabel}
     </span>
     <ChevronsUpDown className='text-muted-foreground hidden h-4 w-4 opacity-50 sm:block' />
@@ -137,7 +137,7 @@ const GroupTriggerButton = React.forwardRef<
     {...props}
   >
     <LayersIcon className='text-muted-foreground block size-4 sm:hidden' />
-    <span className='text-muted-foreground sm:text-foreground hidden truncate text-xs sm:block'>
+    <span className='text-muted-foreground sm:text-foreground hidden text-xs whitespace-nowrap sm:block'>
       {currentLabel}
     </span>
     <ChevronsUpDown className='text-muted-foreground hidden h-4 w-4 opacity-50 sm:block' />
@@ -328,7 +328,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = React.memo(
               }
             />
             <PopoverContent
-              className='bg-popover z-40 w-[90vw] max-w-[20em] rounded-lg border p-0 !shadow-none sm:w-[20em]'
+              className='bg-popover z-40 w-auto max-w-[90vw] min-w-[16em] rounded-lg border p-0 !shadow-none'
               align='start'
               side='bottom'
               sideOffset={4}
@@ -522,7 +522,7 @@ export const GroupSelector: React.FC<GroupSelectorProps> = React.memo(
               }
             />
             <PopoverContent
-              className='bg-popover z-50 w-[90vw] max-w-[14em] rounded-lg border p-0 !shadow-none sm:w-[14em]'
+              className='bg-popover z-50 w-auto max-w-[90vw] min-w-[14em] rounded-lg border p-0 !shadow-none'
               align='start'
               side='bottom'
               sideOffset={4}

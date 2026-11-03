@@ -238,6 +238,23 @@ export function PlaygroundChat({
                                     </div>
                                   )}
 
+                                  {/* Inline images attached by the user */}
+                                  {Array.isArray(version.images) &&
+                                    version.images.length > 0 && (
+                                      <div className='mb-2 flex flex-wrap gap-2'>
+                                        {version.images.map(
+                                          (src, imageIndex) => (
+                                            <img
+                                              key={`${message.key}-image-${imageIndex}`}
+                                              src={src}
+                                              alt='attached image'
+                                              className='max-h-48 max-w-[12rem] rounded-lg border object-cover'
+                                            />
+                                          )
+                                        )}
+                                      </div>
+                                    )}
+
                                   {/* Error or Content */}
                                   {message.status === 'error' ? (
                                     <>

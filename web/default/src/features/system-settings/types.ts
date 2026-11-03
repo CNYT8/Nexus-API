@@ -438,6 +438,7 @@ export type DatabaseIntegrityReport = {
   total_tables: number
   checked_tables: number
   issues: string[]
+  warnings?: string[]
   logs: string[]
 }
 
