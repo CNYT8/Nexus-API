@@ -220,6 +220,10 @@ func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 		geminiRequest.GenerationConfig.Seed = common.GetPointer(geminiSeed)
 	}
 
+	if len(textRequest.ImageConfig) > 0 {
+		geminiRequest.GenerationConfig.ImageConfig = textRequest.ImageConfig
+	}
+
 	attachThoughtSignature := (info.ChannelType == constant.ChannelTypeGemini ||
 		info.ChannelType == constant.ChannelTypeVertexAi) &&
 		model_setting.GetGeminiSettings().FunctionCallThoughtSignatureEnabled
@@ -1061,6 +1065,40 @@ func buildUsageFromGeminiMetadata(metadata dto.GeminiUsageMetadata, fallbackProm
 	return usage
 }
 
+func buildUsageFromGeminiEmbeddingMetadata(metadata *dto.GeminiEmbeddingUsageMetadata, fallbackPromptTokens int) dto.Usage {
+	promptTokens := 0
+	if metadata != nil {
+		promptTokens = metadata.PromptTokenCount
+		if promptTokens <= 0 {
+			for _, detail := range metadata.PromptTokenDetails {
+				promptTokens += detail.TokenCount
+			}
+		}
+	}
+	if promptTokens <= 0 && fallbackPromptTokens > 0 {
+		promptTokens = fallbackPromptTokens
+	}
+
+	usage := dto.Usage{
+		PromptTokens: promptTokens,
+		TotalTokens:  promptTokens,
+	}
+	if metadata != nil {
+		for _, detail := range metadata.PromptTokenDetails {
+			switch detail.Modality {
+			case "AUDIO":
+				usage.PromptTokensDetails.AudioTokens += detail.TokenCount
+			case "TEXT":
+				usage.PromptTokensDetails.TextTokens += detail.TokenCount
+			}
+		}
+	}
+	if usage.PromptTokens > 0 && usage.PromptTokensDetails.TextTokens == 0 && usage.PromptTokensDetails.AudioTokens == 0 {
+		usage.PromptTokensDetails.TextTokens = usage.PromptTokens
+	}
+	return usage
+}
+
 func responseGeminiChat2OpenAI(c *gin.Context, response *dto.GeminiChatResponse) *dto.OpenAITextResponse {
 	fullTextResponse := dto.OpenAITextResponse{
 		Id:      helper.GetResponseID(c),
@@ -1161,7 +1199,7 @@ func responseGeminiChat2OpenAI(c *gin.Context, response *dto.GeminiChatResponse)
 			switch *candidate.FinishReason {
 			case "STOP":
 				choice.FinishReason = constant.FinishReasonStop
-			case "MAX_TOKENS":
+			case "MAX_TOKENS", "CONTINUATION":
 				choice.FinishReason = constant.FinishReasonLength
 			case "SAFETY":
 				// Safety filter triggered
@@ -1235,7 +1273,7 @@ func streamResponseGeminiChat2OpenAI(geminiResponse *dto.GeminiChatResponse) (*d
 			case "STOP":
 				// Normal completion
 				choice.FinishReason = &constant.FinishReasonStop
-			case "MAX_TOKENS":
+			case "MAX_TOKENS", "CONTINUATION":
 				// Reached maximum token limit
 				choice.FinishReason = &constant.FinishReasonLength
 			case "SAFETY":
@@ -1623,8 +1661,8 @@ func GeminiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	// Google has not yet clarified how embedding models will be billed
 	// refer to openai billing method to use input tokens billing
 	// https://platform.openai.com/docs/guides/embeddings#what-are-embeddings
-	usage := service.ResponseText2Usage(c, "", info.UpstreamModelName, info.GetEstimatePromptTokens())
-	openAIResponse.Usage = *usage
+	usage := buildUsageFromGeminiEmbeddingMetadata(geminiResponse.UsageMetadata, info.GetEstimatePromptTokens())
+	openAIResponse.Usage = usage
 
 	jsonResponse, jsonErr := common.Marshal(openAIResponse)
 	if jsonErr != nil {
@@ -1632,7 +1670,7 @@ func GeminiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	}
 
 	service.IOCopyBytesGracefully(c, resp, jsonResponse)
-	return usage, nil
+	return &usage, nil
 }
 
 func GeminiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {

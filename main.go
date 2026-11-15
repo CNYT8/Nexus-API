@@ -176,7 +176,7 @@ func main() {
 
 	// Initialize HTTP server
 	server := gin.New()
-	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
+	server.Use(gin.CustomRecoveryWithWriter(common.ErrorLogWriter, func(c *gin.Context, err any) {
 		common.SysLog(fmt.Sprintf("panic detected: %v", err))
 		statusCode, message := service.ApplyErrorMaskToMessage(
 			c,

@@ -85,6 +85,9 @@ Powered by [expr-lang/expr](https://github.com/expr-lang/expr). Expressions are 
 | `weekday` | `weekday(tz) → int` | Day of week (0=Sunday, 6=Saturday) |
 | `month` | `month(tz) → int` | Month (1-12) |
 | `day` | `day(tz) → int` | Day of month (1-31) |
+| `cn_offday` | `cn_offday(tz) → int` | Weekend or Chinese statutory holiday (1=yes, 0=no) |
+| `cn_workday` | `cn_workday(tz) → int` | Monday–Friday excluding Chinese statutory holidays (1=yes, 0=no) |
+| `cn_holiday` | `cn_holiday(tz) → int` | Chinese statutory holiday (1=yes, 0=no) |
 | `max` | `max(a, b) → float64` | Math max |
 | `min` | `min(a, b) → float64` | Math min |
 | `abs` | `abs(x) → float64` | Absolute value |

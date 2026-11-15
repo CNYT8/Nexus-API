@@ -106,7 +106,6 @@ export function PlaygroundInput({
   onGroupChange,
   imageUrls = [],
   onImageUrlsChange,
-  imageEnabled = false,
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
@@ -129,11 +128,12 @@ export function PlaygroundInput({
     const combined = [attachmentText, (message.text ?? '').trim()]
       .filter(Boolean)
       .join('\n\n')
-    if (!combined || disabled) return
+    if ((!combined && pendingImages.length === 0) || disabled) return
     onSubmit(combined, pendingImages.length > 0 ? pendingImages : undefined)
     setText('')
     setAttachments([])
     setPendingImages([])
+    onImageUrlsChange?.([])
   }
 
   // Text files are decoded in the browser and inlined into the prompt.
@@ -189,15 +189,65 @@ export function PlaygroundInput({
     event.target.value = ''
     if (files.length === 0) return
 
-    if (!imageEnabled) {
-      toast.warning(t('Please enable the image feature in settings first'))
-      return
-    }
-
     setParsingAttachment(true)
     try {
       const nextUrls = [...pendingImages]
       for (const file of files) {
+        if (file.size > MAX_IMAGE_FILE_BYTES) {
+          toast.warning(
+            `${t('Image is too large and was skipped')}: ${file.name} (${t('Limit')} ${formatFileSize(MAX_IMAGE_FILE_BYTES)})`
+          )
+          continue
+        }
+
+        const result = await parseImageAttachment(file)
+        if (!result.ok) {
+          toast.warning(
+            result.reason === 'too_large'
+              ? `${t('Image is too large and was skipped')}: ${result.name}`
+              : `${t('Only image files are supported (PNG, JPEG, WebP, GIF, BMP)')}: ${result.name}`
+          )
+          continue
+        }
+
+        nextUrls.push(result.dataUrl)
+      }
+      if (nextUrls.length > pendingImages.length) {
+        setPendingImages(nextUrls)
+        onImageUrlsChange?.(nextUrls)
+      }
+    } finally {
+      setParsingAttachment(false)
+    }
+  }
+
+  const removePendingImage = (indexToRemove: number) => {
+    const nextUrls = pendingImages.filter((_, idx) => idx !== indexToRemove)
+    setPendingImages(nextUrls)
+    onImageUrlsChange?.(nextUrls)
+  }
+
+  const handlePasteImageEvent = async (
+    event: React.ClipboardEvent<HTMLTextAreaElement>
+  ) => {
+    const items = event.clipboardData?.items
+    if (!items || items.length === 0) return
+
+    const imageFiles: File[] = []
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i]
+      if (item && item.type && item.type.indexOf('image') !== -1) {
+        const file = item.getAsFile()
+        if (file) imageFiles.push(file)
+      }
+    }
+    if (imageFiles.length === 0) return
+
+    event.preventDefault()
+    setParsingAttachment(true)
+    try {
+      const nextUrls = [...pendingImages]
+      for (const file of imageFiles) {
         if (file.size > MAX_IMAGE_FILE_BYTES) {
           toast.warning(
             `${t('Image is too large and was skipped')}: ${file.name} (${t('Limit')} ${formatFileSize(MAX_IMAGE_FILE_BYTES)})`
@@ -249,8 +299,29 @@ export function PlaygroundInput({
           className='hidden'
           onChange={handleImageFilesSelected}
         />
-        {attachments.length > 0 && (
-          <div className='flex flex-wrap gap-2 px-4 pt-3'>
+        {(pendingImages.length > 0 || attachments.length > 0) && (
+          <div className='flex flex-wrap items-center gap-2 px-4 pt-3'>
+            {pendingImages.map((src, index) => (
+              <div
+                key={`${index}-${src.slice(0, 32)}`}
+                className='bg-muted relative size-16 shrink-0 overflow-hidden rounded-lg border'
+              >
+                <img
+                  src={src}
+                  alt={`${t('Upload photo')} ${index + 1}`}
+                  className='size-full object-cover'
+                />
+                <button
+                  type='button'
+                  onClick={() => removePendingImage(index)}
+                  disabled={disabled}
+                  className='absolute top-1 right-1 flex size-5 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80'
+                  aria-label={t('Remove attachment')}
+                >
+                  <XIcon className='size-3' />
+                </button>
+              </div>
+            ))}
             {attachments.map((item) => (
               <div
                 key={item.id}
@@ -287,6 +358,7 @@ export function PlaygroundInput({
           className='px-5 md:text-base'
           disabled={disabled}
           onChange={(event) => setText(event.target.value)}
+          onPaste={handlePasteImageEvent}
           placeholder={t('Ask anything')}
           value={text}
         />
@@ -379,7 +451,12 @@ export function PlaygroundInput({
             ) : (
               <PromptInputButton
                 className='text-foreground font-medium'
-                disabled={disabled || !text.trim()}
+                disabled={
+                  disabled ||
+                  (!text.trim() &&
+                    attachments.length === 0 &&
+                    pendingImages.length === 0)
+                }
                 type='submit'
                 variant='secondary'
               >

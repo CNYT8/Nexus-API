@@ -74,7 +74,17 @@ export function BotProtectionSection({
         value !== defaultValues[key as keyof BotProtectionFormValues]
     )
 
-    for (const [key, value] of updates) {
+    const turnstileEnableUpdate = updates.find(
+      ([key, value]) => key === 'TurnstileCheckEnabled' && value === true
+    )
+    const orderedUpdates = turnstileEnableUpdate
+      ? [
+          ...updates.filter(([key]) => key !== 'TurnstileCheckEnabled'),
+          turnstileEnableUpdate,
+        ]
+      : updates
+
+    for (const [key, value] of orderedUpdates) {
       await updateOption.mutateAsync({ key, value: value ?? '' })
     }
   }

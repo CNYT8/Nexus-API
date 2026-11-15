@@ -497,7 +497,7 @@ func TestAdminGrantConsumptionProducesRebate(t *testing.T) {
 
 	inviter := creditSourceTestUser(t, "admin-grant-inviter", 0)
 	invitee := creditSourceTestUser(t, "admin-grant-invitee", 0)
-	require.NoError(t, DB.Model(&User{}).Where("id = ?", invitee.Id).Update("inviter_id", invitee.Id).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", invitee.Id).Update("inviter_id", inviter.Id).Error)
 
 	require.NoError(t, IncreaseUserQuotaWithMembershipGrant(invitee.Id, 100, 7))
 

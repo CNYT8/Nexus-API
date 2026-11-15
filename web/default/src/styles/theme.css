@@ -145,6 +145,9 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 .dark {
+  /* Native controls follow the theme; Dark Reader also reads this to detect
+     the built-in dark theme. */
+  color-scheme: dark;
   /* OpenAI-like dark mode: nearly black chrome, readable raised surfaces. */
   --background: oklch(0.185 0 0);
   --foreground: oklch(0.965 0 0);

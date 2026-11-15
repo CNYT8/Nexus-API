@@ -86,14 +86,18 @@ export function RedemptionsMutateDrawer({
 
   // Load existing data when updating
   useEffect(() => {
-    if (open && isUpdate && currentRow) {
+    if (!open) {
+      form.reset(REDEMPTION_FORM_DEFAULT_VALUES)
+      return
+    }
+    if (isUpdate && currentRow) {
       // For update, fetch fresh data
       getRedemption(currentRow.id).then((result) => {
         if (result.success && result.data) {
           form.reset(transformRedemptionToFormDefaults(result.data))
         }
       })
-    } else if (open && !isUpdate) {
+    } else if (!isUpdate) {
       // For create, reset to defaults
       form.reset(REDEMPTION_FORM_DEFAULT_VALUES)
     }
@@ -137,7 +141,7 @@ export function RedemptionsMutateDrawer({
 
   const handleSetExpiry = (months: number, days: number, hours: number) => {
     const newDate = addTimeToDate(months, days, hours)
-    form.setValue('expired_time', newDate)
+    form.setValue('expired_time', newDate ?? null)
   }
 
   const { meta: currencyMeta } = getCurrencyDisplay()
@@ -149,15 +153,7 @@ export function RedemptionsMutateDrawer({
     : t('Enter quota in {{currency}}', { currency: currencyLabel })
 
   return (
-    <Sheet
-      open={open}
-      onOpenChange={(v) => {
-        onOpenChange(v)
-        if (!v) {
-          form.reset()
-        }
-      }}
-    >
+    <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className={sideDrawerContentClassName('sm:max-w-[600px]')}>
         <SheetHeader className={sideDrawerHeaderClassName()}>
           <SheetTitle>
@@ -236,8 +232,8 @@ export function RedemptionsMutateDrawer({
                     <div className='flex flex-col gap-2'>
                       <FormControl>
                         <DateTimePicker
-                          value={field.value}
-                          onChange={field.onChange}
+                          value={field.value ?? undefined}
+                          onChange={(date) => field.onChange(date ?? null)}
                           placeholder={t('Never expires')}
                         />
                       </FormControl>

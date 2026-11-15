@@ -4,6 +4,7 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 )
@@ -1161,5 +1162,87 @@ func TestPerCall_QuotaConversion(t *testing.T) {
 	}
 	if res.MatchedTier != "base" {
 		t.Errorf("tier = %q, want base", res.MatchedTier)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Chinese statutory holiday / offday / workday tests
+// ---------------------------------------------------------------------------
+
+func TestCNHolidayCalendar(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.FixedZone("CST", 8*3600)
+	}
+	mustDate := func(y int, m time.Month, d int) time.Time {
+		return time.Date(y, m, d, 10, 0, 0, 0, loc)
+	}
+
+	// 2026-10-01 is Thursday (National Day statutory holiday)
+	oct1 := mustDate(2026, time.October, 1)
+	if !billingexpr.IsCNHoliday(oct1) {
+		t.Errorf("expected 2026-10-01 to be CN holiday")
+	}
+	if !billingexpr.IsCNOffday(oct1) {
+		t.Errorf("expected 2026-10-01 to be CN offday")
+	}
+	if billingexpr.IsCNWorkday(oct1) {
+		t.Errorf("expected 2026-10-01 not to be CN workday")
+	}
+
+	// 2026-02-17 is Tuesday (Spring Festival statutory holiday)
+	feb17 := mustDate(2026, time.February, 17)
+	if !billingexpr.IsCNHoliday(feb17) || !billingexpr.IsCNOffday(feb17) || billingexpr.IsCNWorkday(feb17) {
+		t.Errorf("expected 2026-02-17 Spring Festival to be holiday/offday and not workday")
+	}
+
+	// 2026-11-11 is Wednesday (regular workday)
+	nov11 := mustDate(2026, time.November, 11)
+	if billingexpr.IsCNHoliday(nov11) {
+		t.Errorf("expected 2026-11-11 not to be CN holiday")
+	}
+	if billingexpr.IsCNOffday(nov11) {
+		t.Errorf("expected 2026-11-11 not to be CN offday")
+	}
+	if !billingexpr.IsCNWorkday(nov11) {
+		t.Errorf("expected 2026-11-11 to be CN workday")
+	}
+
+	// 2026-11-08 is Sunday (weekend offday, not statutory holiday)
+	nov8 := mustDate(2026, time.November, 8)
+	if billingexpr.IsCNHoliday(nov8) {
+		t.Errorf("expected 2026-11-08 Sunday not to be statutory holiday")
+	}
+	if !billingexpr.IsCNOffday(nov8) {
+		t.Errorf("expected 2026-11-08 Sunday to be CN offday")
+	}
+	if billingexpr.IsCNWorkday(nov8) {
+		t.Errorf("expected 2026-11-08 Sunday not to be CN workday")
+	}
+}
+
+func TestCNHolidayTimeFuncs_ExprEvaluation(t *testing.T) {
+	// DeepSeek style peak/off-peak expression:
+	// Offday all day 0.5x, Workday 12-14 0.5x, Workday 18-9 0.5x
+	expr := `(tier("base", p * 2 + c * 8)) * (cn_offday("Asia/Shanghai") == 1 ? 0.5 : 1) * (cn_workday("Asia/Shanghai") == 1 && hour("Asia/Shanghai") >= 12 && hour("Asia/Shanghai") < 14 ? 0.5 : 1) * (cn_workday("Asia/Shanghai") == 1 && (hour("Asia/Shanghai") >= 18 || hour("Asia/Shanghai") < 9) ? 0.5 : 1)`
+	cost, trace, err := billingexpr.RunExpr(expr, billingexpr.TokenParams{P: 1000, C: 500})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trace.MatchedTier != "base" {
+		t.Errorf("tier = %q, want base", trace.MatchedTier)
+	}
+	// Base cost = 1000*2 + 500*8 = 6000; during peak it is 6000, during off-peak it is 3000
+	if math.Abs(cost-6000) > 1e-6 && math.Abs(cost-3000) > 1e-6 {
+		t.Errorf("cost = %f, want 6000 (peak) or 3000 (off-peak)", cost)
+	}
+
+	// Verify cn_holiday(tz) also compiles and evaluates cleanly to 0 or 1
+	hCost, _, err := billingexpr.RunExpr(`tier("base", p) * (cn_holiday("Asia/Shanghai") == 1 ? 0.5 : 1)`, billingexpr.TokenParams{P: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(hCost-1000) > 1e-6 && math.Abs(hCost-500) > 1e-6 {
+		t.Errorf("hCost = %f, want 1000 or 500", hCost)
 	}
 }

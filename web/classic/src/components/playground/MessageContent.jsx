@@ -315,7 +315,10 @@ const MessageContent = ({
               (item) => item.type === 'text',
             );
             const imageContents = message.content.filter(
-              (item) => item.type === 'image_url',
+              (item) =>
+                item.type === 'image_url' &&
+                item.image_url?.url &&
+                item.image_url.url !== '[inline-image-omitted]',
             );
 
             return (

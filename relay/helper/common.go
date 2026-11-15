@@ -88,7 +88,7 @@ func EmitOutputSensitiveStreamTerminal(c *gin.Context, info *relaycommon.RelayIn
 	if payload == "" || requestContextDone(c) {
 		return
 	}
-	ExtendWriteDeadline(c)
+	// The streamResponseWriter budget sets the deadline on each Write; no manual call needed.
 	_, _ = c.Writer.Write([]byte(payload))
 	_ = FlushWriter(c)
 }

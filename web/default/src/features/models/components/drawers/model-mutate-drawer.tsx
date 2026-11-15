@@ -98,7 +98,7 @@ const extendedModelFormSchema = z.object({
   description: z.string(),
   icon: z.string(),
   tags: z.array(z.string()),
-  vendor_id: z.number().optional(),
+  vendor_id: z.number(),
   endpoints: z.string(),
   name_rule: z.number(),
   status: z.boolean(),
@@ -347,7 +347,7 @@ export function ModelMutateDrawer({
       description: '',
       icon: '',
       tags: [],
-      vendor_id: undefined,
+      vendor_id: 0,
       endpoints: '',
       name_rule: 0,
       status: true,
@@ -395,7 +395,23 @@ export function ModelMutateDrawer({
 
   // Load model data for editing and ratio configuration
   useEffect(() => {
-    if (open && isEditing && modelData?.data) {
+    if (!open) {
+      form.reset({
+        id: undefined,
+        model_name: '',
+        description: '',
+        icon: '',
+        tags: [],
+        vendor_id: 0,
+        endpoints: '',
+        name_rule: 0,
+        status: true,
+        sync_official: true,
+        ...EMPTY_PRICING_FIELDS,
+      })
+      return
+    }
+    if (isEditing && modelData?.data) {
       const model = modelData.data
       setOldModelName(model.model_name)
 
@@ -411,14 +427,14 @@ export function ModelMutateDrawer({
         description: model.description || '',
         icon: model.icon || '',
         tags: parseModelTags(model.tags),
-        vendor_id: model.vendor_id,
+        vendor_id: model.vendor_id ?? 0,
         endpoints: model.endpoints || '',
         name_rule: model.name_rule || 0,
         status: model.status === 1,
         sync_official: model.sync_official === 1,
         ...pricing.fields,
       })
-    } else if (open && !isEditing) {
+    } else if (!isEditing) {
       const modelName = currentRow?.model_name || ''
       const pricing = readPricingConfig(modelSettings, modelName)
       setOldModelName('')
@@ -429,11 +445,12 @@ export function ModelMutateDrawer({
       setCompletionPrice(pricing.completionPrice)
       setAdvancedOpen(pricing.advancedOpen)
       form.reset({
+        id: undefined,
         model_name: modelName,
         description: '',
         icon: '',
         tags: [],
-        vendor_id: undefined,
+        vendor_id: 0,
         endpoints: '',
         name_rule: 0,
         status: true,
@@ -824,9 +841,9 @@ export function ModelMutateDrawer({
                         })),
                       ]}
                       onValueChange={(value) =>
-                        field.onChange(value ? parseInt(value) : undefined)
+                        field.onChange(value ? parseInt(value) : 0)
                       }
-                      value={field.value ? String(field.value) : undefined}
+                      value={field.value ? String(field.value) : null}
                     >
                       <FormControl>
                         <SelectTrigger>

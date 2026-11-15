@@ -53,17 +53,26 @@ const classicTier = compile(`${classicPure}\nexports.api = { createDefaultVisual
 
 let semanticCases = 0;
 let evaluations = 0;
-const domains = { hour: [0, 23], minute: [0, 59], weekday: [0, 6], month: [1, 12], day: [1, 31] };
+const domains = {
+  hour: [0, 23],
+  minute: [0, 59],
+  weekday: [0, 6],
+  month: [1, 12],
+  day: [1, 31],
+  cn_offday: [0, 1],
+  cn_workday: [0, 1],
+  cn_holiday: [0, 1],
+};
 const factor = (condition) => `(${condition} ? 0.5 : 1)`;
 const time = (fn, tz = 'UTC') => `${fn}("${tz}")`;
 function evaluator(expr, fn = 'hour') {
   // Only repository fixtures/generated numeric literals are evaluated here.
-  const names = [...Object.keys(domains), 'header', 'param', 'has', 'nil', 'tier', 'call', 'p', 'c', 'len', 'cr', 'cc', 'cc1h'];
+  const names = [...Object.keys(domains), 'header', 'param', 'has', 'nil', 'tier', 'call', 'p', 'c', 'len', 'cr', 'cc', 'cc1h', 'cc12h'];
   const execute = new Function(...names, `return (${expr})`);
   return (value, flag) => {
     evaluations++;
     return execute(...Object.keys(domains).map((name) => () => name === fn ? value : domains[name][0]),
-      () => flag ? 'yes' : '', () => flag, (s, v) => s.includes(v), null, (_n, v) => v, (x) => x * 1e6, 100, 20, 100, 0, 0, 0);
+      () => flag ? 'yes' : '', () => flag, (s, v) => s.includes(v), null, (_n, v) => v, (x) => x * 1e6, 100, 20, 100, 0, 0, 0, 0);
   };
 }
 function checkEquivalent(expr, fn, mustParse = false) {
@@ -156,6 +165,8 @@ const bases = ['tier("base", call(5))', 'tier("base", call(3) + p * 2 + c * 6)',
 const dayRule = factor('hour("UTC") >= 9 && hour("UTC") < 12');
 const legacyRule = factor('hour("UTC") >= 9 || hour("UTC") < 12');
 const nightRule = factor('hour("UTC") >= 21 || hour("UTC") < 6');
+const deepseekHolidayRule =
+  '(cn_offday("Asia/Shanghai") == 1 ? 0.5 : 1) * (cn_workday("Asia/Shanghai") == 1 && hour("Asia/Shanghai") >= 12 && hour("Asia/Shanghai") < 14 ? 0.5 : 1) * (cn_workday("Asia/Shanghai") == 1 && (hour("Asia/Shanghai") >= 18 || hour("Asia/Shanghai") < 9) ? 0.5 : 1)';
 for (const base of bases) {
   for (const tier of [defaultTier, classicTier]) {
     const config = tier.tryParseVisualConfig(base);
@@ -167,7 +178,7 @@ for (const base of bases) {
     assert.equal(result.cost, evaluator(base)(0, false));
   }
   for (const api of Object.values(rules)) {
-    for (const rule of [dayRule, nightRule, `${dayRule} * ${nightRule}`]) {
+    for (const rule of [dayRule, nightRule, `${dayRule} * ${nightRule}`, deepseekHolidayRule]) {
       const combined = api.combineBillingExpr(base, rule);
       assert.deepEqual(api.splitBillingExprAndRequestRules(combined), { billingExpr: base, requestRuleExpr: rule });
       const rebuilt = api.buildRequestRuleExpr(api.tryParseRequestRuleExpr(rule));
@@ -360,8 +371,8 @@ for (const kind of ['default', 'classic']) {
       changedKeyCount++;
       const value = current[key];
       assert.ok(typeof value === 'string' && value.trim(), `${file}: empty ${key}`);
-      if (name !== 'en.json' && /[A-Za-z]{3}/.test(key)) assert.notEqual(value, key, `${file}: untranslated ${key}`);
-      if (name.startsWith('zh')) assert.ok(/[\u3400-\u9fff]/.test(value), `${file}: missing Chinese ${key}`);
+      if (name !== 'en.json' && /[A-Za-z]{3}/.test(key) && !(name.startsWith('zh') && /[\u3400-\u9fff]/.test(key))) assert.notEqual(value, key, `${file}: untranslated ${key}`);
+      if (name.startsWith('zh') && /[A-Za-z\u3400-\u9fff]/.test(key)) assert.ok(/[\u3400-\u9fff]/.test(value), `${file}: missing Chinese ${key}`);
       if (!name.startsWith('zh') && name !== 'ja.json') assert.ok(!/[\u3400-\u9fff]/.test(value), `${file}: Chinese residue ${key}`);
     }
     const missing = [...keys].filter((key) => !(key in current));

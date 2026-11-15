@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 	"sync"
 
@@ -479,10 +480,12 @@ func BatchInsertChannels(channels []Channel) error {
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
+			panic(r)
 		}
 	}()
 
-	for _, chunk := range lo.Chunk(channels, 50) {
+	// Keep each chunk backed by channels so generated IDs reach the caller.
+	for chunk := range slices.Chunk(channels, 50) {
 		if err := tx.Create(&chunk).Error; err != nil {
 			tx.Rollback()
 			return err
@@ -758,7 +761,7 @@ func handlerMultiKeyUpdate(channel *Channel, usingKey string, status int, reason
 		if !hasEnabledMultiKey(keys, channel.ChannelInfo.MultiKeyStatusList) {
 			channel.Status = common.ChannelStatusAutoDisabled
 			info := channel.GetOtherInfo()
-			info["status_reason"] = "All keys are disabled"
+			info["status_reason"] = ChannelStatusReasonAllKeysDisabled
 			info["status_time"] = common.GetTimestamp()
 			channel.SetOtherInfo(info)
 		} else if status == common.ChannelStatusEnabled {
@@ -766,6 +769,10 @@ func handlerMultiKeyUpdate(channel *Channel, usingKey string, status int, reason
 		}
 	}
 }
+
+// ChannelStatusReasonAllKeysDisabled marks a multi-key channel that was disabled
+// only because every key was disabled; enabling a key may restore it.
+const ChannelStatusReasonAllKeysDisabled = "All keys are disabled"
 
 func hasEnabledMultiKey(keys []string, statusList map[int]int) bool {
 	for i := range keys {
@@ -778,6 +785,19 @@ func hasEnabledMultiKey(keys []string, statusList map[int]int) bool {
 		}
 	}
 	return false
+}
+
+// HasEnabledMultiKey reports whether a multi-key channel still has at least one
+// enabled key. Non-multi-key channels always return true.
+func HasEnabledMultiKey(channel *Channel) bool {
+	if channel == nil || !channel.ChannelInfo.IsMultiKey {
+		return true
+	}
+	keys := channel.GetKeys()
+	if len(keys) == 0 {
+		return false
+	}
+	return hasEnabledMultiKey(keys, channel.ChannelInfo.MultiKeyStatusList)
 }
 
 func UpdateChannelStatus(channelId int, usingKey string, status int, reason string) bool {
@@ -795,6 +815,9 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 
 	channel, err := GetChannelById(channelId, true)
 	if err != nil {
+		return false
+	}
+	if channel.Status == common.ChannelStatusManuallyDisabled && status == common.ChannelStatusAutoDisabled {
 		return false
 	}
 	// An enabled multi-key channel can still contain a disabled individual key.

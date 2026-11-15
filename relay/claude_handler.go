@@ -106,6 +106,13 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 		info.UpstreamModelName = request.Model
 	}
+	// A model reasoning suffix replaces the client's thinking config, but
+	// block_binding is a conversation control, not a reasoning setting. Keep
+	// the client's value when the rendered mode is still adaptive.
+	if claudeReq.Thinking != nil && request.Thinking != nil &&
+		request.Thinking.Type == "adaptive" && len(request.Thinking.BlockBinding) == 0 {
+		request.Thinking.BlockBinding = claudeReq.Thinking.BlockBinding
+	}
 
 	if info.ChannelSetting.SystemPrompt != "" {
 		if request.System == nil {

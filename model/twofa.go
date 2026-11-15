@@ -139,7 +139,10 @@ func (t *TwoFA) IncrementFailedAttempts() error {
 		}
 
 		nextFailedAttempts := current.FailedAttempts + 1
-		nextLockedUntil := current.LockedUntil
+		var nextLockedUntil *time.Time
+		if current.LockedUntil != nil {
+			nextFailedAttempts = 1
+		}
 		if nextFailedAttempts >= common.MaxFailAttempts {
 			lockUntil := now.Add(time.Duration(common.LockoutDuration) * time.Second)
 			nextLockedUntil = &lockUntil

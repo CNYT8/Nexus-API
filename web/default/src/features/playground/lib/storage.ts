@@ -16,16 +16,28 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useAuthStore } from '@/stores/auth-store'
 import { STORAGE_KEYS } from '../constants'
 import type { PlaygroundConfig, ParameterEnabled, Message } from '../types'
 import { sanitizeMessagesOnLoad } from './message-utils'
 
+function storageKey(baseKey: string): string | null {
+  const userId = useAuthStore.getState().auth.user?.id
+  if (!userId) return null
+  // Drop pre-isolation keys that had no owner and were shared across accounts.
+  for (const legacyKey of Object.values(STORAGE_KEYS)) {
+    localStorage.removeItem(legacyKey)
+  }
+  return `${baseKey}:u${userId}`
+}
 /**
  * Load playground config from localStorage
  */
 export function loadConfig(): Partial<PlaygroundConfig> {
   try {
-    const saved = localStorage.getItem(STORAGE_KEYS.CONFIG)
+    const key = storageKey(STORAGE_KEYS.CONFIG)
+    if (!key) return {}
+    const saved = localStorage.getItem(key)
     if (saved) {
       return JSON.parse(saved)
     }
@@ -41,7 +53,9 @@ export function loadConfig(): Partial<PlaygroundConfig> {
  */
 export function saveConfig(config: Partial<PlaygroundConfig>): void {
   try {
-    localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(config))
+    const key = storageKey(STORAGE_KEYS.CONFIG)
+    if (!key) return
+    localStorage.setItem(key, JSON.stringify(config))
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save config:', error)
@@ -53,7 +67,9 @@ export function saveConfig(config: Partial<PlaygroundConfig>): void {
  */
 export function loadParameterEnabled(): Partial<ParameterEnabled> {
   try {
-    const saved = localStorage.getItem(STORAGE_KEYS.PARAMETER_ENABLED)
+    const key = storageKey(STORAGE_KEYS.PARAMETER_ENABLED)
+    if (!key) return {}
+    const saved = localStorage.getItem(key)
     if (saved) {
       return JSON.parse(saved)
     }
@@ -71,10 +87,9 @@ export function saveParameterEnabled(
   parameterEnabled: Partial<ParameterEnabled>
 ): void {
   try {
-    localStorage.setItem(
-      STORAGE_KEYS.PARAMETER_ENABLED,
-      JSON.stringify(parameterEnabled)
-    )
+    const key = storageKey(STORAGE_KEYS.PARAMETER_ENABLED)
+    if (!key) return
+    localStorage.setItem(key, JSON.stringify(parameterEnabled))
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save parameter enabled:', error)
@@ -86,7 +101,9 @@ export function saveParameterEnabled(
  */
 export function loadMessages(): Message[] | null {
   try {
-    const saved = localStorage.getItem(STORAGE_KEYS.MESSAGES)
+    const key = storageKey(STORAGE_KEYS.MESSAGES)
+    if (!key) return null
+    const saved = localStorage.getItem(key)
     if (saved) {
       const parsed: unknown = JSON.parse(saved)
       if (!Array.isArray(parsed)) {
@@ -111,6 +128,8 @@ export function loadMessages(): Message[] | null {
  */
 export function saveMessages(messages: Message[]): void {
   try {
+    const key = storageKey(STORAGE_KEYS.MESSAGES)
+    if (!key) return
     // Inline base64 images can be several MB each; writing them into
     // localStorage would blow the quota and silently lose all history.
     const sanitized = messages.map((message) => {
@@ -123,7 +142,7 @@ export function saveMessages(messages: Message[]): void {
         : message.versions
       return { ...message, versions }
     })
-    localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(sanitized))
+    localStorage.setItem(key, JSON.stringify(sanitized))
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save messages:', error)
@@ -135,9 +154,12 @@ export function saveMessages(messages: Message[]): void {
  */
 export function clearPlaygroundData(): void {
   try {
-    localStorage.removeItem(STORAGE_KEYS.CONFIG)
-    localStorage.removeItem(STORAGE_KEYS.PARAMETER_ENABLED)
-    localStorage.removeItem(STORAGE_KEYS.MESSAGES)
+    const configKey = storageKey(STORAGE_KEYS.CONFIG)
+    const paramKey = storageKey(STORAGE_KEYS.PARAMETER_ENABLED)
+    const messagesKey = storageKey(STORAGE_KEYS.MESSAGES)
+    if (configKey) localStorage.removeItem(configKey)
+    if (paramKey) localStorage.removeItem(paramKey)
+    if (messagesKey) localStorage.removeItem(messagesKey)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to clear playground data:', error)

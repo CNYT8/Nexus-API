@@ -100,6 +100,15 @@ export const BILLING_VARS: BillingVar[] = [
     group: 'cache',
   },
   {
+    key: 'cc12h',
+    field: 'cacheCreate12hPrice',
+    tierField: 'cache_create_12h_unit_cost',
+    label: 'Cache write (12h) price',
+    shortLabel: 'Cache Write (12h)',
+    side: 'input',
+    group: 'cache',
+  },
+  {
     key: 'img',
     field: 'imagePrice',
     tierField: 'image_unit_cost',
@@ -182,7 +191,16 @@ export const MATCH_LTE = 'lte'
 export const MATCH_EXISTS = 'exists'
 export const MATCH_RANGE = 'range'
 
-export const TIME_FUNCS = ['hour', 'minute', 'weekday', 'month', 'day'] as const
+export const TIME_FUNCS = [
+  'hour',
+  'minute',
+  'weekday',
+  'month',
+  'day',
+  'cn_offday',
+  'cn_workday',
+  'cn_holiday',
+] as const
 export type TimeFunc = (typeof TIME_FUNCS)[number]
 
 export const COMMON_TIMEZONES: { value: string; label: string }[] = [
@@ -287,7 +305,9 @@ export function parseTiersFromExpr(exprStr: string): ParsedTier[] {
       const conditions: TierCondition[] = []
       if (condStr) {
         for (const cp of condStr.split(/\s*&&\s*/)) {
-          const cm = cp.trim().match(/^(len\s*\+\s*c|p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/)
+          const cm = cp
+            .trim()
+            .match(/^(len\s*\+\s*c|p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/)
           if (cm) {
             conditions.push({
               var: cm[1].replace(/\s+/g, '') as TierCondition['var'],
@@ -388,6 +408,9 @@ const TIME_FUNC_RANGES: Record<TimeFunc, [number, number]> = {
   weekday: [0, 6],
   month: [1, 12],
   day: [1, 31],
+  cn_offday: [0, 1],
+  cn_workday: [0, 1],
+  cn_holiday: [0, 1],
 }
 
 function isTimeValueInRange(timeFunc: TimeFunc, text: string): boolean {
@@ -400,11 +423,11 @@ function isTimeValueInRange(timeFunc: TimeFunc, text: string): boolean {
 
 function tryParseTimeCondition(expr: string): RequestCondition | null {
   let m = expr.match(
-    /^(hour|minute|weekday|month|day)\("([^"]+)"\) >= ([\d.eE+-]+) (&&|\|\|) \1\("\2"\) < ([\d.eE+-]+)$/
+    /^(hour|minute|weekday|month|day|cn_offday|cn_workday|cn_holiday)\("([^"]+)"\) >= ([\d.eE+-]+) (&&|\|\|) \1\("\2"\) < ([\d.eE+-]+)$/
   )
   if (!m) {
     m = expr.match(
-      /^\((hour|minute|weekday|month|day)\("([^"]+)"\) >= ([\d.eE+-]+) (&&|\|\|) \1\("\2"\) < ([\d.eE+-]+)\)$/
+      /^\((hour|minute|weekday|month|day|cn_offday|cn_workday|cn_holiday)\("([^"]+)"\) >= ([\d.eE+-]+) (&&|\|\|) \1\("\2"\) < ([\d.eE+-]+)\)$/
     )
   }
   if (m) {
@@ -431,10 +454,11 @@ function tryParseTimeCondition(expr: string): RequestCondition | null {
     }
   }
   m = expr.match(
-    /^(hour|minute|weekday|month|day)\("([^"]+)"\) (==|>=|<) ([\d.eE+-]+)$/
+    /^(hour|minute|weekday|month|day|cn_offday|cn_workday|cn_holiday)\("([^"]+)"\) (==|>=|<) ([\d.eE+-]+)$/
   )
   if (m) {
-    if (m[2].includes('\\') || !isTimeValueInRange(m[1] as TimeFunc, m[4])) return null
+    if (m[2].includes('\\') || !isTimeValueInRange(m[1] as TimeFunc, m[4]))
+      return null
     const opMap: Record<string, string> = {
       '==': MATCH_EQ,
       '>=': MATCH_GTE,
@@ -469,7 +493,13 @@ function tryParseRequestCondition(expr: string): RequestCondition | null {
       source: 'header',
       path: m[1],
       mode: MATCH_CONTAINS,
-      value: JSON.parse(m[2]) as string,
+      value: (() => {
+        try {
+          return JSON.parse(m[2]) as string
+        } catch {
+          return ''
+        }
+      })(),
     }
 
   m = expr.match(
@@ -480,7 +510,13 @@ function tryParseRequestCondition(expr: string): RequestCondition | null {
       source: 'param',
       path: m[1],
       mode: MATCH_CONTAINS,
-      value: JSON.parse(m[3]) as string,
+      value: (() => {
+        try {
+          return JSON.parse(m[3]) as string
+        } catch {
+          return ''
+        }
+      })(),
     }
 
   m = expr.match(

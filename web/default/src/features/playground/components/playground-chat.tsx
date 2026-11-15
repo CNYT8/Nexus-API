@@ -264,21 +264,22 @@ export function PlaygroundChat({
                                       />
                                       {actions}
                                     </>
-                                  ) : (
-                                    showMessageContent && (
-                                      <>
-                                        <MessageContent
-                                          variant='flat'
-                                          className={cn(
-                                            getMessageContentStyles()
-                                          )}
-                                        >
-                                          <Response>{displayContent}</Response>
-                                        </MessageContent>
-                                        {actions}
-                                      </>
-                                    )
-                                  )}
+                                  ) : showMessageContent ? (
+                                    <>
+                                      <MessageContent
+                                        variant='flat'
+                                        className={cn(
+                                          getMessageContentStyles()
+                                        )}
+                                      >
+                                        <Response>{displayContent}</Response>
+                                      </MessageContent>
+                                      {actions}
+                                    </>
+                                  ) : Array.isArray(version.images) &&
+                                    version.images.length > 0 ? (
+                                    actions
+                                  ) : null}
                                 </>
                               )
                             })()}

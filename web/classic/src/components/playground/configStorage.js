@@ -23,19 +23,52 @@ import {
 } from '../../constants/playground.constants';
 import { stripInlineImageDataForStorage } from '../../helpers/playgroundAttachments';
 
-const MESSAGES_STORAGE_KEY = 'playground_messages';
+const LEGACY_SHARED_KEYS = [
+  ...Object.values(STORAGE_KEYS),
+  'playground_parameter_enabled',
+];
 
+const getStorageKey = (baseKey) => {
+  try {
+    const rawUser = localStorage.getItem('user');
+    if (!rawUser) return null;
+    const userId = JSON.parse(rawUser)?.id;
+    if (!userId) return null;
+    for (const legacyKey of LEGACY_SHARED_KEYS) {
+      localStorage.removeItem(legacyKey);
+    }
+    return `${baseKey}:classic:u${userId}`;
+  } catch {
+    return null;
+  }
+};
 /**
  * 保存配置到 localStorage
  * @param {Object} config - 要保存的配置对象
  */
 export const saveConfig = (config) => {
   try {
+    const sanitizedInputs = config?.inputs
+      ? {
+          ...config.inputs,
+          imageUrls: Array.isArray(config.inputs.imageUrls)
+            ? config.inputs.imageUrls.filter(
+                (url) =>
+                  typeof url === 'string' &&
+                  url.trim() !== '' &&
+                  !url.startsWith('data:'),
+              )
+            : [],
+        }
+      : config?.inputs;
     const configToSave = {
       ...config,
+      ...(sanitizedInputs ? { inputs: sanitizedInputs } : {}),
       timestamp: new Date().toISOString(),
     };
-    localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(configToSave));
+    const key = getStorageKey(STORAGE_KEYS.CONFIG);
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(configToSave));
   } catch (error) {
     console.error('保存配置失败:', error);
   }
@@ -53,7 +86,9 @@ export const saveMessages = (messages) => {
       messages: stripInlineImageDataForStorage(messages),
       timestamp: new Date().toISOString(),
     };
-    localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(messagesToSave));
+    const key = getStorageKey(STORAGE_KEYS.MESSAGES);
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(messagesToSave));
   } catch (error) {
     console.error('保存消息失败:', error);
   }
@@ -65,7 +100,8 @@ export const saveMessages = (messages) => {
  */
 export const loadConfig = () => {
   try {
-    const savedConfig = localStorage.getItem(STORAGE_KEYS.CONFIG);
+    const key = getStorageKey(STORAGE_KEYS.CONFIG);
+    const savedConfig = key ? localStorage.getItem(key) : null;
     if (savedConfig) {
       const parsedConfig = JSON.parse(savedConfig);
       const parsedMaxTokens = parseInt(parsedConfig?.inputs?.max_tokens, 10);
@@ -105,7 +141,8 @@ export const loadConfig = () => {
  */
 export const loadMessages = () => {
   try {
-    const savedMessages = localStorage.getItem(STORAGE_KEYS.MESSAGES);
+    const key = getStorageKey(STORAGE_KEYS.MESSAGES);
+    const savedMessages = key ? localStorage.getItem(key) : null;
     if (savedMessages) {
       const parsedMessages = JSON.parse(savedMessages);
       return parsedMessages.messages || null;
@@ -122,8 +159,10 @@ export const loadMessages = () => {
  */
 export const clearConfig = () => {
   try {
-    localStorage.removeItem(STORAGE_KEYS.CONFIG);
-    localStorage.removeItem(STORAGE_KEYS.MESSAGES); // 同时清除消息
+    const configKey = getStorageKey(STORAGE_KEYS.CONFIG);
+    const messagesKey = getStorageKey(STORAGE_KEYS.MESSAGES);
+    if (configKey) localStorage.removeItem(configKey);
+    if (messagesKey) localStorage.removeItem(messagesKey); // 同时清除消息
   } catch (error) {
     console.error('清除配置失败:', error);
   }
@@ -134,7 +173,8 @@ export const clearConfig = () => {
  */
 export const clearMessages = () => {
   try {
-    localStorage.removeItem(STORAGE_KEYS.MESSAGES);
+    const key = getStorageKey(STORAGE_KEYS.MESSAGES);
+    if (key) localStorage.removeItem(key);
   } catch (error) {
     console.error('清除消息失败:', error);
   }
@@ -146,7 +186,8 @@ export const clearMessages = () => {
  */
 export const hasStoredConfig = () => {
   try {
-    return localStorage.getItem(STORAGE_KEYS.CONFIG) !== null;
+    const key = getStorageKey(STORAGE_KEYS.CONFIG);
+    return key ? localStorage.getItem(key) !== null : false;
   } catch (error) {
     console.error('检查配置失败:', error);
     return false;
@@ -159,7 +200,8 @@ export const hasStoredConfig = () => {
  */
 export const getConfigTimestamp = () => {
   try {
-    const savedConfig = localStorage.getItem(STORAGE_KEYS.CONFIG);
+    const key = getStorageKey(STORAGE_KEYS.CONFIG);
+    const savedConfig = key ? localStorage.getItem(key) : null;
     if (savedConfig) {
       const parsedConfig = JSON.parse(savedConfig);
       return parsedConfig.timestamp || null;

@@ -84,6 +84,9 @@ const TIME_FUNC_LABELS: Record<string, string> = {
   weekday: 'Weekday',
   month: 'Month',
   day: 'Day',
+  cn_offday: 'CN weekend/holiday',
+  cn_workday: 'CN workday',
+  cn_holiday: 'CN statutory holiday',
 }
 
 function formatTokenHint(value: string | number): string {
@@ -230,9 +233,7 @@ export function DynamicPricingBreakdown({
       (tier) => Number(tier[v.field as string as keyof ParsedTier] || 0) > 0
     )
   })
-  const hasPerCall = tiers.some(
-    (tier) => Number(tier.per_call_cost) > 0
-  )
+  const hasPerCall = tiers.some((tier) => Number(tier.per_call_cost) > 0)
 
   return (
     <section className='min-w-0 py-3 sm:py-4'>

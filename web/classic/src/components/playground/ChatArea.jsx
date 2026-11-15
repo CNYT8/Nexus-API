@@ -17,7 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+} from 'react';
 import {
   Button,
   Dropdown,
@@ -215,16 +221,27 @@ const ChatArea = ({
     };
   }, [message, updateScrollAffordance]);
 
+  const validImageUrls = useMemo(
+    () => (inputs.imageUrls || []).filter((url) => url && url.trim() !== ''),
+    [inputs.imageUrls],
+  );
+
   const handleSubmit = useCallback(() => {
     const trimmed = inputText.trim();
     const attachmentText = buildAttachmentTextBlock(attachments);
     const combined = [attachmentText, trimmed].filter(Boolean).join('\n\n');
-    if (!combined || isGenerating) return;
+    if ((!combined && validImageUrls.length === 0) || isGenerating) return;
     shouldAutoScrollRef.current = true;
     onMessageSend(combined);
     setInputText('');
     setAttachments([]);
-  }, [inputText, attachments, isGenerating, onMessageSend]);
+  }, [
+    inputText,
+    attachments,
+    validImageUrls.length,
+    isGenerating,
+    onMessageSend,
+  ]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent?.isComposing) {
@@ -287,6 +304,8 @@ const ChatArea = ({
 
     setParsingAttachment(true);
     try {
+      const nextUrls = [...validImageUrls];
+      let added = false;
       for (const file of files) {
         if (file.size > MAX_IMAGE_FILE_BYTES) {
           Toast.warning({
@@ -308,10 +327,11 @@ const ChatArea = ({
           continue;
         }
 
-        onInputChange('imageUrls', [
-          ...(inputs.imageUrls || []).filter((url) => url && url.trim() !== ''),
-          result.dataUrl,
-        ]);
+        nextUrls.push(result.dataUrl);
+        added = true;
+      }
+      if (added) {
+        onInputChange('imageUrls', nextUrls);
       }
     } finally {
       setParsingAttachment(false);
@@ -320,6 +340,11 @@ const ChatArea = ({
 
   const removeAttachment = (id) => {
     setAttachments((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const removeImageUrl = (indexToRemove) => {
+    const nextUrls = validImageUrls.filter((_, idx) => idx !== indexToRemove);
+    onInputChange('imageUrls', nextUrls);
   };
 
   // 粘贴图片：直接从剪贴板读为 data URL 附加，同样不经过服务器。
@@ -476,8 +501,37 @@ const ChatArea = ({
             boxShadow: '0 8px 30px rgba(0, 0, 0, 0.06)',
           }}
         >
-          {attachments.length > 0 && (
-            <div className='flex flex-wrap gap-2 px-3 pt-2.5'>
+          {(validImageUrls.length > 0 || attachments.length > 0) && (
+            <div className='flex flex-wrap items-center gap-2 px-3 pt-2.5'>
+              {validImageUrls.map((url, idx) => (
+                <div
+                  key={`${idx}-${url.slice(0, 32)}`}
+                  className='relative h-16 w-16 shrink-0 overflow-hidden rounded-lg'
+                  style={{
+                    backgroundColor: 'var(--semi-color-fill-0)',
+                    border: '1px solid var(--semi-color-border)',
+                  }}
+                >
+                  <img
+                    src={url}
+                    alt={`${t('上传图片')} ${idx + 1}`}
+                    className='h-full w-full object-cover'
+                  />
+                  <button
+                    type='button'
+                    onClick={() => removeImageUrl(idx)}
+                    disabled={isGenerating}
+                    className='absolute top-1 right-1 flex h-5 w-5 items-center justify-center rounded-full hover:opacity-90'
+                    style={{
+                      backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                      color: '#ffffff',
+                    }}
+                    aria-label={t('移除附件')}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
               {attachments.map((item) => (
                 <div
                   key={item.id}
@@ -672,7 +726,11 @@ const ChatArea = ({
                   theme='solid'
                   type='primary'
                   size='small'
-                  disabled={!inputText.trim()}
+                  disabled={
+                    !inputText.trim() &&
+                    attachments.length === 0 &&
+                    validImageUrls.length === 0
+                  }
                   icon={<Send size={13} />}
                   onClick={handleSubmit}
                   className='!rounded-lg'

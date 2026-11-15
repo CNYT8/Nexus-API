@@ -640,17 +640,18 @@ type AddChannelRequest struct {
 	Channel                   *model.Channel        `json:"channel"`
 }
 
-func getVertexArrayKeys(keys string) ([]string, error) {
+func getVertexArrayKeys(keys string) ([]string, []int, error) {
 	if keys == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	var keyArray []interface{}
 	err := common.Unmarshal([]byte(keys), &keyArray)
 	if err != nil {
-		return nil, fmt.Errorf("批量添加 Vertex AI 必须使用标准的JsonArray格式，例如[{key1}, {key2}...]，请检查输入: %w", err)
+		return nil, nil, fmt.Errorf("批量添加 Vertex AI 必须使用标准的JsonArray格式，例如[{key1}, {key2}...]，请检查输入: %w", err)
 	}
 	cleanKeys := make([]string, 0, len(keyArray))
-	for _, key := range keyArray {
+	inputIndices := make([]int, 0, len(keyArray))
+	for i, key := range keyArray {
 		var keyStr string
 		switch v := key.(type) {
 		case string:
@@ -658,18 +659,19 @@ func getVertexArrayKeys(keys string) ([]string, error) {
 		default:
 			bytes, err := json.Marshal(v)
 			if err != nil {
-				return nil, fmt.Errorf("Vertex AI key JSON 编码失败: %w", err)
+				return nil, nil, fmt.Errorf("Vertex AI key JSON 编码失败: %w", err)
 			}
 			keyStr = string(bytes)
 		}
 		if keyStr != "" {
 			cleanKeys = append(cleanKeys, keyStr)
+			inputIndices = append(inputIndices, i)
 		}
 	}
 	if len(cleanKeys) == 0 {
-		return nil, fmt.Errorf("批量添加 Vertex AI 的 keys 不能为空")
+		return nil, nil, fmt.Errorf("批量添加 Vertex AI 的 keys 不能为空")
 	}
-	return cleanKeys, nil
+	return cleanKeys, inputIndices, nil
 }
 
 func getCodexConfigKeys(raw string) ([]string, error) {
@@ -797,6 +799,7 @@ func AddChannel(c *gin.Context) {
 
 	addChannelRequest.Channel.CreatedTime = common.GetTimestamp()
 	keys := make([]string, 0)
+	inputIndices := make([]int, 0)
 	switch addChannelRequest.Mode {
 	case "multi_to_single":
 		addChannelRequest.Channel.ChannelInfo.IsMultiKey = true
@@ -815,8 +818,11 @@ func AddChannel(c *gin.Context) {
 			}
 			addChannelRequest.Channel.ChannelInfo.MultiKeySize = len(codexKeys)
 			addChannelRequest.Channel.Key = strings.Join(codexKeys, "\n")
+			for i := range codexKeys {
+				inputIndices = append(inputIndices, i)
+			}
 		} else if addChannelRequest.Channel.Type == constant.ChannelTypeVertexAi && addChannelRequest.Channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
-			array, err := getVertexArrayKeys(addChannelRequest.Channel.Key)
+			array, indices, err := getVertexArrayKeys(addChannelRequest.Channel.Key)
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,
@@ -826,14 +832,16 @@ func AddChannel(c *gin.Context) {
 			}
 			addChannelRequest.Channel.ChannelInfo.MultiKeySize = len(array)
 			addChannelRequest.Channel.Key = strings.Join(array, "\n")
+			inputIndices = indices
 		} else {
 			cleanKeys := make([]string, 0)
-			for _, key := range strings.Split(addChannelRequest.Channel.Key, "\n") {
+			for i, key := range strings.Split(addChannelRequest.Channel.Key, "\n") {
 				if key == "" {
 					continue
 				}
 				key = strings.TrimSpace(key)
 				cleanKeys = append(cleanKeys, key)
+				inputIndices = append(inputIndices, i)
 			}
 			addChannelRequest.Channel.ChannelInfo.MultiKeySize = len(cleanKeys)
 			addChannelRequest.Channel.Key = strings.Join(cleanKeys, "\n")
@@ -857,9 +865,12 @@ func AddChannel(c *gin.Context) {
 			addChannelRequest.Channel.ChannelInfo.MultiKeySize = len(codexKeys)
 			addChannelRequest.Channel.Key = strings.Join(codexKeys, "\n")
 			keys = []string{addChannelRequest.Channel.Key}
+			for i := range codexKeys {
+				inputIndices = append(inputIndices, i)
+			}
 		} else if addChannelRequest.Channel.Type == constant.ChannelTypeVertexAi && addChannelRequest.Channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
 			// multi json
-			keys, err = getVertexArrayKeys(addChannelRequest.Channel.Key)
+			keys, inputIndices, err = getVertexArrayKeys(addChannelRequest.Channel.Key)
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,
@@ -869,6 +880,9 @@ func AddChannel(c *gin.Context) {
 			}
 		} else {
 			keys = strings.Split(addChannelRequest.Channel.Key, "\n")
+			for i := range keys {
+				inputIndices = append(inputIndices, i)
+			}
 		}
 	case "single":
 		if addChannelRequest.Channel.Type == constant.ChannelTypeCodex {
@@ -890,6 +904,7 @@ func AddChannel(c *gin.Context) {
 			}
 		}
 		keys = []string{addChannelRequest.Channel.Key}
+		inputIndices = []int{0}
 	default:
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -899,7 +914,8 @@ func AddChannel(c *gin.Context) {
 	}
 
 	channels := make([]model.Channel, 0, len(keys))
-	for _, key := range keys {
+	channelInputIndices := make([][]int, 0, len(keys))
+	for i, key := range keys {
 		if key == "" {
 			continue
 		}
@@ -913,15 +929,33 @@ func AddChannel(c *gin.Context) {
 			localChannel.Name = fmt.Sprintf("%s %s", localChannel.Name, keyPrefix)
 		}
 		channels = append(channels, *localChannel)
+		if addChannelRequest.Mode == "multi_to_single" || (addChannelRequest.Mode == "batch" && addChannelRequest.Channel.Type == constant.ChannelTypeCodex) {
+			channelInputIndices = append(channelInputIndices, inputIndices)
+		} else {
+			channelInputIndices = append(channelInputIndices, []int{inputIndices[i]})
+		}
 	}
 	err = model.BatchInsertChannels(channels)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	ids := make([]int, len(channels))
+	results := make([]gin.H, 0, len(inputIndices))
+	for i, channel := range channels {
+		ids[i] = channel.Id
+		for _, inputIndex := range channelInputIndices[i] {
+			results = append(results, gin.H{"input_index": inputIndex, "channel_id": channel.Id})
+		}
+	}
+	data := gin.H{"ids": ids, "results": results}
+	if len(ids) == 1 {
+		data["id"] = ids[0]
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
+		"data":    data,
 	})
 	return
 }
@@ -1151,7 +1185,8 @@ func parseKeysForSingleToMultiKeyConversion(raw string, vertexJSON bool) ([]stri
 		return splitStoredChannelKeys(trimmed), nil
 	}
 	if strings.HasPrefix(trimmed, "[") {
-		return getVertexArrayKeys(trimmed)
+		keys, _, err := getVertexArrayKeys(trimmed)
+		return keys, err
 	}
 	var keyObject map[string]interface{}
 	if err := json.Unmarshal([]byte(trimmed), &keyObject); err != nil {
@@ -1345,7 +1380,7 @@ func UpdateChannel(c *gin.Context) {
 				} else if channel.Type == constant.ChannelTypeVertexAi && channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
 					// 尝试解析新密钥为JSON数组
 					if strings.HasPrefix(strings.TrimSpace(channel.Key), "[") {
-						array, err := getVertexArrayKeys(channel.Key)
+						array, _, err := getVertexArrayKeys(channel.Key)
 						if err != nil {
 							c.JSON(http.StatusOK, gin.H{
 								"success": false,
@@ -1730,6 +1765,29 @@ func buildCodexKeyStatus(key string) KeyStatus {
 	}
 }
 
+// restoreMultiKeyChannelIfAvailable re-enables a multi-key channel that was
+// disabled only because all of its keys were disabled, once at least one key
+// is enabled again. Manual key disables and request-driven key failures both
+// record the all-keys reason; a later manual channel disable replaces it and
+// is therefore kept.
+func restoreMultiKeyChannelIfAvailable(channel *model.Channel) {
+	if channel == nil {
+		return
+	}
+	disabled := channel.Status == common.ChannelStatusManuallyDisabled || channel.Status == common.ChannelStatusAutoDisabled
+	if !disabled || !model.HasEnabledMultiKey(channel) {
+		return
+	}
+	info := channel.GetOtherInfo()
+	if info["status_reason"] != model.ChannelStatusReasonAllKeysDisabled {
+		return
+	}
+	channel.Status = common.ChannelStatusEnabled
+	info["status_reason"] = ""
+	info["status_time"] = common.GetTimestamp()
+	channel.SetOtherInfo(info)
+}
+
 // ManageMultiKeys handles multi-key management operations
 func ManageMultiKeys(c *gin.Context) {
 	request := MultiKeyManageRequest{}
@@ -1961,6 +2019,7 @@ func ManageMultiKeys(c *gin.Context) {
 		if channel.ChannelInfo.MultiKeyDisabledReason != nil {
 			delete(channel.ChannelInfo.MultiKeyDisabledReason, keyIndex)
 		}
+		restoreMultiKeyChannelIfAvailable(channel)
 
 		err = channel.Update()
 		if err != nil {
@@ -1985,6 +2044,7 @@ func ManageMultiKeys(c *gin.Context) {
 		channel.ChannelInfo.MultiKeyStatusList = make(map[int]int)
 		channel.ChannelInfo.MultiKeyDisabledTime = make(map[int]int64)
 		channel.ChannelInfo.MultiKeyDisabledReason = make(map[int]string)
+		restoreMultiKeyChannelIfAvailable(channel)
 
 		err = channel.Update()
 		if err != nil {

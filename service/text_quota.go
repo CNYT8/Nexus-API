@@ -58,6 +58,16 @@ type textQuotaSummary struct {
 	ToolCallSurchargeQuota   decimal.Decimal
 }
 
+// hasBillableUsage reports whether this request should incur any charge.
+// Claude reports cache tokens separately from ordinary input and output;
+// a request can also carry zero ordinary tokens yet still be billable via a
+// tool-call surcharge or fixed model price.
+func (s *textQuotaSummary) hasBillableUsage() bool {
+	return s.ModelPrice != 0 || s.TotalTokens > 0 ||
+		(s.IsClaudeUsageSemantic && (s.CacheTokens > 0 || s.CacheCreationTokens > 0 ||
+			s.CacheCreationTokens5m > 0 || s.CacheCreationTokens1h > 0)) ||
+		!s.ToolCallSurchargeQuota.IsZero()
+}
 func cacheWriteTokensTotal(summary textQuotaSummary) int {
 	if summary.CacheCreationTokens5m > 0 || summary.CacheCreationTokens1h > 0 {
 		splitCacheWriteTokens := summary.CacheCreationTokens5m + summary.CacheCreationTokens1h
@@ -157,7 +167,16 @@ func isUsageIndependentSettlement(info *relaycommon.RelayInfo, result *billingex
 }
 
 func missingSettlementUsage(usage *dto.Usage) bool {
-	return usage == nil || (usage.PromptTokens <= 0 && usage.CompletionTokens <= 0) || usage.UsageSource == "responses_estimated"
+	if usage == nil || usage.UsageSource == "responses_estimated" {
+		return true
+	}
+	if usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
+		return false
+	}
+	return usage.PromptTokensDetails.CachedTokens <= 0 &&
+		usage.PromptTokensDetails.CacheCreationTokensTotal() <= 0 &&
+		usage.ClaudeCacheCreation5mTokens <= 0 &&
+		usage.ClaudeCacheCreation1hTokens <= 0
 }
 
 func composeTieredTextQuota(relayInfo *relaycommon.RelayInfo, summary textQuotaSummary, tieredQuota int, tieredResult *billingexpr.TieredResult) int {
@@ -329,12 +348,11 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		noteQuotaClamp(relayInfo, clamp)
 	}
 
-	if summary.TotalTokens == 0 {
+	if !summary.hasBillableUsage() {
 		summary.Quota = 0
 	} else if !ratio.IsZero() && summary.Quota == 0 {
 		summary.Quota = 1
 	}
-
 	return summary
 }
 
@@ -362,7 +380,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
 
 	snap := relayInfo.TieredBillingSnapshot
-	missingUsage := missingSettlementUsage(originUsage) || summary.TotalTokens == 0
+	missingUsage := missingSettlementUsage(originUsage) || !summary.hasBillableUsage()
 
 	// Evaluate all tiered expressions with the existing prompt estimate when
 	// usage is missing, but do not mistake that estimate for reported usage.
@@ -423,7 +441,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		extraContent = append(extraContent, fmt.Sprintf("Image Generation Call 花费 %s", decimal.NewFromFloat(summary.ImageGenerationCallPrice).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))
 	}
 
-	if missingUsage || summary.TotalTokens == 0 {
+	if missingUsage {
 		if !tieredBillingApplied {
 			usedConservative = true
 			floor := conservativeSettlementQuota(relayInfo)

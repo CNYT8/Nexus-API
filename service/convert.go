@@ -228,14 +228,14 @@ func buildClaudeUsageFromOpenAIUsage(oaiUsage *dto.Usage) *dto.ClaudeUsage {
 		return nil
 	}
 	cacheCreation5m, cacheCreation1h := NormalizeCacheCreationSplit(
-		oaiUsage.PromptTokensDetails.CachedCreationTokens,
+		oaiUsage.PromptTokensDetails.CacheCreationTokensTotal(),
 		oaiUsage.ClaudeCacheCreation5mTokens,
 		oaiUsage.ClaudeCacheCreation1hTokens,
 	)
 	usage := &dto.ClaudeUsage{
 		InputTokens:              oaiUsage.PromptTokens,
 		OutputTokens:             oaiUsage.CompletionTokens,
-		CacheCreationInputTokens: oaiUsage.PromptTokensDetails.CachedCreationTokens,
+		CacheCreationInputTokens: oaiUsage.PromptTokensDetails.CacheCreationTokensTotal(),
 		CacheReadInputTokens:     oaiUsage.PromptTokensDetails.CachedTokens,
 	}
 	if cacheCreation5m > 0 || cacheCreation1h > 0 {
@@ -621,9 +621,9 @@ func ResponseOpenAI2Claude(openAIResponse *dto.OpenAITextResponse, info *relayco
 				claudeContent.Type = "tool_use"
 				claudeContent.Id = toolUse.ID
 				claudeContent.Name = toolUse.Function.Name
-				mapParams := map[string]interface{}{}
+				mapParams := map[string]json.RawMessage{}
 				if strings.TrimSpace(toolUse.Function.Arguments) != "" {
-					var parsed map[string]interface{}
+					var parsed map[string]json.RawMessage
 					if err := common.Unmarshal([]byte(toolUse.Function.Arguments), &parsed); err == nil && parsed != nil {
 						mapParams = parsed
 					}
@@ -726,7 +726,8 @@ func GeminiToOpenAIRequest(geminiRequest *dto.GeminiChatRequest, info *relaycomm
 		if len(toolCalls) > 0 {
 			// 如果有工具调用，设置工具调用
 			message.SetToolCalls(toolCalls)
-		} else if len(mediaContents) == 1 && mediaContents[0].Type == "text" {
+		}
+		if len(mediaContents) == 1 && mediaContents[0].Type == "text" {
 			// 如果只有一个文本内容，直接设置字符串
 			message.Content = mediaContents[0].Text
 		} else if len(mediaContents) > 0 {

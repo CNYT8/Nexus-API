@@ -211,20 +211,18 @@ export function stripInlineImageDataForStorage(messages) {
     const content = message?.content;
     if (!Array.isArray(content)) return message;
 
-    const nextContent = content.map((part) => {
+    const nextContent = content.filter((part) => {
       if (
         part &&
         part.type === 'image_url' &&
         part.image_url &&
         typeof part.image_url.url === 'string' &&
-        part.image_url.url.startsWith('data:')
+        (part.image_url.url.startsWith('data:') ||
+          part.image_url.url === '[inline-image-omitted]')
       ) {
-        return {
-          ...part,
-          image_url: { url: '[inline-image-omitted]' },
-        };
+        return false;
       }
-      return part;
+      return true;
     });
 
     return { ...message, content: nextContent };

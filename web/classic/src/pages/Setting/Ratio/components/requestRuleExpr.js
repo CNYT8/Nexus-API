@@ -29,7 +29,16 @@ export const MATCH_LTE = 'lte';
 export const MATCH_EXISTS = 'exists';
 export const MATCH_RANGE = 'range';
 
-export const TIME_FUNCS = ['hour', 'minute', 'weekday', 'month', 'day'];
+export const TIME_FUNCS = [
+  'hour',
+  'minute',
+  'weekday',
+  'month',
+  'day',
+  'cn_offday',
+  'cn_workday',
+  'cn_holiday',
+];
 
 export const COMMON_TIMEZONES = [
   { value: 'Asia/Shanghai', label: 'UTC+8 北京 (Asia/Shanghai)' },
@@ -45,8 +54,7 @@ export const COMMON_TIMEZONES = [
   { value: 'Australia/Sydney', label: 'UTC+10 悉尼 (Australia/Sydney)' },
 ];
 
-export const NUMERIC_LITERAL_REGEX =
-  /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
+export const NUMERIC_LITERAL_REGEX = /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
 
 // Time function value domains. Values outside these ranges are invalid for
 // the corresponding time function (e.g. hour() is 0-23) and would otherwise
@@ -57,6 +65,9 @@ const TIME_FUNC_RANGES = {
   weekday: [0, 6],
   month: [1, 12],
   day: [1, 31],
+  cn_offday: [0, 1],
+  cn_workday: [0, 1],
+  cn_holiday: [0, 1],
 };
 
 function isTimeValueInRange(timeFunc, text) {
@@ -102,13 +113,25 @@ export function createEmptyTimeRuleGroup() {
 
 // Kept for backward compat with old preset format
 export function createEmptyRequestRule() {
-  return { source: SOURCE_PARAM, path: '', mode: MATCH_EQ, value: '', multiplier: '' };
+  return {
+    source: SOURCE_PARAM,
+    path: '',
+    mode: MATCH_EQ,
+    value: '',
+    multiplier: '',
+  };
 }
 
 export function createEmptyTimeRule() {
   return {
-    source: SOURCE_TIME, timeFunc: 'hour', timezone: 'Asia/Shanghai',
-    mode: MATCH_GTE, value: '', rangeStart: '', rangeEnd: '', multiplier: '',
+    source: SOURCE_TIME,
+    timeFunc: 'hour',
+    timezone: 'Asia/Shanghai',
+    mode: MATCH_GTE,
+    value: '',
+    rangeStart: '',
+    rangeEnd: '',
+    multiplier: '',
   };
 }
 
@@ -147,16 +170,21 @@ export function getRequestRuleMatchOptions(source, t) {
 // ---------------------------------------------------------------------------
 
 export function normalizeCondition(cond) {
-  const source = cond?.source === SOURCE_TIME
-    ? SOURCE_TIME
-    : cond?.source === SOURCE_HEADER
-      ? SOURCE_HEADER
-      : SOURCE_PARAM;
+  const source =
+    cond?.source === SOURCE_TIME
+      ? SOURCE_TIME
+      : cond?.source === SOURCE_HEADER
+        ? SOURCE_HEADER
+        : SOURCE_PARAM;
 
   if (source === SOURCE_TIME) {
-    const timeFunc = TIME_FUNCS.includes(cond?.timeFunc) ? cond.timeFunc : 'hour';
+    const timeFunc = TIME_FUNCS.includes(cond?.timeFunc)
+      ? cond.timeFunc
+      : 'hour';
     const options = getRequestRuleMatchOptions(SOURCE_TIME, (v) => v);
-    const mode = options.some((item) => item.value === cond?.mode) ? cond.mode : MATCH_GTE;
+    const mode = options.some((item) => item.value === cond?.mode)
+      ? cond.mode
+      : MATCH_GTE;
     return {
       source: SOURCE_TIME,
       timeFunc,
@@ -169,7 +197,9 @@ export function normalizeCondition(cond) {
   }
 
   const options = getRequestRuleMatchOptions(source, (v) => v);
-  const mode = options.some((item) => item.value === cond?.mode) ? cond.mode : MATCH_EQ;
+  const mode = options.some((item) => item.value === cond?.mode)
+    ? cond.mode
+    : MATCH_EQ;
   return {
     source,
     path: cond?.path || '',
@@ -181,7 +211,10 @@ export function normalizeCondition(cond) {
 // Legacy compat wrapper
 export function normalizeRequestRule(rule) {
   const base = normalizeCondition(rule);
-  return { ...base, multiplier: rule?.multiplier == null ? '' : String(rule.multiplier) };
+  return {
+    ...base,
+    multiplier: rule?.multiplier == null ? '' : String(rule.multiplier),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -239,7 +272,11 @@ function parseExprLiteral(raw) {
   const text = raw.trim();
   if (text === 'true' || text === 'false') return text;
   if (NUMERIC_LITERAL_REGEX.test(text)) return text;
-  try { return JSON.parse(text); } catch { return null; }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 function buildExprLiteral(mode, value) {
@@ -263,7 +300,8 @@ function buildTimeConditionExpr(cond) {
   if (mode === MATCH_RANGE) {
     const s = normalized.rangeStart.trim();
     const e = normalized.rangeEnd.trim();
-    if (!isTimeValueInRange(timeFunc, s) || !isTimeValueInRange(timeFunc, e)) return '';
+    if (!isTimeValueInRange(timeFunc, s) || !isTimeValueInRange(timeFunc, e))
+      return '';
     // Overnight range (start > end) crosses the day boundary, e.g. 21-6.
     // A within-day range (start <= end), e.g. 9-12, must use && so the
     // condition is not a tautology that always applies the multiplier.
@@ -286,9 +324,10 @@ function buildRequestConditionExpr(cond) {
   const path = normalized.path.trim();
   if (!path) return '';
 
-  const sourceExpr = normalized.source === SOURCE_HEADER
-    ? `header(${JSON.stringify(path)})`
-    : `param(${JSON.stringify(path)})`;
+  const sourceExpr =
+    normalized.source === SOURCE_HEADER
+      ? `header(${JSON.stringify(path)})`
+      : `param(${JSON.stringify(path)})`;
 
   switch (normalized.mode) {
     case MATCH_EXISTS:
@@ -299,9 +338,18 @@ function buildRequestConditionExpr(cond) {
       return normalized.source === SOURCE_HEADER
         ? `has(${sourceExpr}, ${buildExprLiteral(normalized.mode, normalized.value)})`
         : `${sourceExpr} != nil && has(${sourceExpr}, ${buildExprLiteral(normalized.mode, normalized.value)})`;
-    case MATCH_GT: case MATCH_GTE: case MATCH_LT: case MATCH_LTE: {
-      const opMap = { [MATCH_GT]: '>', [MATCH_GTE]: '>=', [MATCH_LT]: '<', [MATCH_LTE]: '<=' };
-      if (!NUMERIC_LITERAL_REGEX.test(String(normalized.value).trim())) return '';
+    case MATCH_GT:
+    case MATCH_GTE:
+    case MATCH_LT:
+    case MATCH_LTE: {
+      const opMap = {
+        [MATCH_GT]: '>',
+        [MATCH_GTE]: '>=',
+        [MATCH_LT]: '<',
+        [MATCH_LTE]: '<=',
+      };
+      if (!NUMERIC_LITERAL_REGEX.test(String(normalized.value).trim()))
+        return '';
       return `${sourceExpr} != nil && ${sourceExpr} ${opMap[normalized.mode]} ${String(normalized.value).trim()}`;
     }
     case MATCH_EQ:
@@ -322,9 +370,10 @@ function buildRuleGroupFactor(group) {
     .filter(Boolean);
   if (condExprs.length === 0) return '';
 
-  const combined = condExprs.length === 1
-    ? condExprs[0]
-    : condExprs.map((e) => (e.includes(' || ') ? `(${e})` : e)).join(' && ');
+  const combined =
+    condExprs.length === 1
+      ? condExprs[0]
+      : condExprs.map((e) => (e.includes(' || ') ? `(${e})` : e)).join(' && ');
   return `(${combined} ? ${multiplier} : 1)`;
 }
 
@@ -339,12 +388,12 @@ export function buildRequestRuleExpr(groups) {
 function tryParseTimeCondition(expr) {
   // Only accept ranges whose operator matches the visual range semantics.
   let m = expr.match(
-    /^(hour|minute|weekday|month|day)\("([^"]+)"\) >= ([\d.eE+-]+) (&&|\|\|) \1\("\2"\) < ([\d.eE+-]+)$/,
+    /^(hour|minute|weekday|month|day|cn_offday|cn_workday|cn_holiday)\("([^"]+)"\) >= ([\d.eE+-]+) (&&|\|\|) \1\("\2"\) < ([\d.eE+-]+)$/,
   );
   if (!m) {
     // Wrapped range: (hour("tz") >= s && hour("tz") < e)
     m = expr.match(
-      /^\((hour|minute|weekday|month|day)\("([^"]+)"\) >= ([\d.eE+-]+) (&&|\|\|) \1\("\2"\) < ([\d.eE+-]+)\)$/,
+      /^\((hour|minute|weekday|month|day|cn_offday|cn_workday|cn_holiday)\("([^"]+)"\) >= ([\d.eE+-]+) (&&|\|\|) \1\("\2"\) < ([\d.eE+-]+)\)$/,
     );
   }
   if (m) {
@@ -353,27 +402,38 @@ function tryParseTimeCondition(expr) {
     // dropped when the visual editor rebuilds the expression.
     if (
       m[2].includes('\\') ||
-      !isTimeValueInRange(m[1], m[3]) || !isTimeValueInRange(m[1], m[5]) ||
+      !isTimeValueInRange(m[1], m[3]) ||
+      !isTimeValueInRange(m[1], m[5]) ||
       m[4] !== (Number(m[3]) > Number(m[5]) ? '||' : '&&')
     ) {
       // Never reinterpret legacy OR day ranges or AND overnight ranges.
       return null;
     }
     return {
-      source: SOURCE_TIME, timeFunc: m[1], timezone: m[2],
-      mode: MATCH_RANGE, value: '', rangeStart: m[3], rangeEnd: m[5],
+      source: SOURCE_TIME,
+      timeFunc: m[1],
+      timezone: m[2],
+      mode: MATCH_RANGE,
+      value: '',
+      rangeStart: m[3],
+      rangeEnd: m[5],
     };
   }
   // Simple: hour("tz") op value
   m = expr.match(
-    /^(hour|minute|weekday|month|day)\("([^"]+)"\) (==|>=|<) ([\d.eE+-]+)$/,
+    /^(hour|minute|weekday|month|day|cn_offday|cn_workday|cn_holiday)\("([^"]+)"\) (==|>=|<) ([\d.eE+-]+)$/,
   );
   if (m) {
     if (m[2].includes('\\') || !isTimeValueInRange(m[1], m[4])) return null;
     const opMap = { '==': MATCH_EQ, '>=': MATCH_GTE, '<': MATCH_LT };
     return {
-      source: SOURCE_TIME, timeFunc: m[1], timezone: m[2],
-      mode: opMap[m[3]] || MATCH_EQ, value: m[4], rangeStart: '', rangeEnd: '',
+      source: SOURCE_TIME,
+      timeFunc: m[1],
+      timezone: m[2],
+      mode: opMap[m[3]] || MATCH_EQ,
+      value: m[4],
+      rangeStart: '',
+      rangeEnd: '',
     };
   }
   return null;
@@ -384,20 +444,43 @@ function tryParseRequestCondition(expr) {
   if (tc) return tc;
 
   let m = expr.match(/^header\("([^"]+)"\) != ""$/);
-  if (m) return { source: SOURCE_HEADER, path: m[1], mode: MATCH_EXISTS, value: '' };
+  if (m)
+    return { source: SOURCE_HEADER, path: m[1], mode: MATCH_EXISTS, value: '' };
 
   m = expr.match(/^param\("([^"]+)"\) != nil$/);
-  if (m) return { source: SOURCE_PARAM, path: m[1], mode: MATCH_EXISTS, value: '' };
+  if (m)
+    return { source: SOURCE_PARAM, path: m[1], mode: MATCH_EXISTS, value: '' };
 
   m = expr.match(/^has\(header\("([^"]+)"\), ((?:"(?:[^"\\]|\\.)*"))\)$/);
-  if (m) return { source: SOURCE_HEADER, path: m[1], mode: MATCH_CONTAINS, value: JSON.parse(m[2]) };
+  if (m)
+    return {
+      source: SOURCE_HEADER,
+      path: m[1],
+      mode: MATCH_CONTAINS,
+      value: JSON.parse(m[2]),
+    };
 
-  m = expr.match(/^param\("([^"]+)"\) != nil && has\(param\("([^"]+)"\), ((?:"(?:[^"\\]|\\.)*"))\)$/);
-  if (m && m[1] === m[2]) return { source: SOURCE_PARAM, path: m[1], mode: MATCH_CONTAINS, value: JSON.parse(m[3]) };
+  m = expr.match(
+    /^param\("([^"]+)"\) != nil && has\(param\("([^"]+)"\), ((?:"(?:[^"\\]|\\.)*"))\)$/,
+  );
+  if (m && m[1] === m[2])
+    return {
+      source: SOURCE_PARAM,
+      path: m[1],
+      mode: MATCH_CONTAINS,
+      value: JSON.parse(m[3]),
+    };
 
-  m = expr.match(/^param\("([^"]+)"\) != nil && param\("([^"]+)"\) (>|>=|<|<=) ([\d.eE+-]+)$/);
+  m = expr.match(
+    /^param\("([^"]+)"\) != nil && param\("([^"]+)"\) (>|>=|<|<=) ([\d.eE+-]+)$/,
+  );
   if (m && m[1] === m[2]) {
-    const opMap = { '>': MATCH_GT, '>=': MATCH_GTE, '<': MATCH_LT, '<=': MATCH_LTE };
+    const opMap = {
+      '>': MATCH_GT,
+      '>=': MATCH_GTE,
+      '<': MATCH_LT,
+      '<=': MATCH_LTE,
+    };
     return { source: SOURCE_PARAM, path: m[1], mode: opMap[m[3]], value: m[4] };
   }
 
@@ -405,7 +488,12 @@ function tryParseRequestCondition(expr) {
   if (m) {
     const parsedValue = parseExprLiteral(m[3]);
     if (parsedValue === null) return null;
-    return { source: m[1], path: m[2], mode: MATCH_EQ, value: String(parsedValue) };
+    return {
+      source: m[1],
+      path: m[2],
+      mode: MATCH_EQ,
+      value: String(parsedValue),
+    };
   }
 
   return null;
@@ -418,14 +506,20 @@ function tryParseRequestCondition(expr) {
 function tryParseTimeRangePair(lower, upper) {
   const a = tryParseTimeCondition(lower);
   const b = tryParseTimeCondition(upper);
-  if (!a || !b || a.source !== SOURCE_TIME || b.source !== SOURCE_TIME) return null;
+  if (!a || !b || a.source !== SOURCE_TIME || b.source !== SOURCE_TIME)
+    return null;
   if (a.timeFunc !== b.timeFunc || a.timezone !== b.timezone) return null;
   if (a.mode !== MATCH_GTE || b.mode !== MATCH_LT) return null;
   // These bounds were joined by AND, so only a within-day range is equivalent.
   if (Number(a.value) > Number(b.value)) return null;
   return {
-    source: SOURCE_TIME, timeFunc: a.timeFunc, timezone: a.timezone,
-    mode: MATCH_RANGE, value: '', rangeStart: a.value, rangeEnd: b.value,
+    source: SOURCE_TIME,
+    timeFunc: a.timeFunc,
+    timezone: a.timezone,
+    mode: MATCH_RANGE,
+    value: '',
+    rangeStart: a.value,
+    rangeEnd: b.value,
   };
 }
 
@@ -522,7 +616,10 @@ export function splitBillingExprAndRequestRules(expr) {
   const baseParts = [];
 
   parts.forEach((part) => {
-    if (tryParseRequestRuleExpr(part) !== null && tryParseRequestRuleExpr(part).length > 0) {
+    if (
+      tryParseRequestRuleExpr(part) !== null &&
+      tryParseRequestRuleExpr(part).length > 0
+    ) {
       ruleParts.push(part);
     } else {
       baseParts.push(part);

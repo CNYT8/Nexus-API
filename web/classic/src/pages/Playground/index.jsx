@@ -289,20 +289,17 @@ const Playground = () => {
       );
       sendRequest(payload, inputs.stream);
 
-      // 发送后清空已附加的图片，避免下一轮对话重复带上上一轮的图片；
-      // 不再关闭 imageEnabled（该开关已不可达）。
-      if (validImageUrls.length > 0) {
-        setTimeout(() => {
-          handleInputChange('imageUrls', []);
-        }, 100);
-      }
-
       // 发送消息后保存，传入新消息列表（包含用户消息和加载消息）
       const messagesWithLoading = [...newMessages, loadingMessage];
       setTimeout(() => saveMessagesImmediately(messagesWithLoading), 0);
 
       return messagesWithLoading;
     });
+
+    // 发送后立即清空输入框中已附加的图片缩略图，避免下一轮对话重复携带
+    if (validImageUrls.length > 0) {
+      handleInputChange('imageUrls', []);
+    }
   }
 
   // 切换推理展开状态

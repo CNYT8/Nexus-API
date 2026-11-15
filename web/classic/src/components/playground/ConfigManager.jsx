@@ -22,6 +22,7 @@ import { Button, Typography, Toast, Modal, Dropdown } from '@douyinfe/semi-ui';
 import { Download, Upload, RotateCcw, Settings2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
+  saveConfig,
   exportConfig,
   importConfig,
   clearConfig,
@@ -42,14 +43,7 @@ const ConfigManager = ({
   const handleExport = () => {
     try {
       // 在导出前先保存当前配置，确保导出的是最新内容
-      const configWithTimestamp = {
-        ...currentConfig,
-        timestamp: new Date().toISOString(),
-      };
-      localStorage.setItem(
-        'playground_config',
-        JSON.stringify(configWithTimestamp),
-      );
+      saveConfig(currentConfig);
 
       exportConfig(currentConfig, messages);
       Toast.success({

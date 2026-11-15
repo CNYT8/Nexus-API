@@ -64,7 +64,7 @@ func checkRedisLimit(userId int, notifyType string) (bool, error) {
 		return false, fmt.Errorf("invalid notification limit configuration")
 	}
 
-	key := fmt.Sprintf("notify_limit:%d:%s:%s", userId, notifyType, time.Now().Format("2006010215"))
+	key := fmt.Sprintf("notify_limit:%d:%s", userId, notifyType)
 	const script = `
 local current = tonumber(redis.call('GET', KEYS[1]) or '0')
 local limit = tonumber(ARGV[1])
@@ -104,7 +104,7 @@ func checkMemoryLimit(userId int, notifyType string) (bool, error) {
 	notifyLimitMutex.Lock()
 	defer notifyLimitMutex.Unlock()
 
-	key := fmt.Sprintf("%d:%s:%s", userId, notifyType, time.Now().Format("2006010215"))
+	key := fmt.Sprintf("%d:%s", userId, notifyType)
 	now := time.Now()
 
 	// Get current limit count or initialize new one

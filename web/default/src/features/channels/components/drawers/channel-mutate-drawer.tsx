@@ -1591,6 +1591,31 @@ export function ChannelMutateDrawer({
                             </FormItem>
                           )}
                         />
+                        {form.watch('vertex_key_type') === 'api_key' && (
+                          <FormField
+                            control={form.control}
+                            name='vertex_project_id'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Vertex AI Project ID')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    placeholder={t('e.g., my-project-123')}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'Optional. Without it, Google picks the region; with it, requests go to the deployment region below.'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        )}
                         {form.watch('vertex_key_type') === 'json' && (
                           <FormItem>
                             <FormLabel>
@@ -1850,7 +1875,8 @@ export function ChannelMutateDrawer({
                                 </FormLabel>
                                 <div className='flex flex-wrap gap-2'>
                                   <Badge variant='secondary'>
-                                    {t('Routes')}: {advancedCustomStats.routeCount}
+                                    {t('Routes')}:{' '}
+                                    {advancedCustomStats.routeCount}
                                   </Badge>
                                   {advancedCustomRouteTypeLabels.map(
                                     (label) => (
@@ -2257,8 +2283,7 @@ export function ChannelMutateDrawer({
                         />
                       )}
 
-                      {((!isEditing &&
-                        multiKeyMode === 'multi_to_single') ||
+                      {((!isEditing && multiKeyMode === 'multi_to_single') ||
                         (isEditing &&
                           (convertToMultiKey || isMultiKeyChannel))) && (
                         <FormField
@@ -3338,9 +3363,13 @@ export function ChannelMutateDrawer({
                           render={({ field }) => (
                             <FormItem className='flex items-center justify-between px-4 py-3'>
                               <div className='space-y-0.5'>
-                                <FormLabel>{t('Thinking Process Strip')}</FormLabel>
+                                <FormLabel>
+                                  {t('Thinking Process Strip')}
+                                </FormLabel>
                                 <FormDescription>
-                                  {t('Keep upstream reasoning and usage, show only final content downstream')}
+                                  {t(
+                                    'Keep upstream reasoning and usage, show only final content downstream'
+                                  )}
                                 </FormDescription>
                               </div>
                               <FormControl>
@@ -3365,7 +3394,10 @@ export function ChannelMutateDrawer({
                                 </FormDescription>
                               </div>
                               <FormControl>
-                                <Switch checked={field.value} onCheckedChange={field.onChange} />
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={field.onChange}
+                                />
                               </FormControl>
                             </FormItem>
                           )}

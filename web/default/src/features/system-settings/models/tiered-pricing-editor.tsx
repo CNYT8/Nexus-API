@@ -149,7 +149,11 @@ const PRESET_GROUPS: PresetGroup[] = [
   {
     group: 'Per-call',
     presets: [
-      { key: 'percall-flat', label: 'Per-call $5', expr: 'tier("base", call(5))' },
+      {
+        key: 'percall-flat',
+        label: 'Per-call $5',
+        expr: 'tier("base", call(5))',
+      },
       {
         key: 'percall-tiered',
         label: 'Tiered per-call',
@@ -320,6 +324,73 @@ const PRESET_GROUPS: PresetGroup[] = [
               },
             ],
             multiplier: '0.8',
+          },
+        ],
+      },
+      {
+        key: 'deepseek-offpeak',
+        label: 'Off-peak 50% (w/ CN holidays)',
+        expr: 'tier("base", p * 0.27 + c * 1.1 + cr * 0.07)',
+        requestRules: [
+          {
+            conditions: [
+              {
+                source: SOURCE_TIME as 'time',
+                timeFunc: 'cn_offday',
+                timezone: 'Asia/Shanghai',
+                mode: MATCH_EQ,
+                value: '1',
+                rangeStart: '',
+                rangeEnd: '',
+              },
+            ],
+            multiplier: '0.5',
+          },
+          {
+            conditions: [
+              {
+                source: SOURCE_TIME as 'time',
+                timeFunc: 'cn_workday',
+                timezone: 'Asia/Shanghai',
+                mode: MATCH_EQ,
+                value: '1',
+                rangeStart: '',
+                rangeEnd: '',
+              },
+              {
+                source: SOURCE_TIME as 'time',
+                timeFunc: 'hour',
+                timezone: 'Asia/Shanghai',
+                mode: MATCH_RANGE,
+                value: '',
+                rangeStart: '12',
+                rangeEnd: '14',
+              },
+            ],
+            multiplier: '0.5',
+          },
+          {
+            conditions: [
+              {
+                source: SOURCE_TIME as 'time',
+                timeFunc: 'cn_workday',
+                timezone: 'Asia/Shanghai',
+                mode: MATCH_EQ,
+                value: '1',
+                rangeStart: '',
+                rangeEnd: '',
+              },
+              {
+                source: SOURCE_TIME as 'time',
+                timeFunc: 'hour',
+                timezone: 'Asia/Shanghai',
+                mode: MATCH_RANGE,
+                value: '',
+                rangeStart: '18',
+                rangeEnd: '9',
+              },
+            ],
+            multiplier: '0.5',
           },
         ],
       },
@@ -753,7 +824,10 @@ function VisualTierCard({
             </div>
             <div className='flex flex-wrap gap-x-4 gap-y-2'>
               {CACHE_PRICE_VARS.map((variable) => {
-                if (variable.key === 'cc1h' && cacheMode !== CACHE_MODE_TIMED) {
+                if (
+                  (variable.key === 'cc1h' || variable.key === 'cc12h') &&
+                  cacheMode !== CACHE_MODE_TIMED
+                ) {
                   return null
                 }
                 return renderPriceVariable(variable)
@@ -919,13 +993,15 @@ function RawExprEditor({ exprString, onChange }: RawExprEditorProps) {
             <code>ao</code>
           </div>
           <div>
-            {t('Functions')}:{' '}
-            <code>tier(name, value)</code>,{' '}
-            <code>call(x)</code> ({t('Per-call fixed fee')}),{' '}
-            <code>max</code>,{' '}
+            {t('Functions')}: <code>tier(name, value)</code>,{' '}
+            <code>call(x)</code> ({t('Per-call fixed fee')}), <code>max</code>,{' '}
             <code>min</code>, <code>ceil</code>, <code>floor</code>,{' '}
             <code>abs</code>, <code>header(name)</code>,{' '}
-            <code>param(path)</code>, <code>has(source, text)</code>
+            <code>param(path)</code>, <code>has(source, text)</code>,{' '}
+            <code>hour(tz)</code>, <code>minute(tz)</code>,{' '}
+            <code>weekday(tz)</code>, <code>month(tz)</code>,{' '}
+            <code>day(tz)</code>, <code>cn_offday(tz)</code>,{' '}
+            <code>cn_workday(tz)</code>, <code>cn_holiday(tz)</code>
           </div>
         </AlertDescription>
       </Alert>
@@ -992,8 +1068,26 @@ function RuleConditionRow({
         return t('Month number')
       case 'day':
         return t('Day of month')
+      case 'cn_offday':
+        return t('CN weekend/holiday')
+      case 'cn_workday':
+        return t('CN workday')
+      case 'cn_holiday':
+        return t('CN statutory holiday')
       default:
         return timeFunc
+    }
+  }
+  const getTimeFuncHint = (timeFunc: string): string => {
+    switch (timeFunc) {
+      case 'cn_offday':
+        return t('1 = Yes (weekend or CN statutory holiday), 0 = No')
+      case 'cn_workday':
+        return t('1 = Yes (Mon–Fri excluding CN statutory holidays), 0 = No')
+      case 'cn_holiday':
+        return t('1 = Yes (CN statutory holiday), 0 = No')
+      default:
+        return ''
     }
   }
   const sourceLabel =
@@ -1028,11 +1122,30 @@ function RuleConditionRow({
           })),
         ]}
         value={timeCond.timeFunc}
-        onValueChange={(value) =>
-          onChange({ ...timeCond, timeFunc: value as TimeFunc })
-        }
+        onValueChange={(value) => {
+          const nextFunc = value as TimeFunc
+          const isBinaryFlag =
+            nextFunc === 'cn_offday' ||
+            nextFunc === 'cn_workday' ||
+            nextFunc === 'cn_holiday'
+          if (isBinaryFlag) {
+            onChange({
+              ...timeCond,
+              timeFunc: nextFunc,
+              mode: MATCH_EQ,
+              value:
+                timeCond.value === '0' || timeCond.value === '1'
+                  ? timeCond.value
+                  : '1',
+              rangeStart: '',
+              rangeEnd: '',
+            })
+          } else {
+            onChange({ ...timeCond, timeFunc: nextFunc })
+          }
+        }}
       >
-        <SelectTrigger className='w-32' size='sm'>
+        <SelectTrigger className='w-44' size='sm'>
           <SelectValue>{getTimeFuncLabel(timeCond.timeFunc)}</SelectValue>
         </SelectTrigger>
         <SelectContent alignItemWithTrigger={false}>
@@ -1214,6 +1327,13 @@ function RuleConditionRow({
           {t('Start ≤ end: within the day; start > end: across midnight')}
         </p>
       )}
+      {condition.source === SOURCE_TIME &&
+        condition.mode !== MATCH_RANGE &&
+        getTimeFuncHint((condition as TimeCondition).timeFunc) && (
+          <p className='text-muted-foreground w-full text-xs'>
+            {getTimeFuncHint((condition as TimeCondition).timeFunc)}
+          </p>
+        )}
     </div>
   )
 }
@@ -1376,7 +1496,7 @@ function PresetSection({ applyPreset }: PresetSectionProps) {
                 className='h-7 text-xs'
                 onClick={() => applyPreset(preset)}
               >
-                {preset.label}
+                {t(preset.label)}
               </Button>
             ))}
           </div>
@@ -1402,6 +1522,7 @@ function CostEstimator({ effectiveExpr }: EstimatorProps) {
     cacheReadTokens: 0,
     cacheCreateTokens: 0,
     cacheCreate1hTokens: 0,
+    cacheCreate12hTokens: 0,
     imageTokens: 0,
     imageOutputTokens: 0,
     audioInputTokens: 0,
@@ -1546,7 +1667,10 @@ Important: len is NOT affected by auto-exclusion. Tier conditions should use len
 - header(name) — reads a request header
 - param(path) — reads a request body JSON path (gjson syntax)
 - has(source, substr) — substring check
-- hour(tz), minute(tz), weekday(tz), month(tz), day(tz) — time functions, tz is a timezone like "Asia/Shanghai"
+- hour(tz), minute(tz), weekday(tz), month(tz), day(tz) — time functions, tz is a timezone like "Asia/Shanghai" (hour: 0-23, minute: 0-59, weekday: 0=Sunday..6=Saturday, month: 1-12, day: 1-31)
+- cn_offday(tz) — Chinese weekend or statutory holiday check (1=weekend or Chinese statutory holiday, 0=Chinese workday; tz is typically "Asia/Shanghai")
+- cn_workday(tz) — Chinese workday check, i.e. Monday–Friday excluding Chinese statutory holidays (1=workday, 0=weekend or statutory holiday)
+- cn_holiday(tz) — Chinese statutory holiday check (1=Chinese statutory holiday, 0=non-holiday)
 
 ### Price Coefficients
 
@@ -1582,6 +1706,9 @@ len <= 128000
     ? tier("medium", p * 2.2 + c * 8.8)
     : tier("long", p * 4.4 + c * 17.6))
 
+DeepSeek off-peak pricing (Beijing time Mon–Fri excluding Chinese statutory holidays 9:00-12:00 and 14:00-18:00 at peak price; weekends, Chinese statutory holidays all day, and remaining workday hours at 50% price):
+(tier("base", p * 0.27 + c * 1.1 + cr * 0.07)) * (cn_offday("Asia/Shanghai") == 1 ? 0.5 : 1) * (cn_workday("Asia/Shanghai") == 1 && hour("Asia/Shanghai") >= 12 && hour("Asia/Shanghai") < 14 ? 0.5 : 1) * (cn_workday("Asia/Shanghai") == 1 && (hour("Asia/Shanghai") >= 18 || hour("Asia/Shanghai") < 9) ? 0.5 : 1)
+
 ## Rules
 
 1. Every leaf branch must be wrapped in tier("name", cost_expr)
@@ -1591,6 +1718,7 @@ len <= 128000
 5. Price coefficients are the provider's official $/1M tokens prices
 6. If cache/image/audio don't need separate pricing, omit those variables; their tokens are included in p/c automatically
 7. For per-call models use call(x) where x is the price in dollars per request; it can be combined with token prices (fixed fee + usage)
+8. Write time/request condition multipliers outside the main tier expression as: (tier(...)) * (cond ? mult : 1) so the visual editor and model marketplace can parse and display them; use cn_offday("Asia/Shanghai") == 1 and cn_workday("Asia/Shanghai") == 1 for Chinese statutory holiday / weekend pricing
 
 Please generate a billing expression based on the model information and pricing requirements provided.`
 
@@ -1734,10 +1862,13 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
 
   // Loading or switching modes must not rewrite stored prices/rules.
   // Publish only explicit edits, never regenerated initialization state.
-  const handleVisualChange = useCallback((next: VisualConfig) => {
-    setVisualConfig(next)
-    onBillingExprChange(generateExprFromVisualConfig(next))
-  }, [onBillingExprChange])
+  const handleVisualChange = useCallback(
+    (next: VisualConfig) => {
+      setVisualConfig(next)
+      onBillingExprChange(generateExprFromVisualConfig(next))
+    },
+    [onBillingExprChange]
+  )
 
   const handleRawChange = useCallback(
     (value: string) => {
@@ -1758,7 +1889,11 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
         const parsed = tryParseVisualConfig(billingExpr)
         const parsedGroups = tryParseRequestRuleExpr(ruleStr)
         if ((!parsed && billingExpr) || !parsedGroups) {
-          toast.warning(t('This expression is too complex for the visual editor. Please switch to expression mode to edit.'))
+          toast.warning(
+            t(
+              'This expression is too complex for the visual editor. Please switch to expression mode to edit.'
+            )
+          )
           return
         }
         setVisualConfig(parsed || createDefaultVisualConfig())
@@ -1771,7 +1906,14 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
       }
       setEditorMode(next)
     },
-    [rawExpr, currentExpr, currentRequestRuleExpr, onBillingExprChange, onRequestRuleExprChange, t]
+    [
+      rawExpr,
+      currentExpr,
+      currentRequestRuleExpr,
+      onBillingExprChange,
+      onRequestRuleExprChange,
+      t,
+    ]
   )
 
   const applyPreset = useCallback(
@@ -1795,10 +1937,13 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
     [onBillingExprChange, onRequestRuleExprChange]
   )
 
-  const handleRuleGroupsChange = useCallback((next: RequestRuleGroup[]) => {
-    setRequestRuleGroups(next)
-    onRequestRuleExprChange(buildRequestRuleExpr(next))
-  }, [onRequestRuleExprChange])
+  const handleRuleGroupsChange = useCallback(
+    (next: RequestRuleGroup[]) => {
+      setRequestRuleGroups(next)
+      onRequestRuleExprChange(buildRequestRuleExpr(next))
+    },
+    [onRequestRuleExprChange]
+  )
 
   return (
     <div className='space-y-4'>

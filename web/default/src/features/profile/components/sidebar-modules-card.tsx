@@ -21,8 +21,8 @@ import { LayoutDashboard } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
-import { useStatus } from '@/hooks/use-status'
 import { api } from '@/lib/api'
+import { useStatus } from '@/hooks/use-status'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -32,6 +32,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
+import { parseSidebarModulesAdmin } from '@/features/system-settings/maintenance/config'
 
 type SidebarModuleConfig = {
   enabled: boolean
@@ -141,6 +142,21 @@ export function SidebarModulesCard() {
     },
   ]
 
+  const adminConfig = parseSidebarModulesAdmin(
+    status?.SidebarModulesAdmin as string | null | undefined
+  )
+  const visibleSectionDefs = status
+    ? sectionDefs.flatMap((section) => {
+        const adminSection = adminConfig[section.key]
+        if (!adminSection?.enabled) return []
+
+        const modules = section.modules.filter(
+          (module) => adminSection[module.key] === true
+        )
+        return modules.length ? [{ ...section, modules }] : []
+      })
+    : []
+
   const loadConfig = useCallback(async () => {
     try {
       const res = await api.get('/api/user/self')
@@ -149,12 +165,7 @@ export function SidebarModulesCard() {
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
         setConfig(parsed)
       } else {
-        const defaults: SidebarModulesConfig = {}
-        for (const sec of sectionDefs) {
-          defaults[sec.key] = { enabled: true }
-          for (const mod of sec.modules) defaults[sec.key][mod.key] = true
-        }
-        setConfig(defaults)
+        setConfig({})
       }
     } catch {
       /* ignore */
@@ -210,13 +221,15 @@ export function SidebarModulesCard() {
 
   const handleReset = () => {
     const defaults: SidebarModulesConfig = {}
-    for (const sec of sectionDefs) {
+    for (const sec of visibleSectionDefs) {
       defaults[sec.key] = { enabled: true }
       for (const mod of sec.modules) defaults[sec.key][mod.key] = true
     }
     setConfig(defaults)
     toast.success(t('Reset to default configuration'))
   }
+
+  if (!status) return null
 
   return (
     <Card className='gap-0 overflow-hidden py-0'>
@@ -236,7 +249,7 @@ export function SidebarModulesCard() {
         </div>
       </CardHeader>
       <CardContent className='space-y-4 p-3 sm:space-y-5 sm:p-5'>
-        {sectionDefs.map((section) => {
+        {visibleSectionDefs.map((section) => {
           const sectionEnabled = config[section.key]?.enabled !== false
           return (
             <div

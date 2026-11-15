@@ -13,7 +13,7 @@ import (
 )
 
 var StartTime = time.Now().Unix() // unit: second
-var Version = "v1.1.4-rc.2"            // this hard coding will be replaced automatically when building, no need to manually change
+var Version = "v1.1.4-rc.3"       // this hard coding will be replaced automatically when building, no need to manually change
 var SystemName = "New API"
 var Footer = ""
 var Logo = ""
@@ -201,6 +201,13 @@ var RelayIdleConnTimeout int // unit is second
 var RelayResponseHeaderTimeout int // unit is second
 var RelayMaxIdleConns int
 var RelayMaxIdleConnsPerHost int
+
+// RelayHTTP2PingIdleTimeout is the number of seconds an upstream HTTP/2
+// connection may go without any incoming frame before a PING probe is sent;
+// 0 disables probing. RelayHTTP2PingTimeout is how many seconds to wait for
+// the PING acknowledgement before the connection is closed.
+var RelayHTTP2PingIdleTimeout int
+var RelayHTTP2PingTimeout int
 
 var GeminiSafetySetting string
 

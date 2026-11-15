@@ -497,8 +497,9 @@ const EditChannelModal = (props) => {
     system_prompt: '',
     system_prompt_override: false,
     settings: '',
-    // 仅 Vertex: 密钥格式（存入 settings.vertex_key_type）
+    // 仅 Vertex: 密钥格式与项目 ID（存入 settings.vertex_key_type / settings.vertex_project_id）
     vertex_key_type: 'json',
+    vertex_project_id: '',
     // 仅 AWS: 密钥格式和区域（存入 settings.aws_key_type 和 settings.aws_region）
     aws_key_type: 'ak_sk',
     // 企业账户设置
@@ -1226,8 +1227,9 @@ const EditChannelModal = (props) => {
           const parsedSettings = JSON.parse(data.settings);
           data.azure_responses_version =
             parsedSettings.azure_responses_version || '';
-          // 读取 Vertex 密钥格式
+          // 读取 Vertex 密钥格式与项目 ID
           data.vertex_key_type = parsedSettings.vertex_key_type || 'json';
+          data.vertex_project_id = parsedSettings.vertex_project_id || '';
           // 读取 AWS 密钥格式和区域
           data.aws_key_type = parsedSettings.aws_key_type || 'ak_sk';
           // 读取企业账户设置
@@ -1270,6 +1272,7 @@ const EditChannelModal = (props) => {
       } else {
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
         data.vertex_key_type = 'json';
+        data.vertex_project_id = '';
         data.aws_key_type = 'ak_sk';
         data.is_enterprise_account = false;
         data.allow_service_tier = false;
@@ -2196,9 +2199,17 @@ const EditChannelModal = (props) => {
 
     // type === 41 (Vertex): 始终保存 vertex_key_type 到 settings，避免编辑时被重置
     if (localInputs.type === 41) {
-      settings.vertex_key_type = localInputs.vertex_key_type || 'json';
-    } else if ('vertex_key_type' in settings) {
+      const vertexKeyType = localInputs.vertex_key_type || 'json';
+      const vertexProjectId = (localInputs.vertex_project_id || '').trim();
+      settings.vertex_key_type = vertexKeyType;
+      if (vertexKeyType === 'api_key' && vertexProjectId) {
+        settings.vertex_project_id = vertexProjectId;
+      } else {
+        delete settings.vertex_project_id;
+      }
+    } else {
       delete settings.vertex_key_type;
+      delete settings.vertex_project_id;
     }
 
     // type === 1 (OpenAI)、type === 14 (Claude) 或 type === 57 (Codex): 设置字段透传控制（显式保存布尔值）
@@ -2262,8 +2273,9 @@ const EditChannelModal = (props) => {
     delete localInputs.system_prompt;
     delete localInputs.system_prompt_override;
     delete localInputs.is_enterprise_account;
-    // 顶层的 vertex_key_type 不应发送给后端
+    // 顶层的 vertex_key_type / vertex_project_id 不应发送给后端
     delete localInputs.vertex_key_type;
+    delete localInputs.vertex_project_id;
     // 顶层的 aws_key_type 不应发送给后端
     delete localInputs.aws_key_type;
     // 清理字段透传控制的临时字段
@@ -3170,39 +3182,58 @@ const EditChannelModal = (props) => {
                     )}
 
                     {inputs.type === 41 && (
-                      <Form.Select
-                        field='vertex_key_type'
-                        label={t('密钥格式')}
-                        placeholder={t('请选择密钥格式')}
-                        optionList={[
-                          { label: 'JSON', value: 'json' },
-                          { label: 'API Key', value: 'api_key' },
-                        ]}
-                        style={{ width: '100%' }}
-                        value={inputs.vertex_key_type || 'json'}
-                        onChange={(value) => {
-                          // 更新设置中的 vertex_key_type
-                          handleChannelOtherSettingsChange(
-                            'vertex_key_type',
-                            value,
-                          );
-                          // 切换为 api_key 时，关闭批量与手动/文件切换，并清理已选文件
-                          if (value === 'api_key') {
-                            setBatch(false);
-                            setUseManualInput(false);
-                            setVertexKeys([]);
-                            setVertexFileList([]);
-                            if (formApiRef.current) {
-                              formApiRef.current.setValue('vertex_files', []);
+                      <>
+                        <Form.Select
+                          field='vertex_key_type'
+                          label={t('密钥格式')}
+                          placeholder={t('请选择密钥格式')}
+                          optionList={[
+                            { label: 'JSON', value: 'json' },
+                            { label: 'API Key', value: 'api_key' },
+                          ]}
+                          style={{ width: '100%' }}
+                          value={inputs.vertex_key_type || 'json'}
+                          onChange={(value) => {
+                            // 更新设置中的 vertex_key_type
+                            handleChannelOtherSettingsChange(
+                              'vertex_key_type',
+                              value,
+                            );
+                            // 切换为 api_key 时，关闭批量与手动/文件切换，并清理已选文件
+                            if (value === 'api_key') {
+                              setBatch(false);
+                              setUseManualInput(false);
+                              setVertexKeys([]);
+                              setVertexFileList([]);
+                              if (formApiRef.current) {
+                                formApiRef.current.setValue('vertex_files', []);
+                              }
                             }
+                          }}
+                          extraText={
+                            inputs.vertex_key_type === 'api_key'
+                              ? t('API Key 模式下不支持批量创建')
+                              : t('JSON 模式支持手动输入或上传服务账号 JSON')
                           }
-                        }}
-                        extraText={
-                          inputs.vertex_key_type === 'api_key'
-                            ? t('API Key 模式下不支持批量创建')
-                            : t('JSON 模式支持手动输入或上传服务账号 JSON')
-                        }
-                      />
+                        />
+                        {inputs.vertex_key_type === 'api_key' && (
+                          <Form.Input
+                            field='vertex_project_id'
+                            label={t('Vertex AI 项目 ID')}
+                            placeholder={t('例如：my-project-123')}
+                            onChange={(value) =>
+                              handleChannelOtherSettingsChange(
+                                'vertex_project_id',
+                                value,
+                              )
+                            }
+                            extraText={t(
+                              '可选。留空时由 Google 自动选择区域；填写后请求将发往下方配置的部署区域。',
+                            )}
+                            showClear
+                          />
+                        )}
+                      </>
                     )}
                     {isEdit && !isMultiKeyChannel && (
                       <div className='mb-4 flex flex-col gap-1'>

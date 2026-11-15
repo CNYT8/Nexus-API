@@ -107,7 +107,7 @@ func usageIndependentValue(node ast.Node) bool {
 			return false
 		}
 		switch id.Value {
-		case "call", "header", "param", "has", "hour", "minute", "weekday", "month", "day", "max", "min", "abs", "ceil", "floor":
+		case "call", "header", "param", "has", "hour", "minute", "weekday", "month", "day", "cn_offday", "cn_workday", "cn_holiday", "max", "min", "abs", "ceil", "floor":
 			for _, arg := range n.Arguments {
 				if !usageIndependentValue(arg) {
 					return false

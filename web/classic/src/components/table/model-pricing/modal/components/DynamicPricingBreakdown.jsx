@@ -20,7 +20,11 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Avatar, Tag, Table, Typography } from '@douyinfe/semi-ui';
 import { IconPriceTag } from '@douyinfe/semi-icons';
-import { parseTiersFromExpr, getCurrencyConfig, formatRatioDisplay } from '../../../../../helpers';
+import {
+  parseTiersFromExpr,
+  getCurrencyConfig,
+  formatRatioDisplay,
+} from '../../../../../helpers';
 import { BILLING_PRICING_VARS } from '../../../../../constants';
 import {
   splitBillingExprAndRequestRules,
@@ -38,12 +42,22 @@ const { Text } = Typography;
 
 const VAR_LABELS = { p: '输入', c: '输出', len: '输入长度' };
 const OP_LABELS = { '<': '<', '<=': '≤', '>': '>', '>=': '≥' };
-const TIME_FUNC_LABELS = { hour: '小时', minute: '分钟', weekday: '星期', month: '月份', day: '日期' };
+const TIME_FUNC_LABELS = {
+  hour: '小时',
+  minute: '分钟',
+  weekday: '星期',
+  month: '月份',
+  day: '日期',
+  cn_offday: '周末及法定节假日',
+  cn_workday: '中国工作日',
+  cn_holiday: '中国法定节假日',
+};
 
 function formatTokenHint(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n === 0) return '';
-  if (n >= 1000000) return `${(n / 1000000).toFixed(n % 1000000 === 0 ? 0 : 1)}M`;
+  if (n >= 1000000)
+    return `${(n / 1000000).toFixed(n % 1000000 === 0 ? 0 : 1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}K`;
   return String(n);
 }
@@ -52,9 +66,10 @@ function formatConditionSummary(conditions, t) {
   return conditions
     .map((c) => {
       if (c.var && c.op) {
-        const varLabel = c.var === 'len+c'
-          ? `${t('输入')} + ${t('输出')}`
-          : t(VAR_LABELS[c.var] || c.var);
+        const varLabel =
+          c.var === 'len+c'
+            ? `${t('输入')} + ${t('输出')}`
+            : t(VAR_LABELS[c.var] || c.var);
         const hint = formatTokenHint(c.value);
         return `${varLabel} ${OP_LABELS[c.op] || c.op} ${hint || c.value}`;
       }
@@ -77,7 +92,8 @@ function describeCondition(cond, t) {
   const src = cond.source === 'header' ? t('请求头') : t('请求参数');
   const path = cond.path || '';
   if (cond.mode === MATCH_EXISTS) return `${src} ${path} ${t('存在')}`;
-  if (cond.mode === MATCH_CONTAINS) return `${src} ${path} ${t('包含')} "${cond.value}"`;
+  if (cond.mode === MATCH_CONTAINS)
+    return `${src} ${path} ${t('包含')} "${cond.value}"`;
   const opMap = { eq: '=', gt: '>', gte: '≥', lt: '<', lte: '≤' };
   return `${src} ${path} ${opMap[cond.mode] || '='} ${cond.value}`;
 }
@@ -108,7 +124,9 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
           <Text className='text-lg font-medium'>{t('动态计费')}</Text>
         </div>
         <div className='text-sm text-gray-500'>
-          <code style={{ fontSize: 12, wordBreak: 'break-all' }}>{billingExpr}</code>
+          <code style={{ fontSize: 12, wordBreak: 'break-all' }}>
+            {billingExpr}
+          </code>
         </div>
       </div>
     );
@@ -123,9 +141,13 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
       dataIndex: 'label',
       render: (text, record) => (
         <div>
-          <Tag color='blue' size='small'>{text || t('默认')}</Tag>
+          <Tag color='blue' size='small'>
+            {text || t('默认')}
+          </Tag>
           {record.condSummary && (
-            <div className='text-xs text-gray-500 mt-1'>{record.condSummary}</div>
+            <div className='text-xs text-gray-500 mt-1'>
+              {record.condSummary}
+            </div>
           )}
         </div>
       ),
@@ -135,15 +157,27 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
       .map(([field, label]) => ({
         title: `${t(label)} (${symbol}/1M tokens)`,
         dataIndex: field,
-        render: (v) => v > 0 ? <Text strong>{`${symbol}${(v * rate).toFixed(4)}`}</Text> : '-',
+        render: (v) =>
+          v > 0 ? (
+            <Text strong>{`${symbol}${(v * rate).toFixed(4)}`}</Text>
+          ) : (
+            '-'
+          ),
       })),
     ...(hasPerCall
-        ? [{
+      ? [
+          {
             title: `${t('按次')} (${symbol}/次)`,
             dataIndex: 'per_call_cost',
-            render: (v) => v > 0 ? <Text strong>{`${symbol}${(v * rate).toFixed(4)}`}</Text> : '-',
-          }]
-        : []),
+            render: (v) =>
+              v > 0 ? (
+                <Text strong>{`${symbol}${(v * rate).toFixed(4)}`}</Text>
+              ) : (
+                '-'
+              ),
+          },
+        ]
+      : []),
   ];
 
   const tierData = hasTiers
@@ -152,7 +186,9 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
         label: tier.label,
         condSummary: formatConditionSummary(tier.conditions, t),
         per_call_cost: Number(tier.per_call_cost) || 0,
-        ...Object.fromEntries(priceFields.map(([field]) => [field, tier[field] || 0])),
+        ...Object.fromEntries(
+          priceFields.map(([field]) => [field, tier[field] || 0]),
+        ),
       }))
     : [];
 
@@ -172,7 +208,11 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
 
       {hasTiers && (
         <div style={{ marginBottom: 16 }}>
-          <Text strong className='text-sm' style={{ display: 'block', marginBottom: 8 }}>
+          <Text
+            strong
+            className='text-sm'
+            style={{ display: 'block', marginBottom: 8 }}
+          >
             {t('分档价格表')}
           </Text>
           <Table
@@ -188,7 +228,11 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
 
       {hasRules && (
         <div style={{ marginBottom: 16 }}>
-          <Text strong className='text-sm' style={{ display: 'block', marginBottom: 8 }}>
+          <Text
+            strong
+            className='text-sm'
+            style={{ display: 'block', marginBottom: 8 }}
+          >
             {t('条件乘数')}
           </Text>
           {ruleGroups.map((group, gi) => (
@@ -205,12 +249,13 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
               }}
             >
               <Text size='small'>{describeGroup(group, t)}</Text>
-              <Tag color='orange' size='small'>{formatRatioDisplay(group.multiplier)}x</Tag>
+              <Tag color='orange' size='small'>
+                {formatRatioDisplay(group.multiplier)}x
+              </Tag>
             </div>
           ))}
         </div>
       )}
-
     </div>
   );
 }
