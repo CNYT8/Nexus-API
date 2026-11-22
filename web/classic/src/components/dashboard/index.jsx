@@ -93,7 +93,7 @@ const Dashboard = () => {
   const loadUserData = async () => {
     if (dashboardData.isAdminUser) {
       const userData = await dashboardData.loadUserQuotaData();
-      if (userData && userData.length > 0) {
+      if (Array.isArray(userData)) {
         dashboardCharts.updateUserChartData(userData);
       }
     }
@@ -101,7 +101,7 @@ const Dashboard = () => {
 
   const initChart = async () => {
     await dashboardData.loadQuotaData().then((data) => {
-      if (data && data.length > 0) {
+      if (Array.isArray(data)) {
         dashboardCharts.updateChartData(data);
       }
     });
@@ -111,7 +111,7 @@ const Dashboard = () => {
 
   const handleRefresh = async () => {
     const data = await dashboardData.refresh();
-    if (data && data.length > 0) {
+    if (Array.isArray(data)) {
       dashboardCharts.updateChartData(data);
     }
     await loadUserData();

@@ -1,6 +1,8 @@
 package model
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -64,40 +66,115 @@ func LogQuotaData(userId int, username string, modelName string, quota int, crea
 	logQuotaDataCache(userId, username, modelName, quota, createdAt, tokenUsed)
 }
 
+// SaveQuotaDataCache preserves the periodic updater's existing entry point.
 func SaveQuotaDataCache() {
-	CacheQuotaDataLock.Lock()
-	defer CacheQuotaDataLock.Unlock()
-	size := len(CacheQuotaData)
-	// 如果缓存中有数据，就保存到数据库中
-	// 1. 先查询数据库中是否有数据
-	// 2. 如果有数据，就更新数据
-	// 3. 如果没有数据，就插入数据
-	for _, quotaData := range CacheQuotaData {
-		quotaDataDB := &QuotaData{}
-		DB.Table("quota_data").Where("user_id = ? and username = ? and model_name = ? and created_at = ?",
-			quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt).First(quotaDataDB)
-		if quotaDataDB.Id > 0 {
-			//quotaDataDB.Count += quotaData.Count
-			//quotaDataDB.Quota += quotaData.Quota
-			//DB.Table("quota_data").Save(quotaDataDB)
-			increaseQuotaData(quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.Count, quotaData.Quota, quotaData.CreatedAt, quotaData.TokenUsed)
-		} else {
-			DB.Table("quota_data").Create(quotaData)
-		}
+	if err := FlushQuotaDataCache(context.Background()); err != nil {
+		common.SysError("保存数据看板数据失败，未保存项保留在缓存中: " + err.Error())
 	}
-	CacheQuotaData = make(map[string]*QuotaData)
-	common.SysLog(fmt.Sprintf("保存数据看板数据成功，共保存%d条数据", size))
 }
 
-func increaseQuotaData(userId int, username string, modelName string, count int, quota int, createdAt int64, tokenUsed int) {
-	err := DB.Table("quota_data").Where("user_id = ? and username = ? and model_name = ? and created_at = ?",
-		userId, username, modelName, createdAt).Updates(map[string]interface{}{
-		"count":      gorm.Expr("count + ?", count),
-		"quota":      gorm.Expr("quota + ?", quota),
-		"token_used": gorm.Expr("token_used + ?", tokenUsed),
-	}).Error
-	if err != nil {
-		common.SysLog(fmt.Sprintf("increaseQuotaData error: %s", err))
+// FlushQuotaDataCache holds the existing cache lock through each DB transaction
+// and removes only committed entries. Both lock acquisition and DB work honor ctx.
+// An ambiguous database commit cannot be made exactly-once without a durable
+// idempotency key; this in-memory cache does not provide crash recovery.
+func FlushQuotaDataCache(ctx context.Context) error {
+	if err := lockQuotaDataCache(ctx); err != nil {
+		return err
+	}
+	defer CacheQuotaDataLock.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(CacheQuotaData) == 0 {
+		return nil
+	}
+	if DB == nil {
+		return errors.New("quota data database is not initialized")
+	}
+
+	var flushErrors []error
+	saved := 0
+	for key, quotaData := range CacheQuotaData {
+		if err := ctx.Err(); err != nil {
+			flushErrors = append(flushErrors, err)
+			break
+		}
+		if quotaData == nil {
+			flushErrors = append(flushErrors, fmt.Errorf("quota data cache %q is nil", key))
+			continue
+		}
+		// Create may assign an ID before a transaction rolls back. Keep those
+		// mutations away from the pending cache entry so retry starts cleanly.
+		pending := *quotaData
+		err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var existing QuotaData
+			query := tx.Where("user_id = ? and username = ? and model_name = ? and created_at = ?",
+				pending.UserID, pending.Username, pending.ModelName, pending.CreatedAt).First(&existing)
+			if errors.Is(query.Error, gorm.ErrRecordNotFound) {
+				pending.Id = 0
+				created := tx.Create(&pending)
+				if created.Error != nil {
+					return created.Error
+				}
+				if created.RowsAffected != 1 {
+					return fmt.Errorf("quota data insert affected %d rows", created.RowsAffected)
+				}
+				return nil
+			}
+			if query.Error != nil {
+				return query.Error
+			}
+			updated := tx.Model(&QuotaData{}).Where("id = ?", existing.Id).Updates(map[string]interface{}{
+				"count":      gorm.Expr("count + ?", pending.Count),
+				"quota":      gorm.Expr("quota + ?", pending.Quota),
+				"token_used": gorm.Expr("token_used + ?", pending.TokenUsed),
+			})
+			if updated.Error != nil {
+				return updated.Error
+			}
+			if updated.RowsAffected != 1 {
+				return fmt.Errorf("quota data update affected %d rows", updated.RowsAffected)
+			}
+			return nil
+		})
+		if err != nil {
+			flushErrors = append(flushErrors, fmt.Errorf("flush quota data %q: %w", key, err))
+			continue
+		}
+		// Delete immediately after a successful commit, even if ctx just expired.
+		// A later failed item must not make this delta run a second time.
+		delete(CacheQuotaData, key)
+		saved++
+	}
+	if len(flushErrors) == 0 {
+		common.SysLog(fmt.Sprintf("保存数据看板数据成功，共保存%d条数据", saved))
+	}
+	return errors.Join(flushErrors...)
+}
+
+func lockQuotaDataCache(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if ctx.Done() == nil {
+		CacheQuotaDataLock.Lock()
+		return nil
+	}
+	if CacheQuotaDataLock.TryLock() {
+		return nil
+	}
+	// Do not leave a goroutine waiting on Lock after the shutdown deadline.
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if CacheQuotaDataLock.TryLock() {
+				return nil
+			}
+		}
 	}
 }
 

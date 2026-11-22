@@ -52,9 +52,21 @@ const (
 	RelayModeGemini
 
 	RelayModeResponsesCompact
+
+	RelayModeAlphaSearch
+	RelayModeDeepSeekSearch
+	RelayModeDeepSeekFetch
 )
 
 func Path2RelayMode(path string) int {
+	switch path {
+	case "/v1/alpha/search":
+		return RelayModeAlphaSearch
+	case "/v1/tools/search":
+		return RelayModeDeepSeekSearch
+	case "/v1/tools/fetch":
+		return RelayModeDeepSeekFetch
+	}
 	relayMode := RelayModeUnknown
 	if strings.HasPrefix(path, "/v1/chat/completions") || strings.HasPrefix(path, "/pg/chat/completions") {
 		relayMode = RelayModeChatCompletions

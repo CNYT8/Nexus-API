@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -79,7 +79,7 @@ import {
 } from '@/components/nexus-api-preset-icon'
 import { SettingsSwitchField } from '../components/settings-form-layout'
 import { SettingsSection } from '../components/settings-section'
-import { useUpdateOption } from '../hooks/use-update-option'
+import { useSettingsList } from '../hooks/use-settings-list'
 
 type ApiInfo = {
   id: number
@@ -127,11 +127,29 @@ const colorOptions = [
 
 export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
   const { t } = useTranslation()
-  const updateOption = useUpdateOption()
   const apiInfoSchema = createApiInfoSchema(t)
-  const [apiInfoList, setApiInfoList] = useState<ApiInfo[]>([])
-  const [isEnabled, setIsEnabled] = useState(enabled)
-  const [hasChanges, setHasChanges] = useState(false)
+  const {
+    items: apiInfoList,
+    setItems: setApiInfoList,
+    isEnabled,
+    hasChanges,
+    isPending,
+    parseError,
+    save: handleSaveAll,
+    toggleEnabled: handleToggleEnabled,
+  } = useSettingsList<ApiInfo>({
+    enabled,
+    data,
+    dataKey: 'console_setting.api_info',
+    enabledKey: 'console_setting.api_info_enabled',
+    schema: z.object({
+      id: z.number().int().positive(),
+      url: z.string(),
+      route: z.string(),
+      description: z.string(),
+      color: z.string(),
+    }),
+  })
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [showDialog, setShowDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
@@ -147,39 +165,6 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
       color: 'blue',
     },
   })
-
-  useEffect(() => {
-    try {
-      const parsed = JSON.parse(data || '[]')
-      if (Array.isArray(parsed)) {
-        setApiInfoList(
-          parsed.map((item, idx) => ({
-            ...item,
-            id: item.id || idx + 1,
-          }))
-        )
-      }
-    } catch {
-      setApiInfoList([])
-    }
-  }, [data])
-
-  useEffect(() => {
-    setIsEnabled(enabled)
-  }, [enabled])
-
-  const handleToggleEnabled = async (checked: boolean) => {
-    try {
-      await updateOption.mutateAsync({
-        key: 'console_setting.api_info_enabled',
-        value: checked,
-      })
-      setIsEnabled(checked)
-      toast.success(t('Setting saved'))
-    } catch {
-      toast.error(t('Failed to update setting'))
-    }
-  }
 
   const handleAdd = () => {
     setEditingApiInfo(null)
@@ -219,18 +204,17 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
   }
 
   const confirmDelete = () => {
+    if (parseError) return
     if (deleteTarget === 'single' && editingApiInfo) {
       setApiInfoList((prev) =>
         prev.filter((item) => item.id !== editingApiInfo.id)
       )
-      setHasChanges(true)
       toast.success(t('API info deleted. Click "Save Settings" to apply.'))
     } else if (deleteTarget === 'batch') {
       setApiInfoList((prev) =>
         prev.filter((item) => !selectedIds.includes(item.id))
       )
       setSelectedIds([])
-      setHasChanges(true)
       toast.success(
         t('{{count}} API entries deleted. Click "Save Settings" to apply.', {
           count: selectedIds.length,
@@ -242,6 +226,7 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
   }
 
   const handleSubmitForm = (values: ApiInfoFormValues) => {
+    if (parseError) return
     if (editingApiInfo) {
       setApiInfoList((prev) =>
         prev.map((item) =>
@@ -254,22 +239,7 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
       setApiInfoList((prev) => [...prev, { id: newId, ...values }])
       toast.success(t('API info added. Click "Save Settings" to apply.'))
     }
-    setHasChanges(true)
     setShowDialog(false)
-  }
-
-  const handleSaveAll = async () => {
-    try {
-      const result = await updateOption.mutateAsync({
-        key: 'console_setting.api_info',
-        value: JSON.stringify(apiInfoList),
-      })
-      if (result.success) {
-        setHasChanges(false)
-      }
-    } catch {
-      toast.error(t('Failed to save API info'))
-    }
   }
 
   const toggleSelectAll = (checked: boolean) => {
@@ -294,10 +264,15 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
 
   return (
     <SettingsSection title={t('API Addresses')}>
+      {parseError && (
+        <p role='alert' className='text-destructive break-words text-sm'>
+          {t('Invalid settings list. Fix the source data and reload before editing.')} {parseError}
+        </p>
+      )}
       <div className='space-y-4'>
         <div className='flex flex-wrap items-center justify-between gap-2'>
           <div className='flex flex-wrap items-center gap-2'>
-            <Button onClick={handleAdd} size='sm'>
+            <Button onClick={handleAdd} size='sm' disabled={!!parseError}>
               <Plus className='mr-2 h-4 w-4' />
               {t('Add API')}
             </Button>
@@ -305,7 +280,7 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
               onClick={handleBatchDelete}
               size='sm'
               variant='destructive'
-              disabled={selectedIds.length === 0}
+              disabled={!!parseError || selectedIds.length === 0}
             >
               <Trash2 className='mr-2 h-4 w-4' />
               {t('Delete (')}
@@ -315,15 +290,16 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
               onClick={handleSaveAll}
               size='sm'
               variant='secondary'
-              disabled={!hasChanges || updateOption.isPending}
+              disabled={!!parseError || !hasChanges || isPending}
             >
               <Save className='mr-2 h-4 w-4' />
-              {updateOption.isPending ? t('Saving...') : t('Save Settings')}
+              {isPending ? t('Saving...') : t('Save Settings')}
             </Button>
           </div>
           <SettingsSwitchField
             checked={isEnabled}
             onCheckedChange={handleToggleEnabled}
+            disabled={isPending}
             label={t('Enabled')}
             className='border-b-0 py-0'
           />

@@ -21,7 +21,6 @@ import React from 'react';
 import {
   Button,
   Card,
-  Input,
   Space,
   Typography,
   Avatar,
@@ -53,16 +52,14 @@ import {
   getOAuthProviderIcon,
 } from '../../../../helpers';
 import TwoFASetting from '../components/TwoFASetting';
+import SecurityManagement from '../security/SecurityManagement';
 
 const AccountManagement = ({
   t,
   userState,
   status,
-  systemToken,
   setShowEmailBindModal,
   setShowWeChatBindModal,
-  generateAccessToken,
-  handleSystemTokenClick,
   setShowChangePasswordModal,
   setShowAccountDeleteModal,
   passkeyStatus,
@@ -591,44 +588,7 @@ const AccountManagement = ({
           <div className='py-4'>
             <div className='space-y-6'>
               <Space vertical className='w-full'>
-                {/* 系统访问令牌 */}
-                <Card className='!rounded-xl w-full'>
-                  <div className='flex flex-col sm:flex-row items-start sm:justify-between gap-4'>
-                    <div className='flex items-start w-full sm:w-auto'>
-                      <div className='w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mr-4 flex-shrink-0'>
-                        <IconKey size='large' className='text-slate-600' />
-                      </div>
-                      <div className='flex-1'>
-                        <Typography.Title heading={6} className='mb-1'>
-                          {t('系统访问令牌')}
-                        </Typography.Title>
-                        <Typography.Text type='tertiary' className='text-sm'>
-                          {t('用于API调用的身份验证令牌，请妥善保管')}
-                        </Typography.Text>
-                        {systemToken && (
-                          <div className='mt-3'>
-                            <Input
-                              readonly
-                              value={systemToken}
-                              onClick={handleSystemTokenClick}
-                              size='large'
-                              prefix={<IconKey />}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <Button
-                      type='primary'
-                      theme='solid'
-                      onClick={generateAccessToken}
-                      className='!bg-slate-600 hover:!bg-slate-700 w-full sm:w-auto'
-                      icon={<IconKey />}
-                    >
-                      {systemToken ? t('重新生成') : t('生成令牌')}
-                    </Button>
-                  </div>
-                </Card>
+                <SecurityManagement />
 
                 {/* 密码管理 */}
                 <Card className='!rounded-xl w-full'>

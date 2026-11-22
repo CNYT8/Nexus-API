@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -14,17 +13,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func buildMaskedTokenResponse(token *model.Token) *model.Token {
+func buildMaskedTokenResponse(token *model.Token) *tokenPolicyResponse {
 	if token == nil {
 		return nil
 	}
 	maskedToken := *token
 	maskedToken.Key = token.GetMaskedKey()
-	return &maskedToken
+	return &tokenPolicyResponse{Token: &maskedToken, AutoGroups: token.GetAutoGroups()}
 }
 
-func buildMaskedTokenResponses(tokens []*model.Token) []*model.Token {
-	maskedTokens := make([]*model.Token, 0, len(tokens))
+func buildMaskedTokenResponses(tokens []*model.Token) []*tokenPolicyResponse {
+	maskedTokens := make([]*tokenPolicyResponse, 0, len(tokens))
 	for _, token := range tokens {
 		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token))
 	}
@@ -77,7 +76,19 @@ func GetToken(c *gin.Context) {
 	common.ApiSuccess(c, buildMaskedTokenResponse(token))
 }
 
+func requireTokenReveal(c *gin.Context) bool {
+	c.Header("Cache-Control", "no-store")
+	if c.GetInt("id") > 0 && model.AccessTokenAllows(c, "token", "reveal") {
+		return true
+	}
+	c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "code": "TOKEN_REVEAL_REQUIRED", "message": "读取令牌明文需要独立授权"})
+	return false
+}
+
 func GetTokenKey(c *gin.Context) {
+	if !requireTokenReveal(c) {
+		return
+	}
 	id, err := strconv.Atoi(c.Param("id"))
 	userId := c.GetInt("id")
 	if err != nil {
@@ -116,26 +127,8 @@ func GetTokenStatus(c *gin.Context) {
 }
 
 func GetTokenUsage(c *gin.Context) {
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "No Authorization header",
-		})
-		return
-	}
-
-	parts := strings.Split(authHeader, " ")
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "Invalid Bearer token",
-		})
-		return
-	}
-	tokenKey := parts[1]
-
-	token, err := model.GetTokenByKey(strings.TrimPrefix(tokenKey, "sk-"), false)
+	// Use the identity established by TokenAuthReadOnly, never a second parser.
+	token, err := model.GetTokenByIds(c.GetInt("token_id"), c.GetInt("id"))
 	if err != nil {
 		common.SysError("failed to get token by key: " + err.Error())
 		common.ApiErrorI18n(c, i18n.MsgTokenGetInfoFailed)
@@ -147,26 +140,29 @@ func GetTokenUsage(c *gin.Context) {
 		expiredAt = 0
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    true,
-		"message": "ok",
-		"data": gin.H{
-			"object":               "token_usage",
-			"name":                 token.Name,
-			"total_granted":        token.RemainQuota + token.UsedQuota,
-			"total_used":           token.UsedQuota,
-			"total_available":      token.RemainQuota,
-			"unlimited_quota":      token.UnlimitedQuota,
-			"model_limits":         token.GetModelLimitsMap(),
-			"model_limits_enabled": token.ModelLimitsEnabled,
-			"expires_at":           expiredAt,
-		},
-	})
+	data := gin.H{
+		"object": "token_usage", "name": token.Name,
+		"total_granted": token.RemainQuota + token.UsedQuota,
+		"total_used":    token.UsedQuota, "total_available": token.RemainQuota,
+		"unlimited_quota": token.UnlimitedQuota,
+		"model_limits":    token.GetModelLimitsMap(), "model_limits_enabled": token.ModelLimitsEnabled,
+		"expires_at": expiredAt, "allow_user_quota_query": token.AllowUserQuotaQuery,
+	}
+	if token.AllowUserQuotaQuery {
+		user, readErr := model.GetUserById(token.UserId, false)
+		if readErr != nil {
+			common.ApiError(c, readErr)
+			return
+		}
+		data["user_quota"] = gin.H{"total_available": user.Quota, "total_used": user.UsedQuota}
+	}
+	c.JSON(http.StatusOK, gin.H{"code": true, "message": "ok", "data": data})
 }
 
 func AddToken(c *gin.Context) {
-	token := model.Token{}
-	err := c.ShouldBindJSON(&token)
+	request := tokenPolicyRequest{}
+	err := c.ShouldBindJSON(&request)
+	token := request.Token
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -222,6 +218,10 @@ func AddToken(c *gin.Context) {
 		Group:              token.Group,
 		CrossGroupRetry:    token.CrossGroupRetry,
 	}
+	if err = applyTokenPolicy(&cleanToken, request, cleanToken.UserId, true); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	err = cleanToken.Insert()
 	if err != nil {
 		common.ApiError(c, err)
@@ -250,8 +250,9 @@ func DeleteToken(c *gin.Context) {
 func UpdateToken(c *gin.Context) {
 	userId := c.GetInt("id")
 	statusOnly := c.Query("status_only")
-	token := model.Token{}
-	err := c.ShouldBindJSON(&token)
+	request := tokenPolicyRequest{}
+	err := c.ShouldBindJSON(&request)
+	token := request.Token
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -300,6 +301,10 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		if err = applyTokenPolicy(cleanToken, request, userId, false); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	if statusOnly != "" {
 		err = cleanToken.Update()
@@ -341,6 +346,9 @@ func DeleteTokenBatch(c *gin.Context) {
 }
 
 func GetTokenKeysBatch(c *gin.Context) {
+	if !requireTokenReveal(c) {
+		return
+	}
 	tokenBatch := TokenBatch{}
 	if err := c.ShouldBindJSON(&tokenBatch); err != nil || len(tokenBatch.Ids) == 0 {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)

@@ -32,6 +32,7 @@ const MessageContent = ({
   onToggleReasoningExpansion,
   isEditing = false,
   onEditSave,
+  onEditSaveAndSubmit,
   onEditCancel,
   editValue,
   onEditValueChange,
@@ -274,11 +275,22 @@ const MessageContent = ({
 
       {isEditing ? (
         <div className='space-y-2.5'>
+          <span className='text-xs text-gray-500'>{t('Ctrl/⌘ + Enter 保存，Esc 取消')}</span>
           <TextArea
             value={editValue}
             onChange={(value) => onEditValueChange(value)}
             placeholder={t('请输入消息内容...')}
             autosize={{ minRows: 3, maxRows: 12 }}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return;
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                onEditCancel();
+              } else if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                event.preventDefault();
+                if (editValue?.trim()) onEditSave();
+              }
+            }}
             style={{
               resize: 'vertical',
               fontSize: styleState.isMobile ? '14px' : '15px',
@@ -286,7 +298,18 @@ const MessageContent = ({
               backgroundColor: 'var(--semi-color-bg-0)',
             }}
           />
-          <div className='flex items-center justify-end gap-2'>
+          <div className='flex flex-wrap items-center justify-end gap-2'>
+            {message.role === 'user' && (
+              <Button
+                size='small'
+                type='primary'
+                theme='light'
+                onClick={onEditSaveAndSubmit}
+                disabled={!editValue?.trim()}
+              >
+                {t('保存并提交')}
+              </Button>
+            )}
             <Button
               size='small'
               type='tertiary'

@@ -10,13 +10,18 @@ import (
 )
 
 func cacheSetToken(token Token) error {
+	if !redisAvailable() {
+		return nil
+	}
 	key := common.GenerateHMAC(token.Key)
-	token.Clean()
-	err := common.RedisHSetObj(fmt.Sprintf("token:%s", key), &token, time.Duration(common.RedisKeyCacheSeconds())*time.Second)
+	token.CacheExpiresAt = time.Now().Add(authCacheTTL()).Unix()
+	mac, err := token.cacheMAC()
 	if err != nil {
 		return err
 	}
-	return nil
+	token.CacheMAC = mac
+	token.Clean()
+	return storeAuthCache(fmt.Sprintf("token:%s", key), &token, map[string]bool{"RemainQuota": true, "UsedQuota": true, "AccessedTime": true})
 }
 
 // cacheSetTokenSettings updates only non-accounting token fields. It preserves
@@ -40,14 +45,17 @@ func cacheSetTokenSettings(token Token) error {
 	key := common.GenerateHMAC(token.Key)
 	cacheKey := fmt.Sprintf("token:%s", key)
 	fields := map[string]string{
-		"Name":               token.Name,
-		"Status":             strconv.Itoa(token.Status),
-		"ExpiredTime":        strconv.FormatInt(token.ExpiredTime, 10),
-		"UnlimitedQuota":     strconv.FormatBool(token.UnlimitedQuota),
-		"ModelLimitsEnabled": strconv.FormatBool(token.ModelLimitsEnabled),
-		"ModelLimits":        token.ModelLimits,
-		"Group":              token.Group,
-		"CrossGroupRetry":    strconv.FormatBool(token.CrossGroupRetry),
+		"Name":                token.Name,
+		"Status":              strconv.Itoa(token.Status),
+		"ExpiredTime":         strconv.FormatInt(token.ExpiredTime, 10),
+		"UnlimitedQuota":      strconv.FormatBool(token.UnlimitedQuota),
+		"ModelLimitsEnabled":  strconv.FormatBool(token.ModelLimitsEnabled),
+		"ModelLimits":         token.ModelLimits,
+		"Group":               token.Group,
+		"CrossGroupRetry":     strconv.FormatBool(token.CrossGroupRetry),
+		"AutoGroups":          token.AutoGroups,
+		"AllowUserQuotaQuery": strconv.FormatBool(token.AllowUserQuotaQuery),
+		"AuthVersion":         strconv.FormatInt(token.AuthVersion, 10),
 	}
 	if token.AllowIps != nil {
 		fields["AllowIps"] = *token.AllowIps
@@ -105,5 +113,18 @@ func cacheGetTokenByKey(key string) (*Token, error) {
 		return nil, err
 	}
 	token.Key = key
+	mac, err := token.cacheMAC()
+	if err != nil || token.Id <= 0 || !validAuthCacheMAC(mac, token.CacheMAC, token.CacheExpiresAt) {
+		return nil, fmt.Errorf("token cache integrity check failed")
+	}
+	current := Token{}
+	if err := DB.Where(commonKeyCol+" = ?", key).First(&current).Error; err != nil {
+		return nil, err
+	}
+	current.CacheExpiresAt = token.CacheExpiresAt
+	currentMAC, err := current.cacheMAC()
+	if err != nil || !validAuthCacheMAC(currentMAC, token.CacheMAC, token.CacheExpiresAt) {
+		return nil, fmt.Errorf("token cache version fence rejected stale metadata")
+	}
 	return &token, nil
 }

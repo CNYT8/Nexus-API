@@ -23,19 +23,51 @@ var (
 	rebatePayoutOnce        sync.Once
 	rebatePayoutRunning     atomic.Bool
 	rebateMaintenancePaused atomic.Bool
+	taskBillingWorkMu       sync.Mutex
+	taskBillingWorkCount    int
 )
 
 // SetRebateMaintenancePaused pauses or resumes background rebate payout and
 // recovery tasks during wallet ledger baseline initialization.
 func SetRebateMaintenancePaused(paused bool) {
+	taskBillingWorkMu.Lock()
 	rebateMaintenancePaused.Store(paused)
+	taskBillingWorkMu.Unlock()
+}
+
+// BeginTaskBillingWork atomically admits a background accounting operation.
+// Admission and pause share one mutex, so a worker cannot enter after a drain
+// has observed zero active operations.
+func BeginTaskBillingWork() bool {
+	taskBillingWorkMu.Lock()
+	defer taskBillingWorkMu.Unlock()
+	if rebateMaintenancePaused.Load() {
+		return false
+	}
+	taskBillingWorkCount++
+	return true
+}
+
+func EndTaskBillingWork() {
+	taskBillingWorkMu.Lock()
+	taskBillingWorkCount--
+	taskBillingWorkMu.Unlock()
 }
 
 // WaitForRebateTasksIdle waits up to maxWait for any in-flight payout or
 // recovery iteration to finish once maintenance pause is enabled.
-func WaitForRebateTasksIdle(maxWait time.Duration) {
+func WaitForRebateTasksIdle(maxWait time.Duration) bool {
 	deadline := time.Now().Add(maxWait)
-	for (rebatePayoutRunning.Load() || rebateRecoveryRunning.Load()) && time.Now().Before(deadline) {
+	for {
+		taskBillingWorkMu.Lock()
+		idle := taskBillingWorkCount == 0
+		taskBillingWorkMu.Unlock()
+		if idle {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
@@ -61,15 +93,18 @@ func StartRebatePayoutTask() {
 }
 
 func runRebatePayoutOnce() {
-	if rebateMaintenancePaused.Load() {
+	if !BeginTaskBillingWork() {
 		return
 	}
+	defer EndTaskBillingWork()
 	if !rebatePayoutRunning.CompareAndSwap(false, true) {
 		return
 	}
 	defer rebatePayoutRunning.Store(false)
 
-	for {
+	// 每次调度有固定预算，避免待发记录持续增长时长期占用数据库。
+	deadline := time.Now().Add(20 * time.Second)
+	for batch := 0; batch < 10 && time.Now().Before(deadline); batch++ {
 		if rebateMaintenancePaused.Load() {
 			return
 		}

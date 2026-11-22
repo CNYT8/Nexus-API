@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect, useCallback } from 'react';
+import React, { useContext, useEffect, useCallback, useLayoutEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Toast } from '@douyinfe/semi-ui';
@@ -28,6 +28,7 @@ import { useIsMobile } from '../../hooks/common/useIsMobile';
 
 // hooks
 import { usePlaygroundState } from '../../hooks/playground/usePlaygroundState';
+import { useAccountSession } from '../../hooks/playground/accountSession';
 import { useMessageActions } from '../../hooks/playground/useMessageActions';
 import { useApiRequest } from '../../hooks/playground/useApiRequest';
 import { useSyncMessageAndCustomBody } from '../../hooks/playground/useSyncMessageAndCustomBody';
@@ -75,13 +76,20 @@ const generateAvatarDataUrl = (username) => {
 };
 
 const Playground = () => {
+  const session = useAccountSession();
+  return session.userId ? (
+    <PlaygroundSession key={session.revision} session={session} />
+  ) : null;
+};
+
+const PlaygroundSession = ({ session }) => {
   const { t } = useTranslation();
   const [userState] = useContext(UserContext);
   const isMobile = useIsMobile();
   const styleState = { isMobile };
   const [searchParams] = useSearchParams();
 
-  const state = usePlaygroundState();
+  const state = usePlaygroundState(session);
   const {
     inputs,
     parameterEnabled,
@@ -101,7 +109,7 @@ const Playground = () => {
     handleInputChange,
     handleParameterToggle,
     debouncedSaveConfig,
-    saveMessagesImmediately,
+    getMessages,
     handleConfigImport,
     handleConfigReset,
     setShowSettings,
@@ -118,16 +126,39 @@ const Playground = () => {
   } = state;
 
   // API 请求相关
-  const { sendRequest, onStopGenerator } = useApiRequest(
+  const { sendRequest, onStopGenerator, canSend } = useApiRequest(
     setMessage,
     setDebugData,
     setActiveDebugTab,
     sseSourceRef,
-    saveMessagesImmediately,
+    session,
   );
 
   // 数据加载
-  useDataLoader(userState, inputs, handleInputChange, setModels, setGroups);
+  const { isModelAvailable } = useDataLoader(
+    userState,
+    inputs,
+    handleInputChange,
+    setModels,
+    setGroups,
+    session,
+  );
+
+  // Re-read settings after confirmation, before constructing a request.
+  const sendCurrent = useCallback((payload, stream, messages) => {
+    const group = payload.group ?? inputs.group;
+    if (group !== inputs.group || !isModelAvailable(payload.model, group)) return false;
+    return sendRequest(payload, stream, messages);
+  }, [inputs.group, isModelAvailable, sendRequest]);
+  const latestSend = useRef(null);
+  useLayoutEffect(() => {
+    latestSend.current = { sendCurrent, inputs, parameterEnabled, sendMessage };
+  });
+  const submitEdited = useCallback((messages) => {
+    const current = latestSend.current;
+    const payload = buildApiPayload(messages, null, current.inputs, current.parameterEnabled);
+    return current.sendCurrent(payload, current.inputs.stream, [...messages, createLoadingAssistantMessage()]);
+  }, []);
 
   // 消息编辑
   const {
@@ -137,12 +168,13 @@ const Playground = () => {
     handleMessageEdit,
     handleEditSave,
     handleEditCancel,
+    requestAction,
   } = useMessageEdit(
     setMessage,
-    inputs,
-    parameterEnabled,
-    sendRequest,
-    saveMessagesImmediately,
+    submitEdited,
+    canSend,
+    getMessages,
+    session,
   );
 
   // 消息和自定义请求体同步
@@ -155,6 +187,7 @@ const Playground = () => {
       setCustomRequestBody,
       setMessage,
       debouncedSaveConfig,
+      canSend,
     );
 
   // 角色信息
@@ -177,8 +210,10 @@ const Playground = () => {
   const messageActions = useMessageActions(
     message,
     setMessage,
-    onMessageSend,
-    saveMessagesImmediately,
+    (content, attachment, history) => latestSend.current.sendMessage(content, attachment, history),
+    canSend,
+    getMessages,
+    requestAction,
   );
 
   // 构建预览请求体
@@ -234,7 +269,12 @@ const Playground = () => {
 
   // 发送消息
   function onMessageSend(content, attachment) {
-    console.log('attachment: ', attachment);
+    return requestAction(() => latestSend.current.sendMessage(content, attachment));
+  }
+
+  function sendMessage(content, attachment, history) {
+    if (!canSend()) return false;
+    const previous = history || getMessages();
 
     // 创建用户消息和加载消息
     const userMessage = createMessage(MESSAGE_ROLES.USER, content);
@@ -245,22 +285,15 @@ const Playground = () => {
       try {
         const customPayload = JSON.parse(customRequestBody);
 
-        setMessage((prevMessage) => {
-          const newMessages = [...prevMessage, userMessage, loadingMessage];
-
-          // 发送自定义请求体
-          sendRequest(customPayload, customPayload.stream !== false);
-
-          // 发送消息后保存，传入新消息列表
-          setTimeout(() => saveMessagesImmediately(newMessages), 0);
-
-          return newMessages;
-        });
-        return;
+        return sendCurrent(customPayload, customPayload.stream !== false, [
+          ...previous,
+          ...(!history ? [userMessage] : []),
+          loadingMessage,
+        ]);
       } catch (error) {
         console.error('自定义请求体JSON解析失败:', error);
         Toast.error(ERROR_MESSAGES.JSON_PARSE_ERROR);
-        return;
+        return false;
       }
     }
 
@@ -278,28 +311,23 @@ const Playground = () => {
       messageContent,
     );
 
-    setMessage((prevMessage) => {
-      const newMessages = [...prevMessage, userMessageWithImages];
-
-      const payload = buildApiPayload(
-        newMessages,
-        null,
-        inputs,
-        parameterEnabled,
-      );
-      sendRequest(payload, inputs.stream);
-
-      // 发送消息后保存，传入新消息列表（包含用户消息和加载消息）
-      const messagesWithLoading = [...newMessages, loadingMessage];
-      setTimeout(() => saveMessagesImmediately(messagesWithLoading), 0);
-
-      return messagesWithLoading;
-    });
+    const newMessages = history
+      ? previous
+      : [...previous, userMessageWithImages];
+    const payload = buildApiPayload(
+      newMessages,
+      null,
+      inputs,
+      parameterEnabled,
+    );
+    if (!sendCurrent(payload, inputs.stream, [...newMessages, loadingMessage]))
+      return false;
 
     // 发送后立即清空输入框中已附加的图片缩略图，避免下一轮对话重复携带
-    if (validImageUrls.length > 0) {
+    if (!history && validImageUrls.length > 0) {
       handleInputChange('imageUrls', []);
     }
+    return true;
   }
 
   // 切换推理展开状态
@@ -328,7 +356,8 @@ const Playground = () => {
           styleState={styleState}
           onToggleReasoningExpansion={toggleReasoningExpansion}
           isEditing={isCurrentlyEditing}
-          onEditSave={handleEditSave}
+          onEditSave={() => handleEditSave(false)}
+          onEditSaveAndSubmit={() => handleEditSave(true)}
           onEditCancel={handleEditCancel}
           editValue={editValue}
           onEditValueChange={setEditValue}
@@ -428,11 +457,14 @@ const Playground = () => {
   ]);
 
   // 清空对话的处理函数
-  const handleClearMessages = useCallback(() => {
+  const handleClearMessages = useCallback(() => requestAction(() => {
+    onStopGenerator();
     setMessage([]);
-    // 清空对话后保存，传入空数组
-    setTimeout(() => saveMessagesImmediately([]), 0);
-  }, [setMessage, saveMessagesImmediately]);
+    return true;
+  }, {
+    title: t('清空对话'),
+    content: t('确定清空所有消息吗？此操作无法撤销。'),
+  }), [setMessage, onStopGenerator, requestAction, t]);
 
   // 处理粘贴图片：不再受不可达的 imageEnabled 开关限制
   const handlePasteImage = useCallback(
@@ -452,6 +484,8 @@ const Playground = () => {
     onPasteImage: handlePasteImage,
     imageUrls: inputs.imageUrls || [],
     imageEnabled: inputs.imageEnabled || false,
+    session,
+    canSend,
   };
 
   return (
@@ -461,6 +495,8 @@ const Playground = () => {
           chatRef={chatRef}
           message={message}
           inputs={inputs}
+          parameterEnabled={parameterEnabled}
+          customRequestMode={customRequestMode}
           models={models}
           groups={groups}
           styleState={styleState}
@@ -468,6 +504,7 @@ const Playground = () => {
           showDebugPanel={showDebugPanel}
           roleInfo={roleInfo}
           onInputChange={handleInputChange}
+          onParameterToggle={handleParameterToggle}
           onMessageSend={onMessageSend}
           onMessageCopy={messageActions.handleMessageCopy}
           onMessageReset={messageActions.handleMessageReset}

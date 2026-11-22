@@ -24,6 +24,18 @@ import {
   isValidMessage,
 } from './utils';
 import axios from 'axios';
+import i18next, { t } from 'i18next';
+import { normalizeLanguage } from '../i18n/language';
+import { rememberOAuthReturn } from '../components/auth/oauth-return-target';
+import {
+  getServerErrorMessage,
+  getServerMessage,
+  isServerErrorCancelled,
+  isServerErrorNotified,
+  markServerErrorNotified,
+  notifyServerError,
+  safeServerErrorMessage,
+} from './server-error-message';
 import { MESSAGE_ROLES } from '../constants/playground.constants';
 import { installAPIAcceleration } from './apiAcceleration';
 import {
@@ -35,6 +47,10 @@ function getAPIBaseURL() {
   return import.meta.env.VITE_REACT_APP_SERVER_URL
     ? import.meta.env.VITE_REACT_APP_SERVER_URL
     : '';
+}
+
+function getRequestLanguage() {
+  return normalizeLanguage(i18next.resolvedLanguage || i18next.language) || 'zh-CN';
 }
 
 function getAPIHeaders() {
@@ -60,19 +76,44 @@ function redirectToOAuthUrl(url, options = {}) {
 
 function installAPIErrorHandler(instance) {
   instance.interceptors.response.use(
-    (response) => response,
+    (response) => {
+      const message = getServerMessage(response.data);
+      if (response.data && typeof response.data === 'object' && message) {
+        response.data.message = message;
+      }
+      // Classic pages own business-error notifications; retain that contract.
+      return response;
+    },
     (error) => {
+      if (isServerErrorCancelled(error)) return Promise.reject(error);
       if (isWebRiskVerificationRequired(error)) {
         dispatchWebRiskVerificationRequired(
           error?.response?.data?.data?.turnstile_site_key || '',
         );
+        markServerErrorNotified(error);
         return Promise.reject(error);
       }
-      // 如果请求配置中显式要求跳过全局错误处理，则不弹出默认错误提示
-      if (error.config && error.config.skipErrorHandler) {
+      const status = error?.response?.status;
+      const masks = {
+        429: '错误：请求次数过多，请稍后再试！',
+        500: '错误：服务器内部错误，请联系管理员！',
+        405: '本站仅作演示之用，无服务端！',
+      };
+      if (masks[status]) {
+        error.message = t(masks[status]);
+        error[safeServerErrorMessage] = true;
+      } else {
+        error.message = getServerErrorMessage(error);
+      }
+      if (error.config?.skipErrorHandler || isServerErrorNotified(error)) {
         return Promise.reject(error);
       }
-      showError(error);
+      if (status === 401 || status === 405) {
+        // showError marks the failure after applying auth/demo-site behavior.
+        showError(error);
+      } else {
+        notifyServerError(error);
+      }
       return Promise.reject(error);
     },
   );
@@ -85,7 +126,24 @@ function createAPIInstance() {
   });
 
   installAPIAcceleration(instance, {
-    getUserId: getUserIdFromLocalStorage,
+    getUserId: () => `${getUserIdFromLocalStorage()}|${getRequestLanguage()}`,
+  });
+  // The existing accelerator does not include custom language/notification
+  // headers in its key. Keep those explicit requests independent.
+  const acceleratedGet = instance.get.bind(instance);
+  instance.get = (url, config = {}) => {
+    const headers = new axios.AxiosHeaders(config.headers);
+    return acceleratedGet(url, {
+      ...config,
+      disableDuplicate: config.disableDuplicate || headers.has('Accept-Language') ||
+        Boolean(config.skipErrorHandler) || headers.has('New-API-User'),
+    });
+  };
+  instance.interceptors.request.use((config) => {
+    if (!config.headers.has('Accept-Language')) {
+      config.headers.set('Accept-Language', getRequestLanguage());
+    }
+    return config;
   });
   installAPIErrorHandler(instance);
   return instance;
@@ -257,7 +315,9 @@ async function prepareOAuthState(options = {}) {
     localStorage.removeItem('user');
     updateAPI();
   }
-  return await getOAuthState();
+  const state = await getOAuthState();
+  rememberOAuthReturn(state, shouldLogout);
+  return state;
 }
 
 export async function onDiscordOAuthClicked(client_id, options = {}) {

@@ -154,13 +154,16 @@ func TestWalletFundingLegacyPathWhenLedgerInactive(t *testing.T) {
 
 	funding := &WalletFunding{userId: user.Id, settlementKey: reservationTestKey(t, user.Id, "pre-baseline")}
 	require.NoError(t, funding.PreConsume(30))
-	require.False(t, funding.reservationActive)
-	require.False(t, funding.CanRetrySettlement())
+	require.True(t, funding.reservationActive)
+	require.True(t, funding.CanRetrySettlement())
 	require.Equal(t, 70, userQuota(t, user.Id))
 
 	var count int64
 	require.NoError(t, db.Model(&model.WalletReservation{}).Count(&count).Error)
-	require.Zero(t, count)
+	require.EqualValues(t, 1, count)
+	var reservation model.WalletReservation
+	require.NoError(t, db.Where("reservation_key = ?", funding.settlementKey).First(&reservation).Error)
+	require.Equal(t, model.BillingReservationLegacy, reservation.FundingMode)
 
 	// Settling before activation keeps the difference-only debit and never
 	// fabricates a settlement row.

@@ -25,6 +25,7 @@ import {
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
 import { getLogsColumns } from './UsageLogsColumnDefs';
+import ResponseModelObservation from './ResponseModelObservation';
 
 const LogsTable = (logsData) => {
   const {
@@ -58,6 +59,17 @@ const LogsTable = (logsData) => {
       openChannelAffinityUsageCacheModal,
       isAdminUser,
       billingDisplayMode,
+    }).map((column) => {
+      if (!isAdminUser || column.key !== COLUMN_KEYS.MODEL) return column;
+      return {
+        ...column,
+        render: (text, record, index) => (
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+            {column.render(text, record, index)}
+            <ResponseModelObservation other={record.other} isAdmin={isAdminUser} t={t} />
+          </div>
+        ),
+      };
     });
   }, [
     t,

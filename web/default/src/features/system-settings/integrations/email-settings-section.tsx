@@ -78,7 +78,7 @@ export function EmailSettingsSection({
     defaultValues,
   })
 
-  useResetForm(form, defaultValues)
+  const submitForm = useResetForm(form, defaultValues)
 
   const onSubmit = async (values: EmailFormValues) => {
     const sanitized = {
@@ -137,17 +137,15 @@ export function EmailSettingsSection({
       })
     }
 
-    for (const update of updates) {
-      await updateOption.mutateAsync(update)
-    }
+    await updateOption.saveOptions(updates)
   }
 
   return (
     <SettingsSection title={t('SMTP Email')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)} autoComplete='off'>
+        <SettingsForm onSubmit={submitForm(onSubmit)} autoComplete='off'>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
             saveLabel='Save SMTP settings'
           />

@@ -1,6 +1,7 @@
 package dto
 
 type UserSetting struct {
+	QuotaWarningEnabled              *bool   `json:"quota_warning_enabled,omitempty"`                // 未设置时接收余额不足提醒
 	NotifyType                       string  `json:"notify_type,omitempty"`                          // QuotaWarningType 额度预警类型
 	QuotaWarningThreshold            float64 `json:"quota_warning_threshold,omitempty"`              // QuotaWarningThreshold 额度预警阈值
 	WebhookUrl                       string  `json:"webhook_url,omitempty"`                          // WebhookUrl webhook地址
@@ -18,6 +19,10 @@ type UserSetting struct {
 	AdminPermissions                 string  `json:"admin_permissions,omitempty"`                    // AdminPermissions 超级管理员分配给管理员的管理权限
 	BillingPreference                string  `json:"billing_preference,omitempty"`                   // BillingPreference 扣费策略（订阅/钱包）
 	Language                         string  `json:"language,omitempty"`                             // Language 用户语言偏好 (zh, en)
+}
+
+func (s UserSetting) IsQuotaWarningEnabled() bool {
+	return s.QuotaWarningEnabled == nil || *s.QuotaWarningEnabled
 }
 
 var (

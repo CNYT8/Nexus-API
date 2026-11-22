@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
+	"gorm.io/gorm"
 )
 
 type TaskStatus string
@@ -42,27 +44,51 @@ const (
 )
 
 type Task struct {
-	ID         int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
-	CreatedAt  int64                 `json:"created_at" gorm:"index"`
-	UpdatedAt  int64                 `json:"updated_at"`
-	TaskID     string                `json:"task_id" gorm:"type:varchar(191);index"` // 第三方id，不一定有/ song id\ Task id
-	Platform   constant.TaskPlatform `json:"platform" gorm:"type:varchar(30);index"` // 平台
-	UserId     int                   `json:"user_id" gorm:"index"`
-	Group      string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
-	ChannelId  int                   `json:"channel_id" gorm:"index"`
-	Quota      int                   `json:"quota"`
-	Action     string                `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
-	Status     TaskStatus            `json:"status" gorm:"type:varchar(20);index"` // 任务状态
-	FailReason string                `json:"fail_reason"`
-	SubmitTime int64                 `json:"submit_time" gorm:"index"`
-	StartTime  int64                 `json:"start_time" gorm:"index"`
-	FinishTime int64                 `json:"finish_time" gorm:"index"`
-	Progress   string                `json:"progress" gorm:"type:varchar(20);index"`
-	Properties Properties            `json:"properties" gorm:"type:json"`
-	Username   string                `json:"username,omitempty" gorm:"-"`
+	ID           int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
+	CreatedAt    int64                 `json:"created_at" gorm:"index"`
+	UpdatedAt    int64                 `json:"updated_at"`
+	TaskID       string                `json:"task_id" gorm:"type:varchar(191);index"` // 第三方id，不一定有/ song id\ Task id
+	Platform     constant.TaskPlatform `json:"platform" gorm:"type:varchar(30);index"` // 平台
+	UserId       int                   `json:"user_id" gorm:"index"`
+	Group        string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
+	ChannelId    int                   `json:"channel_id" gorm:"index"`
+	Quota        int                   `json:"quota"`
+	BillingState string                `json:"-" gorm:"type:varchar(24);not null;default:'';index"`
+	BillingQuota int                   `json:"-" gorm:"type:bigint;not null;default:0"`
+	Action       string                `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
+	Status       TaskStatus            `json:"status" gorm:"type:varchar(20);index"` // 任务状态
+	FailReason   string                `json:"fail_reason"`
+	SubmitTime   int64                 `json:"submit_time" gorm:"index"`
+	StartTime    int64                 `json:"start_time" gorm:"index"`
+	FinishTime   int64                 `json:"finish_time" gorm:"index"`
+	Progress     string                `json:"progress" gorm:"type:varchar(20);index"`
+	Properties   Properties            `json:"properties" gorm:"type:json"`
+	Username     string                `json:"username,omitempty" gorm:"-"`
 	// 禁止返回给用户，内部可能包含key等隐私信息
 	PrivateData TaskPrivateData `json:"-" gorm:"column:private_data;type:json"`
 	Data        json.RawMessage `json:"data" gorm:"type:json"`
+	// In-memory write intent, set only by the script polling adapter.
+	scriptPollMetadata *taskScriptPollMetadata `json:"-" gorm:"-"`
+}
+
+type taskScriptPollMetadata struct {
+	statePresent bool
+	state        string
+	usage        string
+	usageError   string
+}
+
+// SetScriptPollMetadata records the fields supplied by this poll, including
+// explicit empty values. A nil state means the hook did not supply state.
+// Generic status/timeout updates must not write stale script snapshots back.
+func (t *Task) SetScriptPollMetadata(state *string, usage, usageError string) {
+	metadata := &taskScriptPollMetadata{usage: usage, usageError: usageError}
+	if state != nil {
+		metadata.statePresent, metadata.state = true, *state
+		t.PrivateData.ScriptPluginState = *state
+	}
+	t.PrivateData.ScriptPluginUsage, t.PrivateData.ScriptPluginUsageError = usage, usageError
+	t.scriptPollMetadata = metadata
 }
 
 func (t *Task) SetData(data any) {
@@ -70,7 +96,18 @@ func (t *Task) SetData(data any) {
 	t.Data = json.RawMessage(b)
 }
 
+var ErrTaskResultDiscarded = errors.New("task result was not retained")
+
+// ResultRetrievable governs result reads, including provider re-fetches. History
+// and billing queries may still load the row without making its result public.
+func (t *Task) ResultRetrievable() bool {
+	return t != nil && !t.PrivateData.ResultDiscarded
+}
+
 func (t *Task) GetData(v any) error {
+	if !t.ResultRetrievable() {
+		return ErrTaskResultDiscarded
+	}
 	return common.Unmarshal(t.Data, &v)
 }
 
@@ -109,9 +146,20 @@ func (m Properties) Value() (driver.Value, error) {
 }
 
 type TaskPrivateData struct {
-	Key            string `json:"key,omitempty"`
-	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
-	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	preservedJSON   *taskPrivateDataJSON
+	Key             string              `json:"key,omitempty"`
+	UpstreamTaskID  string              `json:"upstream_task_id,omitempty"` // 上游真实 task ID
+	ResultURL       string              `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	PollFailures    int                 `json:"poll_failures,omitempty"`
+	LastPollClass   string              `json:"last_poll_class,omitempty"`
+	ResultMetadata  *TaskResultMetadata `json:"result_metadata,omitempty"`
+	ResultDiscarded bool                `json:"result_discarded,omitempty"`
+	// Executable revision/state are private and independent of usage billing.
+	ScriptPluginID         int64  `json:"script_plugin_id,omitempty"`
+	ScriptPluginDigest     string `json:"script_plugin_digest,omitempty"`
+	ScriptPluginState      string `json:"script_plugin_state,omitempty"`
+	ScriptPluginUsage      string `json:"script_plugin_usage,omitempty"`
+	ScriptPluginUsageError string `json:"script_plugin_usage_error,omitempty"`
 	// BillingKey 是提交前创建的服务端耐久钱包预扣身份。存在时必须优先于
 	// task.ID 派生的历史身份使用，轮询结算也依赖它精确终结同一 reservation。
 	BillingKey string `json:"billing_key,omitempty"`
@@ -131,11 +179,15 @@ type TaskBillingContext struct {
 	OtherRatios     map[string]float64 `json:"other_ratios,omitempty"`      // 附加倍率（时长、分辨率等）
 	OriginModelName string             `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
 	PerCallBilling  bool               `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
+	UsageSnapshot   *TaskUsageSnapshot `json:"usage_snapshot,omitempty"`
 }
 
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）
 // 旧数据没有 UpstreamTaskID 时，TaskID 本身就是上游 ID
 func (t *Task) GetUpstreamTaskID() string {
+	if !t.ResultRetrievable() {
+		return ""
+	}
 	if t.PrivateData.UpstreamTaskID != "" {
 		return t.PrivateData.UpstreamTaskID
 	}
@@ -145,6 +197,9 @@ func (t *Task) GetUpstreamTaskID() string {
 // GetResultURL 获取任务结果 URL（视频地址等）
 // 新数据存在 PrivateData.ResultURL 中；旧数据回退到 FailReason（历史兼容）
 func (t *Task) GetResultURL() string {
+	if !t.ResultRetrievable() {
+		return ""
+	}
 	if t.PrivateData.ResultURL != "" {
 		return t.PrivateData.ResultURL
 	}
@@ -164,7 +219,8 @@ func (p *TaskPrivateData) Scan(val interface{}) error {
 	}
 	var decoded TaskPrivateData
 	if len(bytesValue) != 0 {
-		if err := common.Unmarshal(bytesValue, &decoded); err != nil {
+		// 直接传入数据库原始字节，避免 JSON 解码器先去掉首尾空白。
+		if err := decoded.UnmarshalJSON(bytesValue); err != nil {
 			return err
 		}
 	}
@@ -177,7 +233,7 @@ func (p TaskPrivateData) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	// 同 Properties.Value:string 避免 PG simple protocol 的 bytea 编码。
-	b, err := common.Marshal(p)
+	b, err := p.MarshalJSON()
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +265,8 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 	properties := Properties{}
 	privateData := TaskPrivateData{}
 	if relayInfo != nil && relayInfo.ChannelMeta != nil {
-		if relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeGemini ||
+		if platform == constant.TaskPlatform("jsplugin") ||
+			relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeGemini ||
 			relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeVertexAi {
 			privateData.Key = relayInfo.ChannelMeta.ApiKey
 		}
@@ -325,27 +382,43 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 	return tasks
 }
 
-func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
-	var tasks []*Task
-	err := DB.Where("progress != ?", "100%").
-		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
-		Where("submit_time < ?", cutoffUnix).
-		Order("submit_time").
-		Limit(limit).
-		Find(&tasks).Error
-	if err != nil {
-		return nil
-	}
-	return tasks
+func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int, accept ...func(*Task) bool) []*Task {
+	return findPollableTasks(DB.Where("submit_time < ?", cutoffUnix), limit, accept...)
 }
 
-func GetAllUnFinishSyncTasks(limit int) []*Task {
-	var tasks []*Task
-	var err error
-	// get all tasks progress is not 100%
-	err = DB.Where("progress != ?", "100%").Where("status != ?", TaskStatusFailure).Where("status != ?", TaskStatusSuccess).Limit(limit).Order("id").Find(&tasks).Error
-	if err != nil {
+func GetAllUnFinishSyncTasks(limit int, accept ...func(*Task) bool) []*Task {
+	return findPollableTasks(DB, limit, accept...)
+}
+
+// Filter after decoding private_data without database-specific JSON operators.
+// The cursor advances over skipped rows, so they cannot occupy the whole LIMIT.
+func findPollableTasks(query *gorm.DB, limit int, accept ...func(*Task) bool) []*Task {
+	if limit <= 0 {
 		return nil
+	}
+	var tasks []*Task
+	var afterID int64
+	for len(tasks) < limit {
+		var page []*Task
+		err := query.Session(&gorm.Session{}).Where("id > ? AND progress != ?", afterID, "100%").
+			Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+			Order("id").Limit(limit).Find(&page).Error
+		if err != nil {
+			return nil
+		}
+		for _, task := range page {
+			afterID = task.ID
+			if task.HasForeignExecutionEvidence() || (len(accept) > 0 && accept[0] != nil && !accept[0](task)) {
+				continue
+			}
+			tasks = append(tasks, task)
+			if len(tasks) == limit {
+				return tasks
+			}
+		}
+		if len(page) < limit {
+			break
+		}
 	}
 	return tasks
 }
@@ -360,6 +433,9 @@ func GetByOnlyTaskId(taskId string) (*Task, bool, error) {
 	exist, err := RecordExist(err)
 	if err != nil {
 		return nil, false, err
+	}
+	if exist && !task.ResultRetrievable() {
+		return nil, false, nil
 	}
 	return task, exist, err
 }
@@ -376,6 +452,9 @@ func GetByTaskId(userId int, taskId string) (*Task, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
+	if exist && !task.ResultRetrievable() {
+		return nil, false, nil
+	}
 	return task, exist, err
 }
 
@@ -390,23 +469,55 @@ func GetByTaskIds(userId int, taskIds []any) ([]*Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	return task, nil
+	visible := make([]*Task, 0, len(task))
+	for _, item := range task {
+		if item.ResultRetrievable() {
+			visible = append(visible, item)
+		}
+	}
+	return visible, nil
 }
 
-func (Task *Task) Insert() error {
-	var err error
-	err = DB.Create(Task).Error
+func (task *Task) Insert() error {
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := LockTaskBillingUserTx(tx, task.UserId); err != nil {
+			return err
+		}
+		if task.Status == TaskStatusSuccess || task.Status == TaskStatusFailure {
+			if task.BillingState != TaskBillingPending {
+				task.BillingState, task.BillingQuota = TaskBillingPending, task.Quota
+			}
+			if task.Status == TaskStatusFailure {
+				task.BillingQuota = 0
+			}
+		}
+		if err := tx.Create(task).Error; err != nil {
+			return err
+		}
+		if task.PrivateData.BillingKey != "" {
+			return BindWalletReservationTaskTx(tx, task.PrivateData.BillingKey, task.UserId, "task", task.ID)
+		}
+		return nil
+	})
+	if task.PrivateData.BillingSource == "subscription" && task.PrivateData.BillingKey != "" {
+		return billingReservationAfterCommit(DB, task.UserId, err)
+	}
 	return err
 }
 
 type taskSnapshot struct {
-	Status     TaskStatus
-	Progress   string
-	StartTime  int64
-	FinishTime int64
-	FailReason string
-	ResultURL  string
-	Data       json.RawMessage
+	Status           TaskStatus
+	Progress         string
+	StartTime        int64
+	FinishTime       int64
+	FailReason       string
+	ResultURL        string
+	PollFailures     int
+	LastPollClass    string
+	ScriptState      string
+	ScriptUsage      string
+	ScriptUsageError string
+	Data             json.RawMessage
 }
 
 func (s taskSnapshot) Equal(other taskSnapshot) bool {
@@ -416,29 +527,80 @@ func (s taskSnapshot) Equal(other taskSnapshot) bool {
 		s.FinishTime == other.FinishTime &&
 		s.FailReason == other.FailReason &&
 		s.ResultURL == other.ResultURL &&
+		s.PollFailures == other.PollFailures &&
+		s.LastPollClass == other.LastPollClass &&
+		s.ScriptState == other.ScriptState &&
+		s.ScriptUsage == other.ScriptUsage &&
+		s.ScriptUsageError == other.ScriptUsageError &&
 		bytes.Equal(s.Data, other.Data)
 }
 
 func (t *Task) Snapshot() taskSnapshot {
 	return taskSnapshot{
-		Status:     t.Status,
-		Progress:   t.Progress,
-		StartTime:  t.StartTime,
-		FinishTime: t.FinishTime,
-		FailReason: t.FailReason,
-		ResultURL:  t.PrivateData.ResultURL,
-		Data:       t.Data,
+		Status:           t.Status,
+		Progress:         t.Progress,
+		StartTime:        t.StartTime,
+		FinishTime:       t.FinishTime,
+		FailReason:       t.FailReason,
+		ResultURL:        t.PrivateData.ResultURL,
+		PollFailures:     t.PrivateData.PollFailures,
+		LastPollClass:    t.PrivateData.LastPollClass,
+		ScriptState:      t.PrivateData.ScriptPluginState,
+		ScriptUsage:      t.PrivateData.ScriptPluginUsage,
+		ScriptUsageError: t.PrivateData.ScriptPluginUsageError,
+		Data:             t.Data,
 	}
 }
 
-func (Task *Task) Update() error {
-	var err error
-	err = DB.Save(Task).Error
-	return err
+func (t *Task) Update() error {
+	if t == nil {
+		return gorm.ErrInvalidData
+	}
+	if t.HasForeignExecutionEvidence() {
+		return ErrTaskExecutionProtected
+	}
+	if t.ID == 0 {
+		return DB.Create(t).Error
+	}
+	updated := false
+	err := guardedTaskWrites(DB.Where("id = ?", t.ID), false, func(tx *gorm.DB, stored *Task) error {
+		if stored.UserId != t.UserId {
+			return errors.New("task owner changed while acquiring write locks")
+		}
+		privateData, err := mergeTaskWritePrivateData(stored.PrivateData, t.PrivateData)
+		if err != nil {
+			return err
+		}
+		copy := *t
+		copy.PrivateData = privateData
+		if err := tx.Model(stored).Select("*").Updates(&copy).Error; err != nil {
+			return err
+		}
+		t.PrivateData = privateData
+		updated = true
+		return nil
+	})
+	if err != nil || updated {
+		return err
+	}
+	// Preserve Save's create behavior without its upsert fallback: a concurrent
+	// insert must cause a conflict, never overwrite an unchecked existing row.
+	return DB.Create(t).Error
 }
 
 func (t *Task) UpdateQuota() error {
-	return DB.Model(t).Update("quota", t.Quota).Error
+	if t == nil {
+		return gorm.ErrInvalidData
+	}
+	if t.HasForeignExecutionEvidence() {
+		return ErrTaskExecutionProtected
+	}
+	if t.ID == 0 {
+		return gorm.ErrMissingWhereClause
+	}
+	return guardedTaskWrites(DB.Where("id = ?", t.ID), false, func(tx *gorm.DB, stored *Task) error {
+		return tx.Model(stored).Update("quota", t.Quota).Error
+	})
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
@@ -450,25 +612,89 @@ func (t *Task) UpdateQuota() error {
 // falls back to INSERT ON CONFLICT when the WHERE-guarded UPDATE matches
 // zero rows, which silently bypasses the CAS guard.
 func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
-	result := DB.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
-	if result.Error != nil {
-		return false, result.Error
+	if t.HasForeignExecutionEvidence() {
+		return false, ErrTaskExecutionProtected
 	}
-	return result.RowsAffected > 0, nil
+	won := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := LockTaskBillingUserTx(tx, t.UserId); err != nil {
+			return err
+		}
+		var stored Task
+		if err := walletCurrentTx(tx).First(&stored, t.ID).Error; err != nil {
+			return err
+		}
+		if stored.HasForeignExecutionEvidence() {
+			return ErrTaskExecutionProtected
+		}
+		if stored.UserId != t.UserId || stored.Status != fromStatus ||
+			stored.Status == TaskStatusSuccess || stored.Status == TaskStatusFailure {
+			return nil
+		}
+		// Merge only fields owned by polling into the locked row. In particular,
+		// a stale snapshot must not restore billing identities or settlement data.
+		resultURL := t.PrivateData.ResultURL
+		resultMetadata := t.PrivateData.ResultMetadata
+		pollFailures, pollClass := t.PrivateData.PollFailures, t.PrivateData.LastPollClass
+		scriptPoll := t.scriptPollMetadata
+		mergeScriptPoll := scriptPoll != nil && t.PrivateData.ScriptPluginID > 0 &&
+			t.PrivateData.ScriptPluginID == stored.PrivateData.ScriptPluginID &&
+			t.PrivateData.ScriptPluginDigest != "" && t.PrivateData.ScriptPluginDigest == stored.PrivateData.ScriptPluginDigest
+		t.PrivateData = stored.PrivateData
+		if mergeScriptPoll {
+			// Empty strings are intentional updates too. Omitted state and all
+			// fields outside this adapter's whitelist remain owned by the row.
+			if scriptPoll.statePresent {
+				t.PrivateData.ScriptPluginState = scriptPoll.state
+			}
+			t.PrivateData.ScriptPluginUsage, t.PrivateData.ScriptPluginUsageError = scriptPoll.usage, scriptPoll.usageError
+		}
+		t.PrivateData.ResultURL = resultURL
+		if resultMetadata != nil {
+			t.PrivateData.ResultMetadata = resultMetadata
+		}
+		// Only an explicitly healthy poll clears the durable failure counter.
+		if pollFailures == 0 && pollClass == "ok" {
+			t.PrivateData.PollFailures, t.PrivateData.LastPollClass = 0, "ok"
+		}
+		if t.BillingState != TaskBillingSkipped {
+			t.Quota = stored.Quota
+		}
+		if t.Status == TaskStatusSuccess || t.Status == TaskStatusFailure {
+			if t.BillingState != TaskBillingPending && t.BillingState != TaskBillingSkipped {
+				t.BillingQuota = stored.Quota
+			}
+			if t.Status == TaskStatusFailure {
+				t.BillingQuota = 0
+			}
+			if t.BillingState != TaskBillingSkipped {
+				t.BillingState = TaskBillingPending
+			}
+		} else {
+			t.BillingState, t.BillingQuota = stored.BillingState, stored.BillingQuota
+		}
+		result := tx.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
+		won = result.RowsAffected == 1
+		return result.Error
+	})
+	if err == nil {
+		t.scriptPollMetadata = nil
+	}
+	return won, err
 }
 
-// TaskBulkUpdate performs an unconditional bulk UPDATE by upstream task_id strings.
-// Same caveats as TaskBulkUpdateByID — no CAS guard.
+// TaskBulkUpdate updates by upstream task_id, skipping protected rows under lock.
+// Same caveats and partial-skip contract as TaskBulkUpdateByID — no status CAS.
 func TaskBulkUpdate(taskIds []string, params map[string]any) error {
 	if len(taskIds) == 0 {
 		return nil
 	}
-	return DB.Model(&Task{}).
-		Where("task_id in (?)", taskIds).
-		Updates(params).Error
+	return guardedTaskBulkUpdate(DB.Where("task_id in (?)", taskIds), params)
 }
 
-// TaskBulkUpdateByID performs an unconditional bulk UPDATE by primary key IDs.
+// TaskBulkUpdateByID skips protected rows and updates native rows in one
+// transaction. A protected row is a successful skip; any other error rolls back
+// the entire batch. Missing IDs remain no-ops. private_data is merged per row.
 // WARNING: This function has NO CAS (Compare-And-Swap) guard — it will overwrite
 // any concurrent status changes. DO NOT use in billing/quota lifecycle flows
 // (e.g., timeout, success, failure transitions that trigger refunds or settlements).
@@ -477,9 +703,7 @@ func TaskBulkUpdateByID(ids []int64, params map[string]any) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	return DB.Model(&Task{}).
-		Where("id in (?)", ids).
-		Updates(params).Error
+	return guardedTaskBulkUpdate(DB.Where("id in (?)", ids), params)
 }
 
 type TaskQuotaUsage struct {

@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -32,42 +34,11 @@ func SecureVerificationRequired() gin.HandlerFunc {
 			return
 		}
 
-		// 检查 session 中的验证时间戳
-		session := sessions.Default(c)
-		verifiedAtRaw := session.Get(SecureVerificationSessionKey)
-
-		if verifiedAtRaw == nil {
+		if !service.HasFreshSessionVerification(c, "", SecureVerificationTimeout*time.Second) {
 			c.JSON(http.StatusForbidden, gin.H{
 				"success": false,
 				"message": "需要安全验证",
 				"code":    "VERIFICATION_REQUIRED",
-			})
-			c.Abort()
-			return
-		}
-
-		verifiedAt, ok := verifiedAtRaw.(int64)
-		if !ok {
-			// session 数据格式错误
-			clearSecureVerificationSession(session)
-			c.JSON(http.StatusForbidden, gin.H{
-				"success": false,
-				"message": "验证状态异常，请重新验证",
-				"code":    "VERIFICATION_INVALID",
-			})
-			c.Abort()
-			return
-		}
-
-		// 检查验证是否过期
-		elapsed := time.Now().Unix() - verifiedAt
-		if elapsed >= SecureVerificationTimeout {
-			// 验证已过期，清除 session
-			clearSecureVerificationSession(session)
-			c.JSON(http.StatusForbidden, gin.H{
-				"success": false,
-				"message": "验证已过期，请重新验证",
-				"code":    "VERIFICATION_EXPIRED",
 			})
 			c.Abort()
 			return
@@ -95,32 +66,14 @@ func OptionalSecureVerification() gin.HandlerFunc {
 			return
 		}
 
-		session := sessions.Default(c)
-		verifiedAtRaw := session.Get(SecureVerificationSessionKey)
-
-		if verifiedAtRaw == nil {
-			c.Set("secure_verified", false)
-			c.Next()
-			return
+		verified := service.HasFreshSessionVerification(c, "", SecureVerificationTimeout*time.Second)
+		c.Set("secure_verified", verified)
+		if verified {
+			_, record, err := service.CurrentSessionUser(c)
+			if err == nil {
+				c.Set("secure_verified_at", record.VerifiedAt)
+			}
 		}
-
-		verifiedAt, ok := verifiedAtRaw.(int64)
-		if !ok {
-			c.Set("secure_verified", false)
-			c.Next()
-			return
-		}
-
-		elapsed := time.Now().Unix() - verifiedAt
-		if elapsed >= SecureVerificationTimeout {
-			clearSecureVerificationSession(session)
-			c.Set("secure_verified", false)
-			c.Next()
-			return
-		}
-
-		c.Set("secure_verified", true)
-		c.Set("secure_verified_at", verifiedAt)
 		c.Next()
 	}
 }
@@ -128,6 +81,9 @@ func OptionalSecureVerification() gin.HandlerFunc {
 // ClearSecureVerification 清除安全验证状态
 // 用于用户登出或需要强制重新验证的场景
 func ClearSecureVerification(c *gin.Context) {
+	if user, _, err := service.CurrentSessionUser(c); err == nil {
+		_ = model.ClearUserSessionVerification(service.SessionBinding(c), user.Id)
+	}
 	session := sessions.Default(c)
 	clearSecureVerificationSession(session)
 }

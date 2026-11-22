@@ -28,7 +28,6 @@ import {
   Spin,
 } from '@douyinfe/semi-ui';
 import {
-  compareObjects,
   API,
   showError,
   showSuccess,
@@ -36,10 +35,11 @@ import {
   verifyJSON,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
+import { optionValuesEqual, saveOptionBatch, useOptionDrafts } from './hooks/optionSave';
 
 export default function ModelRatioSettings(props) {
   const [loading, setLoading] = useState(false);
-  const [inputs, setInputs] = useState({
+  const { inputs, setInputs, baseline: inputsRow, beginSave, finishSave } = useOptionDrafts({
     ModelPrice: '',
     ModelRatio: '',
     CacheRatio: '',
@@ -50,90 +50,56 @@ export default function ModelRatioSettings(props) {
     AudioCompletionRatio: '',
     ExposeRatioEnabled: false,
     CompletionRatioOverrideEnabled: true,
-  });
+  }, props.options, loading);
   const refForm = useRef();
-  const [inputsRow, setInputsRow] = useState(inputs);
   const { t } = useTranslation();
 
   async function onSubmit() {
+    if (loading) return;
     try {
-      await refForm.current
-        .validate()
-        .then(() => {
-          const updateArray = compareObjects(inputs, inputsRow);
-          if (!updateArray.length)
-            return showWarning(t('你似乎并没有修改什么'));
-
-          const requestQueue = updateArray.map((item) => {
-            const value =
-              typeof inputs[item.key] === 'boolean'
-                ? String(inputs[item.key])
-                : inputs[item.key];
-            return API.put('/api/option/', { key: item.key, value });
-          });
-
-          setLoading(true);
-          Promise.all(requestQueue)
-            .then((res) => {
-              if (res.includes(undefined)) {
-                return showError(
-                  requestQueue.length > 1
-                    ? t('部分保存失败，请重试')
-                    : t('保存失败'),
-                );
-              }
-
-              for (let i = 0; i < res.length; i++) {
-                if (!res[i].data.success) {
-                  return showError(res[i].data.message);
-                }
-              }
-
-              showSuccess(t('保存成功'));
-              props.refresh();
-            })
-            .catch((error) => {
-              console.error('Unexpected error:', error);
-              showError(t('保存失败，请重试'));
-            })
-            .finally(() => {
-              setLoading(false);
-            });
-        })
-        .catch(() => {
-          showError(t('请检查输入'));
-        });
-    } catch (error) {
+      await refForm.current.validate();
+    } catch {
       showError(t('请检查输入'));
-      console.error(error);
+      return;
+    }
+    const updates = Object.keys(inputs).filter((key) => !optionValuesEqual(inputs[key], inputsRow[key])).map((key) => ({
+      key,
+      value: typeof inputs[key] === 'boolean' ? String(inputs[key]) : inputs[key],
+    }));
+    if (!updates.length) return showWarning(t('你似乎并没有修改什么'));
+    beginSave();
+    setLoading(true);
+    try {
+      await saveOptionBatch(updates, props.refresh, t, finishSave);
+    } finally {
+      setLoading(false);
     }
   }
 
   async function resetModelRatio() {
+    if (loading) return;
+    setLoading(true);
+    let resetSucceeded = false;
     try {
-      let res = await API.post(`/api/option/rest_model_ratio`);
-      if (res.data.success) {
-        showSuccess(res.data.message);
-        props.refresh();
-      } else {
-        showError(res.data.message);
-      }
+      const res = await API.post('/api/option/rest_model_ratio');
+      resetSucceeded = Boolean(res.data.success);
+      if (!resetSucceeded) showError(res.data.message || t('保存失败'));
     } catch (error) {
-      showError(error);
+      showError(error.message || t('保存失败'));
+    }
+    try {
+      const refreshed = await props.refresh();
+      if (resetSucceeded && refreshed) showSuccess(t('保存成功'));
+    } catch {
+      showError(t('刷新失败'));
+    } finally {
+      setLoading(false);
     }
   }
 
   useEffect(() => {
-    const currentInputs = {};
-    for (let key in props.options) {
-      if (Object.keys(inputs).includes(key)) {
-        currentInputs[key] = props.options[key];
-      }
-    }
-    setInputs(currentInputs);
-    setInputsRow(structuredClone(currentInputs));
-    refForm.current.setValues(currentInputs);
-  }, [props.options]);
+    refForm.current?.setValues(inputs);
+  }, [inputs]);
 
   return (
     <Spin spinning={loading}>

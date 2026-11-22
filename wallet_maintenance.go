@@ -8,9 +8,10 @@ import (
 )
 
 // runWalletMaintenance executes an explicit, operator-driven wallet credit
-// maintenance action and returns so the caller can shut down. Accounting
-// writers MUST be stopped and drained before "init"; otherwise a mixed-version
-// fleet could create balances that are not backed by source lots.
+// maintenance action and returns so the caller can shut down. Legacy versions
+// without the database baseline gate MUST be stopped and drained before "init".
+// Compatible writers share the model gate, and unfinished persistent legacy
+// reservations reject initialization until completion or explicit recovery.
 //
 //	NEXUS_WALLET_MAINTENANCE=init    snapshot legacy balances as non-eligible lots
 //	NEXUS_WALLET_MAINTENANCE=verify  check quota == lots - open debt for every user

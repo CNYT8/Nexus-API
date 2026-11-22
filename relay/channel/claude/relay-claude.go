@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -35,21 +36,22 @@ const (
 func openAIFileContentToClaudeMedia(c *gin.Context, mediaMessage dto.MediaContent) (*dto.ClaudeMediaMessage, error) {
 	source := mediaMessage.ToFileSource()
 	if source == nil {
-		return nil, nil
+		return nil, fmt.Errorf("Claude media requires file_data or file_url; file_id alone is unsupported")
 	}
 
-	mimeType := ""
+	mimeType, title := "", ""
 	if mediaMessage.Type == dto.ContentTypeFile {
-		file := mediaMessage.GetFile()
-		if file != nil {
-			if i := strings.LastIndex(file.FileName, "."); i >= 0 && i < len(file.FileName)-1 {
-				mimeType = service.GetMimeTypeByExtension(file.FileName[i+1:])
+		if file := mediaMessage.GetFile(); file != nil {
+			title = file.FileName
+			if i := strings.LastIndex(title, "."); i >= 0 && i < len(title)-1 {
+				mimeType = service.GetMimeTypeByExtension(title[i+1:])
 			}
 		}
-		if mimeType == "" || mimeType == "application/octet-stream" {
-			return nil, nil
+		// A data URI carries its own MIME type. Use the filename only for raw
+		// base64, leaving URL resolution and existing source caches intact.
+		if !source.IsURL() && !source.HasCache() && !strings.HasPrefix(source.GetRawData(), "data:") && mimeType != "" && mimeType != "application/octet-stream" {
+			source = types.NewFileSourceFromData(source.GetRawData(), mimeType)
 		}
-		source = types.NewFileSourceFromData(source.GetRawData(), mimeType)
 	}
 
 	base64Data, detectedMimeType, err := service.GetBase64Data(c, source, "formatting file for Claude")
@@ -59,38 +61,30 @@ func openAIFileContentToClaudeMedia(c *gin.Context, mediaMessage dto.MediaConten
 	if detectedMimeType != "" {
 		mimeType = detectedMimeType
 	}
-
-	switch {
-	case strings.HasPrefix(mimeType, "text/"):
-		decoded, err := base64.StdEncoding.DecodeString(base64Data)
-		if err != nil {
-			return nil, err
-		}
-		return &dto.ClaudeMediaMessage{
-			Type: "text",
-			Text: common.GetPointer[string](string(decoded)),
-		}, nil
-	case strings.HasPrefix(mimeType, "application/pdf"):
-		return &dto.ClaudeMediaMessage{
-			Type: "document",
-			Source: &dto.ClaudeMessageSource{
-				Type:      "base64",
-				MediaType: mimeType,
-				Data:      base64Data,
-			},
-		}, nil
-	case strings.HasPrefix(mimeType, "image/"):
-		return &dto.ClaudeMediaMessage{
-			Type: "image",
-			Source: &dto.ClaudeMessageSource{
-				Type:      "base64",
-				MediaType: mimeType,
-				Data:      base64Data,
-			},
-		}, nil
-	default:
-		return nil, nil
+	mimeType, _, _ = strings.Cut(strings.ToLower(strings.TrimSpace(mimeType)), ";")
+	mimeType = strings.TrimSpace(mimeType)
+	if mimeType == "image/jpg" {
+		mimeType = "image/jpeg"
 	}
+	block := &dto.ClaudeMediaMessage{CacheControl: mediaMessage.CacheControl}
+	switch {
+	case strings.HasPrefix(mimeType, "text/") || mimeType == "application/json":
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(base64Data))
+		if err != nil || !utf8.Valid(decoded) {
+			return nil, fmt.Errorf("text file of MIME type %q could not be decoded as UTF-8 text", mimeType)
+		}
+		block.Type, block.Title = "document", title
+		block.Source = &dto.ClaudeMessageSource{Type: "text", MediaType: "text/plain", Data: string(decoded)}
+	case mimeType == "application/pdf":
+		block.Type, block.Title = "document", title
+		block.Source = &dto.ClaudeMessageSource{Type: "base64", MediaType: mimeType, Data: base64Data}
+	case mimeType == "image/jpeg" || mimeType == "image/png" || mimeType == "image/gif" || mimeType == "image/webp":
+		block.Type = "image"
+		block.Source = &dto.ClaudeMessageSource{Type: "base64", MediaType: mimeType, Data: base64Data}
+	default:
+		return nil, fmt.Errorf("Claude Messages cannot carry content of MIME type %q", mimeType)
+	}
+	return block, nil
 }
 
 func stopReasonClaude2OpenAI(reason string) string {
@@ -110,25 +104,26 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 	claudeTools := make([]any, 0, len(textRequest.Tools))
 
 	for _, tool := range textRequest.Tools {
-		if params, ok := tool.Function.Parameters.(map[string]any); ok {
-			claudeTool := dto.Tool{
-				Name:        tool.Function.Name,
-				Description: tool.Function.Description,
+		if tool.Type != "" && tool.Type != "function" {
+			hosted, err := chatHostedToolToClaude(tool)
+			if err != nil {
+				return nil, err
 			}
-			claudeTool.InputSchema = make(map[string]interface{})
-			if params["type"] != nil {
-				claudeTool.InputSchema["type"] = params["type"].(string)
-			}
-			claudeTool.InputSchema["properties"] = params["properties"]
-			claudeTool.InputSchema["required"] = params["required"]
-			for s, a := range params {
-				if s == "type" || s == "properties" || s == "required" {
-					continue
-				}
-				claudeTool.InputSchema[s] = a
-			}
-			claudeTools = append(claudeTools, &claudeTool)
+			claudeTools = append(claudeTools, hosted)
+			continue
 		}
+		params := map[string]any{"type": "object", "properties": map[string]any{}}
+		if tool.Function.Parameters != nil {
+			var err error
+			params, err = common.Any2Type[map[string]any](tool.Function.Parameters)
+			if err != nil || params == nil {
+				return nil, fmt.Errorf("tool %q parameters must be an object", tool.Function.Name)
+			}
+		}
+		claudeTools = append(claudeTools, &dto.Tool{
+			Name: tool.Function.Name, Description: tool.Function.Description,
+			InputSchema: params, Strict: tool.Function.Strict,
+		})
 	}
 
 	// Web search tool
@@ -189,8 +184,8 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 		Temperature:   textRequest.Temperature,
 		Tools:         claudeTools,
 	}
-	if maxTokens := textRequest.GetMaxTokens(); maxTokens > 0 {
-		claudeRequest.MaxTokens = common.GetPointer(maxTokens)
+	if textRequest.MaxCompletionTokens != nil || textRequest.MaxTokens != nil {
+		claudeRequest.MaxTokens = common.GetPointer(textRequest.GetMaxTokens())
 	}
 	if textRequest.TopP != nil {
 		claudeRequest.TopP = common.GetPointer(*textRequest.TopP)
@@ -203,6 +198,9 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 	}
 
 	// 处理 tool_choice 和 parallel_tool_calls
+	if textRequest.ToolChoice != nil && mapToolChoice(textRequest.ToolChoice, nil) == nil {
+		return nil, fmt.Errorf("unsupported Chat tool_choice for Claude conversion")
+	}
 	if textRequest.ToolChoice != nil || textRequest.ParallelTooCalls != nil {
 		claudeToolChoice := mapToolChoice(textRequest.ToolChoice, textRequest.ParallelTooCalls)
 		if claudeToolChoice != nil {
@@ -210,7 +208,7 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 		}
 	}
 
-	if claudeRequest.MaxTokens == nil || *claudeRequest.MaxTokens == 0 {
+	if claudeRequest.MaxTokens == nil {
 		defaultMaxTokens := uint(model_setting.GetClaudeSettings().GetDefaultMaxTokens(textRequest.Model))
 		claudeRequest.MaxTokens = &defaultMaxTokens
 	}
@@ -249,15 +247,18 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 			claudeRequest.TopP = nil
 			claudeRequest.TopK = nil
 		} else {
-			// 因为BudgetTokens 必须大于1024
-			if claudeRequest.MaxTokens == nil || *claudeRequest.MaxTokens < 1280 {
+			// A client cap is an upper bound, including an explicit zero. Only
+			// the server default may be raised to accommodate thinking.
+			if textRequest.MaxCompletionTokens == nil && textRequest.MaxTokens == nil && *claudeRequest.MaxTokens < 1280 {
 				claudeRequest.MaxTokens = common.GetPointer[uint](1280)
 			}
-
-			// BudgetTokens 为 max_tokens 的 80%
+			budget := int(float64(*claudeRequest.MaxTokens) * model_setting.GetClaudeSettings().ThinkingAdapterBudgetTokensPercentage)
+			if budget < 1024 {
+				budget = 1024
+			}
 			claudeRequest.Thinking = &dto.Thinking{
 				Type:         "enabled",
-				BudgetTokens: common.GetPointer[int](int(float64(*claudeRequest.MaxTokens) * model_setting.GetClaudeSettings().ThinkingAdapterBudgetTokensPercentage)),
+				BudgetTokens: &budget,
 			}
 			// TODO: 临时处理
 			// https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#important-considerations-when-using-extended-thinking
@@ -302,6 +303,16 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 				Type:         "enabled",
 				BudgetTokens: &budgetTokens,
 			}
+		}
+	}
+
+	if err := helper.ApplyRequestModelModifiers(c, &claudeRequest, textRequest.Model); err != nil {
+		return nil, err
+	}
+	if claudeRequest.Thinking != nil && claudeRequest.Thinking.Type == "enabled" && claudeRequest.Thinking.BudgetTokens != nil {
+		budget := *claudeRequest.Thinking.BudgetTokens
+		if budget < 1024 || (claudeRequest.MaxTokens != nil && uint(budget) >= *claudeRequest.MaxTokens) {
+			return nil, fmt.Errorf("Claude thinking budget must be at least 1024 and less than the explicit output token limit")
 		}
 	}
 
@@ -531,8 +542,13 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 	} else if claudeResponse.Type == "content_block_start" {
 		if claudeResponse.ContentBlock != nil {
 			// 如果是文本块，尽可能发送首段文本（若存在）
-			if claudeResponse.ContentBlock.Type == "text" && claudeResponse.ContentBlock.Text != nil {
-				choice.Delta.SetContentString(*claudeResponse.ContentBlock.Text)
+			if claudeResponse.ContentBlock.Type == "text" {
+				if claudeResponse.ContentBlock.Text != nil {
+					choice.Delta.SetContentString(*claudeResponse.ContentBlock.Text)
+				}
+				if annotations := claudeCitationsToChat(claudeResponse.ContentBlock.Citations, claudeResponse.ContentBlock.GetText(), ""); len(annotations) > 0 {
+					choice.Delta.Annotations, _ = json.Marshal(annotations)
+				}
 			}
 			if claudeResponse.ContentBlock.Type == "tool_use" {
 				tools = append(tools, dto.ToolCallResponse{
@@ -566,6 +582,12 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 				choice.Delta.ReasoningContent = &signatureContent
 			case "thinking_delta":
 				choice.Delta.ReasoningContent = claudeResponse.Delta.Thinking
+			case "citations_delta":
+				if len(claudeResponse.Delta.Citation) > 0 {
+					if annotations := claudeCitationsToChat([]json.RawMessage{claudeResponse.Delta.Citation}, "", ""); len(annotations) > 0 {
+						choice.Delta.Annotations, _ = json.Marshal(annotations)
+					}
+				}
 			}
 		}
 	} else if claudeResponse.Type == "message_delta" {
@@ -598,13 +620,7 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 		Created: common.GetTimestamp(),
 	}
 	var responseText string
-	var responseThinking string
-	if len(claudeResponse.Content) > 0 {
-		responseText = claudeResponse.Content[0].GetText()
-		if claudeResponse.Content[0].Thinking != nil {
-			responseThinking = *claudeResponse.Content[0].Thinking
-		}
-	}
+	var annotations []any
 	tools := make([]dto.ToolCallResponse, 0)
 	thinkingContent := ""
 
@@ -624,10 +640,11 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 		case "thinking":
 			// 加密的不管， 只输出明文的推理过程
 			if message.Thinking != nil {
-				thinkingContent = *message.Thinking
+				thinkingContent += *message.Thinking
 			}
 		case "text":
-			responseText = message.GetText()
+			annotations = append(annotations, claudeCitationsToChat(message.Citations, message.GetText(), responseText)...)
+			responseText += message.GetText()
 		}
 	}
 	choice := dto.OpenAITextResponseChoice{
@@ -638,8 +655,8 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 		FinishReason: stopReasonClaude2OpenAI(claudeResponse.StopReason),
 	}
 	choice.SetStringContent(responseText)
-	if len(responseThinking) > 0 {
-		choice.ReasoningContent = &responseThinking
+	if len(annotations) > 0 {
+		choice.Message.Annotations, _ = json.Marshal(annotations)
 	}
 	if len(tools) > 0 {
 		choice.Message.SetToolCalls(tools)
@@ -660,6 +677,9 @@ type ClaudeResponseInfo struct {
 	ResponseText strings.Builder
 	Usage        *dto.Usage
 	Done         bool
+
+	citationBlocks     map[int]*claudeCitationBlock
+	citationTextOffset int
 }
 
 func cacheCreationTokensForOpenAIUsage(usage *dto.Usage) int {
@@ -889,6 +909,7 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		helper.ClaudeChunkData(c, claudeResponse, data)
 	} else if info.RelayFormat == types.RelayFormatOpenAI {
 		response := StreamResponseClaude2OpenAI(&claudeResponse)
+		claudeInfo.updateChatCitations(&claudeResponse, response)
 
 		if !FormatClaudeResponseInfo(&claudeResponse, response, claudeInfo) {
 			return nil
@@ -944,6 +965,7 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 }
 
 func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
+	defer helper.FinalizeThinkingStream(c)
 	claudeInfo := &ClaudeResponseInfo{
 		ResponseId:   helper.GetResponseID(c),
 		Created:      common.GetTimestamp(),
@@ -1006,8 +1028,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		c.Set("claude_web_search_requests", claudeResponse.Usage.ServerToolUse.WebSearchRequests)
 	}
 
-	service.IOCopyBytesGracefully(c, httpResp, responseData)
-	return nil
+	return service.WriteRelayJSON(c, httpResp, responseData, info)
 }
 
 func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
@@ -1025,7 +1046,7 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
 	logger.LogDebug(c, "Claude response body received: bytes=%d", len(responseBody))
-	if matcher := relaycommon.NewOutputSensitiveMatcherForConfig(info.OutputSensitiveConfig); matcher != nil {
+	if matcher := relaycommon.NewOutputSensitiveMatcherForConfig(info.OutputSensitiveConfig); !info.ThinkingProcessStrip && matcher != nil {
 		cleaned, matched, _, scanErr := relaycommon.SanitizeOutputSensitiveJSONWithThinkingPolicy(responseBody, matcher, info.ThinkingProcessStrip)
 		if scanErr != nil {
 			return nil, types.NewError(scanErr, types.ErrorCodeBadResponseBody)
@@ -1064,10 +1085,12 @@ func mapToolChoice(toolChoice any, parallelToolCalls *bool) *dto.ClaudeToolChoic
 				Type: "none",
 			}
 		}
-	} else if toolChoiceMap, ok := toolChoice.(map[string]interface{}); ok {
-		// 处理 tool_choice 对象值
+	} else if toolChoiceMap, err := common.Any2Type[map[string]interface{}](toolChoice); err == nil {
+		if kind, _ := toolChoiceMap["type"].(string); kind == "web_search" || kind == "web_search_preview" || strings.HasPrefix(kind, "web_search_20") {
+			claudeToolChoice = &dto.ClaudeToolChoice{Type: "tool", Name: "web_search"}
+		}
 		if function, ok := toolChoiceMap["function"].(map[string]interface{}); ok {
-			if toolName, ok := function["name"].(string); ok {
+			if toolName, ok := function["name"].(string); ok && toolName != "" {
 				claudeToolChoice = &dto.ClaudeToolChoice{
 					Type: "tool",
 					Name: toolName,

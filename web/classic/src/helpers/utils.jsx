@@ -24,6 +24,13 @@ import {
   BILLING_VAR_REGEX,
 } from '../constants';
 import i18next from 'i18next';
+import {
+  getServerErrorMessage,
+  getServerErrorStatus,
+  isServerErrorCancelled,
+  isServerErrorNotified,
+  markServerErrorNotified,
+} from './server-error-message';
 import React from 'react';
 import { toast } from 'react-toastify';
 import {
@@ -125,33 +132,29 @@ if (isMobileScreen) {
 }
 
 export function showError(error) {
+  if (isServerErrorCancelled(error)) return;
+  const status = getServerErrorStatus(error);
+  if (status === 401) {
+    markServerErrorNotified(error);
+    localStorage.removeItem('user');
+    window.location.href = '/login?expired=true';
+    return;
+  }
+  if (isServerErrorNotified(error)) return;
   console.error(error);
-  if (error.message) {
-    if (error.name === 'AxiosError') {
-      switch (error.response?.status) {
-        case 401:
-          // 清除用户状态
-          localStorage.removeItem('user');
-          // toast.error('错误：未登录或登录已过期，请重新登录！', showErrorOptions);
-          window.location.href = '/login?expired=true';
-          break;
-        case 429:
-          Toast.error(i18next.t('错误：请求次数过多，请稍后再试！'));
-          break;
-        case 500:
-          Toast.error(i18next.t('错误：服务器内部错误，请联系管理员！'));
-          break;
-        case 405:
-          Toast.info(i18next.t('本站仅作演示之用，无服务端！'));
-          break;
-        default:
-          Toast.error(i18next.t('错误：') + error.message);
-      }
-      return;
-    }
-    Toast.error(i18next.t('错误：') + error.message);
-  } else {
-    Toast.error(i18next.t('错误：') + error);
+  markServerErrorNotified(error);
+  switch (status) {
+    case 429:
+      Toast.error(i18next.t('错误：请求次数过多，请稍后再试！'));
+      break;
+    case 500:
+      Toast.error(i18next.t('错误：服务器内部错误，请联系管理员！'));
+      break;
+    case 405:
+      Toast.info(i18next.t('本站仅作演示之用，无服务端！'));
+      break;
+    default:
+      Toast.error(i18next.t('错误：') + getServerErrorMessage(error));
   }
 }
 

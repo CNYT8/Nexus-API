@@ -18,6 +18,8 @@ const (
 	WalletReservationFinalizing = "finalizing"
 	WalletReservationFinalized  = "finalized"
 	WalletReservationRefunded   = "refunded"
+	BillingDispatchPending      = "pending"
+	BillingDispatchStarted      = "dispatched"
 )
 
 var (
@@ -29,12 +31,20 @@ var (
 // ReservedQuota is an absolute total, not a delta. It remains available for
 // auditing after termination. Finalizing is a durable, non-refundable barrier.
 type WalletReservation struct {
-	ID             int64     `gorm:"primaryKey"`
-	ReservationKey string    `gorm:"type:char(64);not null;uniqueIndex"`
-	UserID         int       `gorm:"not null;index"`
-	ReservedQuota  int64     `gorm:"not null;default:0"`
-	State          string    `gorm:"type:varchar(24);not null;index:idx_wallet_reservation_recovery,priority:1"`
-	FinalQuota     int64     `gorm:"not null;default:0"`
+	ID             int64  `gorm:"primaryKey"`
+	ReservationKey string `gorm:"type:char(64);not null;uniqueIndex"`
+	UserID         int    `gorm:"not null;index"`
+	ReservedQuota  int64  `gorm:"not null;default:0"`
+	State          string `gorm:"type:varchar(24);not null;index:idx_wallet_reservation_recovery,priority:1"`
+	FinalQuota     int64  `gorm:"not null;default:0"`
+	TaskKind       string `gorm:"type:varchar(24);not null;default:'';index"`
+	TaskID         int64  `gorm:"not null;default:0"`
+	TokenID        int    `gorm:"not null;default:0"`
+	FundingMode    string `gorm:"type:varchar(24);not null;default:''"`
+	// 空值表示升级前的发送状态未知，不能作为自动退款依据。
+	DispatchState  string    `gorm:"type:varchar(16);not null;default:''"`
+	SubscriptionID int       `gorm:"not null;default:0"`
+	PeriodStart    int64     `gorm:"not null;default:0"`
 	CreatedAt      time.Time `gorm:"not null"`
 	UpdatedAt      time.Time `gorm:"not null;index:idx_wallet_reservation_recovery,priority:2"`
 }
@@ -54,6 +64,11 @@ type WalletLotHold struct {
 func walletLockUserTx(tx *gorm.DB, userID int) (*User, error) {
 	if tx == nil || userID <= 0 {
 		return nil, errors.New("invalid wallet user lock")
+	}
+	// Initialization and old-mode writers must serialize before taking any
+	// user/reservation/token locks. Nested billing helpers share this transaction.
+	if _, err := LockWalletCreditBaselineTx(tx); err != nil {
+		return nil, err
 	}
 	// SQLite has no row locks. Acquire its write lock before any accounting
 	// reads (including zero-delta operations), rather than upgrading a snapshot.
@@ -224,11 +239,11 @@ func ReserveWalletQuotaTx(tx *gorm.DB, key string, userID int, targetTotal int64
 	if targetTotal < 0 {
 		return ErrInvalidTopUpQuota
 	}
-	user, err := walletLockUserTx(tx, userID)
+	active, err := LockWalletCreditBaselineTx(tx)
 	if err != nil {
 		return err
 	}
-	active, err := walletCreditBaselineState(tx)
+	user, err := walletLockUserTx(tx, userID)
 	if err != nil {
 		return err
 	}
@@ -246,7 +261,7 @@ func ReserveWalletQuotaTx(tx *gorm.DB, key string, userID int, targetTotal int64
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		r = &WalletReservation{ReservationKey: key, UserID: userID, State: WalletReservationReserved, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+		r = &WalletReservation{ReservationKey: key, UserID: userID, State: WalletReservationReserved, DispatchState: BillingDispatchPending, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 		res := tx.Create(r)
 		if res.Error != nil {
 			return res.Error
@@ -257,10 +272,23 @@ func ReserveWalletQuotaTx(tx *gorm.DB, key string, userID int, targetTotal int64
 	} else if err != nil {
 		return err
 	}
-	if r.State != WalletReservationReserved || targetTotal < r.ReservedQuota {
+	if (r.FundingMode != "" && r.FundingMode != BillingReservationWallet) || r.State != WalletReservationReserved || targetTotal < r.ReservedQuota {
 		return ErrWalletReservationConflict
 	}
 	delta := targetTotal - r.ReservedQuota
+	if delta > 0 {
+		_, pending, err := walletPendingReversalQuotasTx(tx, userID)
+		if err != nil {
+			return err
+		}
+		available, err := walletCheckedAdd(int64(user.Quota), -pending)
+		if err != nil {
+			return err
+		}
+		if available < delta {
+			return ErrWalletInsufficientQuota
+		}
+	}
 	if err := walletChangeQuotaTx(tx, user, -delta, delta > 0); err != nil {
 		return err
 	}
@@ -335,11 +363,15 @@ func walletAcquireHoldsTx(tx *gorm.DB, key string, userID int, quota int64) erro
 	if err != nil {
 		return err
 	}
+	pending, _, err := walletPendingReversalQuotasTx(tx, userID)
+	if err != nil {
+		return err
+	}
 	for _, lot := range lots {
 		if quota == 0 {
 			break
 		}
-		n := lot.QuotaRemaining - totals[lot.ID]
+		n := max(int64(0), lot.QuotaRemaining-totals[lot.ID]-pending[lot.ID])
 		if n > quota {
 			n = quota
 		}
@@ -446,11 +478,20 @@ func ReleaseWalletReservationToTx(tx *gorm.DB, key string, userID int, expectedT
 	if r.State != WalletReservationReserved || r.ReservedQuota != expectedTotal {
 		return ErrWalletReservationConflict
 	}
-	if err := walletReleaseHoldsTx(tx, r, expectedTotal-targetTotal); err != nil {
-		return err
-	}
-	if err := walletChangeQuotaTx(tx, user, expectedTotal-targetTotal, false); err != nil {
-		return err
+	if r.FundingMode == BillingReservationLegacy {
+		if err := adjustLegacyBillingReservationTx(tx, r, targetTotal-expectedTotal, "release"); err != nil {
+			return err
+		}
+	} else {
+		if r.FundingMode != "" && r.FundingMode != BillingReservationWallet {
+			return ErrWalletReservationConflict
+		}
+		if err := walletReleaseHoldsTx(tx, r, expectedTotal-targetTotal); err != nil {
+			return err
+		}
+		if err := walletChangeQuotaTx(tx, user, expectedTotal-targetTotal, false); err != nil {
+			return err
+		}
 	}
 	if expectedTotal == targetTotal {
 		return nil
@@ -491,11 +532,25 @@ func RefundWalletReservationTx(tx *gorm.DB, key string, userID int) error {
 	if r.State != WalletReservationReserved {
 		return ErrWalletReservationConflict
 	}
-	if err := walletReleaseHoldsTx(tx, r, r.ReservedQuota); err != nil {
-		return err
-	}
-	if err := walletChangeQuotaTx(tx, user, r.ReservedQuota, false); err != nil {
-		return err
+	switch r.FundingMode {
+	case BillingReservationLegacy:
+		if err := adjustLegacyBillingReservationTx(tx, r, -r.ReservedQuota, "refund"); err != nil {
+			return err
+		}
+	case BillingReservationSubscription:
+		if _, err := adjustUserSubscriptionDeltaTx(tx, r.SubscriptionID, -r.ReservedQuota, r.PeriodStart, r.CreatedAt.Unix(), true, false); err != nil {
+			return err
+		}
+	default:
+		if r.FundingMode != "" && r.FundingMode != BillingReservationWallet {
+			return ErrWalletReservationConflict
+		}
+		if err := walletReleaseHoldsTx(tx, r, r.ReservedQuota); err != nil {
+			return err
+		}
+		if err := walletChangeQuotaTx(tx, user, r.ReservedQuota, false); err != nil {
+			return err
+		}
 	}
 	res := tx.Model(&WalletReservation{}).Where("id = ? AND state = ?", r.ID, r.State).Updates(map[string]interface{}{"state": WalletReservationRefunded, "updated_at": time.Now().UTC()})
 	if res.Error != nil {
@@ -508,10 +563,12 @@ func RefundWalletReservationTx(tx *gorm.DB, key string, userID int) error {
 }
 
 // RecoverFinalizingWalletSettlements replays only durable successful-usage
-// intents. It never refunds, mutates tokens, or guesses actual usage. Each
+// intents. Funding and the persisted token delta commit together; it never
+// refunds or guesses actual usage. Each
 // entry commits independently; errors remain retryable and are returned even
 // if other entries succeeded. The count is successfully handled candidates
 // (another worker may have already finalized one; that replay is harmless).
+// limit 限制实际尝试的记录数（含失败）；任务所属记录跳过，不占预算。
 func RecoverFinalizingWalletSettlements(db *gorm.DB, limit int) (int, error) {
 	if db == nil {
 		return 0, errors.New("wallet recovery requires a database")
@@ -519,20 +576,51 @@ func RecoverFinalizingWalletSettlements(db *gorm.DB, limit int) (int, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	var pending []WalletReservation
-	if err := db.Where("state = ?", WalletReservationFinalizing).Order("updated_at ASC, id ASC").Limit(limit).Find(&pending).Error; err != nil {
-		return 0, err
-	}
-	processed := 0
+	processed, afterID := 0, int64(0)
 	var failures []error
-	for _, r := range pending {
-		if _, err := FinalizeWalletConsumption(db, r.ReservationKey, r.UserID, r.ReservedQuota, r.FinalQuota); err != nil {
-			failures = append(failures, fmt.Errorf("recover wallet reservation %d: %w", r.ID, err))
-			continue
+	for {
+		var pending []WalletReservation
+		if err := db.Where("id > ? AND state = ?", afterID, WalletReservationFinalizing).Order("id ASC").Limit(limit).Find(&pending).Error; err != nil {
+			return processed, errors.Join(append(failures, err)...)
 		}
-		processed++
+		for _, r := range pending {
+			afterID = r.ID
+			skipped, inviterID := false, 0
+			err := db.Transaction(func(tx *gorm.DB) error {
+				if err := LockTaskBillingUserTx(tx, r.UserID); err != nil {
+					return err
+				}
+				// Reload after the user lock: a task may have bound this row
+				// since the candidate scan.
+				current, err := walletReservationTx(tx, r.ReservationKey, r.UserID)
+				if err != nil {
+					return err
+				}
+				owned, err := WalletReservationTaskOwnerTx(tx, current)
+				if err != nil || owned {
+					skipped = owned
+					return err
+				}
+				inviterID, _, err = FinalizeBillingReservationTx(tx, current.ReservationKey, current.UserID, current.ReservedQuota, current.FinalQuota)
+				return err
+			})
+			if err != nil {
+				failures = append(failures, fmt.Errorf("recover wallet reservation %d: %w", r.ID, err))
+			} else if !skipped {
+				_ = billingReservationAfterCommit(db, r.UserID, nil)
+				if inviterID > 0 {
+					_ = walletAfterCommit(db, inviterID, nil)
+				}
+				processed++
+			}
+			if processed+len(failures) >= limit {
+				return processed, errors.Join(failures...)
+			}
+		}
+		if len(pending) < limit {
+			return processed, errors.Join(failures...)
+		}
 	}
-	return processed, errors.Join(failures...)
 }
 
 // Prepare must commit separately BEFORE attempting final settlement. Recovery

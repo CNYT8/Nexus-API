@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   PaperclipIcon,
   FileIcon,
@@ -51,6 +51,7 @@ import {
 } from '@/components/ai-elements/prompt-input'
 import { Suggestion, Suggestions } from '@/components/ai-elements/suggestion'
 import { ModelGroupSelector } from '@/components/model-group-selector'
+import type { AccountSession } from '../hooks/use-account-session'
 import {
   IMAGE_FILE_ACCEPT,
   MAX_IMAGE_FILE_BYTES,
@@ -61,10 +62,27 @@ import {
   parseImageAttachment,
   parseTextAttachment,
 } from '../lib/attachments'
-import type { ModelOption, GroupOption } from '../types'
+import type {
+  ModelOption,
+  GroupOption,
+  ParameterEnabled,
+  PlaygroundConfig,
+} from '../types'
+import { PlaygroundParameterPanel } from './playground-parameter-panel'
 
 interface PlaygroundInputProps {
-  onSubmit: (text: string, images?: string[]) => void
+  config: PlaygroundConfig
+  parameterEnabled: ParameterEnabled
+  onConfigChange: <K extends keyof PlaygroundConfig>(
+    key: K,
+    value: PlaygroundConfig[K]
+  ) => void
+  onParameterEnabledChange: (
+    key: keyof ParameterEnabled,
+    value: boolean
+  ) => void
+  session: AccountSession
+  onSubmit: (text: string, images?: string[]) => boolean | void | Promise<boolean | void>
   onStop?: () => void
   disabled?: boolean
   isGenerating?: boolean
@@ -93,6 +111,7 @@ const suggestions = [
 ]
 
 export function PlaygroundInput({
+  session,
   onSubmit,
   onStop,
   disabled,
@@ -104,10 +123,24 @@ export function PlaygroundInput({
   groups,
   groupValue,
   onGroupChange,
+  config,
+  parameterEnabled,
+  onConfigChange,
+  onParameterEnabledChange,
   imageUrls = [],
   onImageUrlsChange,
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
+  const mountedRef = useRef(true)
+  const parsingRef = useRef(false)
+  const submittingRef = useRef(false)
+  const isCurrent = () => mountedRef.current && session.isCurrent()
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<
     Array<{ id: string; name: string; size: number; text: string }>
@@ -123,17 +156,34 @@ export function PlaygroundInput({
     disabled || isModelLoading || models.length === 0
   const isGroupSelectDisabled = disabled || groups.length === 0
 
-  const handleSubmit = (message: PromptInputMessage) => {
+  const handleSubmit = async (message: PromptInputMessage) => {
     const attachmentText = buildAttachmentTextBlock(attachments)
     const combined = [attachmentText, (message.text ?? '').trim()]
       .filter(Boolean)
       .join('\n\n')
-    if ((!combined && pendingImages.length === 0) || disabled) return
-    onSubmit(combined, pendingImages.length > 0 ? pendingImages : undefined)
-    setText('')
-    setAttachments([])
-    setPendingImages([])
-    onImageUrlsChange?.([])
+    if (
+      (!combined && pendingImages.length === 0) ||
+      disabled ||
+      isGenerating ||
+      submittingRef.current ||
+      parsingRef.current ||
+      !isCurrent()
+    )
+      return
+    submittingRef.current = true
+    try {
+      const accepted = await onSubmit(
+        combined,
+        pendingImages.length > 0 ? pendingImages : undefined
+      )
+      if (accepted === false || !isCurrent()) return
+      setText((current) => current === text ? '' : current)
+      setAttachments((current) => current.filter((item) => !attachments.includes(item)))
+      setPendingImages((current) => current.filter((url) => !pendingImages.includes(url)))
+      onImageUrlsChange?.([])
+    } finally {
+      submittingRef.current = false
+    }
   }
 
   // Text files are decoded in the browser and inlined into the prompt.
@@ -143,8 +193,9 @@ export function PlaygroundInput({
   ) => {
     const files = Array.from(event.target.files ?? [])
     event.target.value = ''
-    if (files.length === 0) return
+    if (files.length === 0 || parsingRef.current || !isCurrent()) return
 
+    parsingRef.current = true
     setParsingAttachment(true)
     try {
       for (const file of files) {
@@ -156,6 +207,7 @@ export function PlaygroundInput({
         }
 
         const result = await parseTextAttachment(file)
+        if (!isCurrent()) return
         if (!result.ok) {
           toast.warning(
             result.reason === 'too_large'
@@ -176,7 +228,8 @@ export function PlaygroundInput({
         ])
       }
     } finally {
-      setParsingAttachment(false)
+      parsingRef.current = false
+      if (isCurrent()) setParsingAttachment(false)
     }
   }
 
@@ -187,8 +240,9 @@ export function PlaygroundInput({
   ) => {
     const files = Array.from(event.target.files ?? [])
     event.target.value = ''
-    if (files.length === 0) return
+    if (files.length === 0 || parsingRef.current || !isCurrent()) return
 
+    parsingRef.current = true
     setParsingAttachment(true)
     try {
       const nextUrls = [...pendingImages]
@@ -201,6 +255,7 @@ export function PlaygroundInput({
         }
 
         const result = await parseImageAttachment(file)
+        if (!isCurrent()) return
         if (!result.ok) {
           toast.warning(
             result.reason === 'too_large'
@@ -217,7 +272,8 @@ export function PlaygroundInput({
         onImageUrlsChange?.(nextUrls)
       }
     } finally {
-      setParsingAttachment(false)
+      parsingRef.current = false
+      if (isCurrent()) setParsingAttachment(false)
     }
   }
 
@@ -241,9 +297,10 @@ export function PlaygroundInput({
         if (file) imageFiles.push(file)
       }
     }
-    if (imageFiles.length === 0) return
+    if (imageFiles.length === 0 || parsingRef.current || !isCurrent()) return
 
     event.preventDefault()
+    parsingRef.current = true
     setParsingAttachment(true)
     try {
       const nextUrls = [...pendingImages]
@@ -256,6 +313,7 @@ export function PlaygroundInput({
         }
 
         const result = await parseImageAttachment(file)
+        if (!isCurrent()) return
         if (!result.ok) {
           toast.warning(
             result.reason === 'too_large'
@@ -272,12 +330,14 @@ export function PlaygroundInput({
         onImageUrlsChange?.(nextUrls)
       }
     } finally {
-      setParsingAttachment(false)
+      parsingRef.current = false
+      if (isCurrent()) setParsingAttachment(false)
     }
   }
 
   const handleSuggestionClick = (suggestion: string) => {
-    onSubmit(suggestion)
+    if (disabled || isGenerating || submittingRef.current || parsingRef.current || !isCurrent()) return
+    void onSubmit(suggestion)
   }
 
   return (
@@ -425,6 +485,13 @@ export function PlaygroundInput({
               <span className='hidden sm:inline'>{t('Search')}</span>
               <span className='sr-only sm:hidden'>{t('Search')}</span>
             </PromptInputButton>
+            <PlaygroundParameterPanel
+              config={config}
+              disabled={disabled || isGenerating}
+              onConfigChange={onConfigChange}
+              onParameterEnabledChange={onParameterEnabledChange}
+              parameterEnabled={parameterEnabled}
+            />
           </PromptInputTools>
 
           <div className='flex flex-wrap items-center gap-1.5 md:gap-2'>
@@ -476,6 +543,7 @@ export function PlaygroundInput({
               text === 'More' ? 'hidden sm:flex' : ''
             }`}
             key={text}
+            disabled={disabled || isGenerating || parsingAttachment}
             onClick={() => handleSuggestionClick(text)}
             suggestion={text}
           >

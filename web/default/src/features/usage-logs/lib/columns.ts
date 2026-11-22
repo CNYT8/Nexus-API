@@ -19,7 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 /**
  * Column definitions factory
  */
+import { useMemo } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
+import { withResponseModelObservation } from './response-model-columns'
 import { useCommonLogsColumns } from '../components/columns/common-logs-columns'
 import { useDrawingLogsColumns } from '../components/columns/drawing-logs-columns'
 import { useTaskLogsColumns } from '../components/columns/task-logs-columns'
@@ -34,7 +36,11 @@ export function useColumnsByCategory(
   isAdmin: boolean
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): ColumnDef<any>[] {
-  const commonColumns = useCommonLogsColumns(isAdmin)
+  const baseCommonColumns = useCommonLogsColumns(isAdmin)
+  const commonColumns = useMemo(
+    () => withResponseModelObservation(baseCommonColumns, isAdmin),
+    [baseCommonColumns, isAdmin]
+  )
   const drawingColumns = useDrawingLogsColumns(isAdmin)
   const taskColumns = useTaskLogsColumns(isAdmin)
 

@@ -40,6 +40,8 @@ export const useModelsData = () => {
   const [editingModel, setEditingModel] = useState({
     id: undefined,
   });
+  const [deleteTargets, setDeleteTargets] = useState([]);
+  const [deleting, setDeleting] = useState(false);
 
   // Row selection
   const [selectedKeys, setSelectedKeys] = useState([]);
@@ -179,9 +181,9 @@ export const useModelsData = () => {
         const createdVendors = data?.created_vendors || 0;
         const skipped = (data?.skipped_models || []).length || 0;
         showSuccess(
-          t(
-            `已同步：新增 ${createdModels} 模型，新增 ${createdVendors} 供应商，跳过 ${skipped} 项`,
-          ),
+          t('已同步：新增 {{createdModels}} 模型，新增 {{createdVendors}} 供应商，跳过 {{skipped}} 项', {
+            createdModels, createdVendors, skipped,
+          }),
         );
         await loadVendors();
         await refresh();
@@ -232,9 +234,9 @@ export const useModelsData = () => {
         const createdVendors = data?.created_vendors || 0;
         const skipped = (data?.skipped_models || []).length || 0;
         showSuccess(
-          t(
-            `完成：新增 ${createdModels} 模型，更新 ${updatedModels} 模型，新增 ${createdVendors} 供应商，跳过 ${skipped} 项`,
-          ),
+          t('完成：新增 {{createdModels}} 模型，更新 {{updatedModels}} 模型，新增 {{createdVendors}} 供应商，跳过 {{skipped}} 项', {
+            createdModels, updatedModels, createdVendors, skipped,
+          }),
         );
         await loadVendors();
         await refresh();
@@ -295,8 +297,8 @@ export const useModelsData = () => {
     let res;
     switch (action) {
       case 'delete':
-        res = await API.delete(`/api/models/${id}`);
-        break;
+        setDeleteTargets([record]);
+        return;
       case 'enable':
         res = await API.put('/api/models/?status_only=true', { id, status: 1 });
         break;
@@ -310,18 +312,13 @@ export const useModelsData = () => {
     const { success, message } = res.data;
     if (success) {
       showSuccess(t('操作成功完成！'));
-      if (action === 'delete') {
-        await refresh();
-      } else {
-        // Update local state for enable/disable
-        setModels((prevModels) =>
-          prevModels.map((model) =>
-            model.id === id
-              ? { ...model, status: action === 'enable' ? 1 : 0 }
-              : model,
-          ),
-        );
-      }
+      setModels((prevModels) =>
+        prevModels.map((model) =>
+          model.id === id
+            ? { ...model, status: action === 'enable' ? 1 : 0 }
+            : model,
+        ),
+      );
     } else {
       showError(message);
     }
@@ -374,37 +371,35 @@ export const useModelsData = () => {
   };
 
   // Batch delete models
-  const batchDeleteModels = async () => {
-    if (selectedKeys.length === 0) {
-      showError(t('请至少选择一个模型'));
-      return;
-    }
-
+  const batchDeleteModels = async (options) => {
+    const ids = [...new Set(deleteTargets.map((model) => model.id))];
+    if (!ids.length || deleting) return false;
+    setDeleting(true);
     try {
-      const deletePromises = selectedKeys.map((model) =>
-        API.delete(`/api/models/${model.id}`),
-      );
-
-      const results = await Promise.all(deletePromises);
-      let successCount = 0;
-
-      results.forEach((res, index) => {
-        if (res.data.success) {
-          successCount++;
-        } else {
-          showError(
-            `删除模型 ${selectedKeys[index].model_name} 失败: ${res.data.message}`,
-          );
-        }
+      const { data: response } = await API.post('/api/models/batch/delete', {
+        model_ids: ids,
+        ...options,
       });
-
-      if (successCount > 0) {
-        showSuccess(t(`成功删除 ${successCount} 个模型`));
-        setSelectedKeys([]);
-        await refresh();
+      if (!response.success) throw new Error(response.message || t('批量删除失败'));
+      const deleted = response.data?.deleted_count ?? 0;
+      if (deleted > 0) showSuccess(t('成功删除 {{count}} 个模型', { count: deleted }));
+      if (response.data?.updated_channels) {
+        showSuccess(t('已更新 {{count}} 个渠道', { count: response.data.updated_channels }));
       }
+      // Atomic endpoint: a count alone cannot identify a partial set of IDs.
+      if (deleted !== ids.length) throw new Error(t('批量删除失败'));
+      setSelectedKeys((prev) => prev.filter((model) => !ids.includes(model.id)));
+      setDeleteTargets([]);
+      return true;
     } catch (error) {
-      showError(t('批量删除失败'));
+      showError(error.message || t('批量删除失败'));
+      return false;
+    } finally {
+      try {
+        await refresh();
+      } finally {
+        setDeleting(false);
+      }
     }
   };
 
@@ -448,6 +443,9 @@ export const useModelsData = () => {
     setEditingModel,
     setShowEdit,
     closeEdit,
+    deleteTargets,
+    setDeleteTargets,
+    deleting,
 
     // Form state
     formInitValues,

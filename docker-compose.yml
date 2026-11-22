@@ -28,15 +28,26 @@ services:
     environment:
       - SQL_DSN=postgresql://root:123456@postgres:5432/new-api # ⚠️ IMPORTANT: Change the password in production!
 #      - SQL_DSN=root:123456@tcp(mysql:3306)/new-api  # Point to the mysql service, uncomment if using MySQL
+#      - LOG_SQL_DSN=postgresql://root:123456@postgres:5432/new_api_logs  # 可选独立日志库，需预先创建数据库
+#      - LOG_SQL_DSN=clickhouse://default:123456@clickhouse:9000/new_api_logs  # 与上一项二选一，同时启用下方 ClickHouse 服务、依赖和卷
+#      - LOG_SQL_CLICKHOUSE_ENABLED=true  # 使用 ClickHouse 日志库时必须显式启用
+#      - LOG_SQL_CLICKHOUSE_ID_FLOOR=0  # 必填；仅全新日志库可用 0，切换时必须不低于所有保留日志库的最大日志 ID
+#      - LOG_SQL_CLICKHOUSE_TTL_DAYS=0  # 0 为永久保留，非零范围 31-36500 天；切换日志库不会自动回填历史
       - REDIS_CONN_STRING=redis://:123456@redis:6379 # ⚠️ IMPORTANT: Change the password in production!
       - TZ=Asia/Shanghai
       - ERROR_LOG_ENABLED=true # 是否启用错误日志记录 (Whether to enable error log recording)
       - BATCH_UPDATE_ENABLED=true  # 是否启用批量更新 (Whether to enable batch update)
       - NODE_NAME=new-api-node-1  # 节点名称，用于审计日志中标识节点身份；多节点/容器部署时建议设置 (Node name used in audit logs; recommended when running multiple instances or in containers)
 #      - STREAMING_TIMEOUT=300  # 流模式无响应超时时间，单位秒，默认120秒，如果出现空补全可以尝试改为更大值 （Streaming timeout in seconds, default is 120s. Increase if experiencing empty completions）
+#      - RELAY_IDLE_CONN_TIMEOUT=90  # 上游 HTTP 空闲连接超时秒数，0 为不限制
+#      - TASK_TIMEOUT_MINUTES=4320  # 异步任务超时分钟数，0 为关闭
+#      - TASK_POLL_MAX_FAILURES=20  # 连续轮询失败上限，0 为不自动终止
 #      - SESSION_SECRET=random_string  # 多机部署时设置，必须修改这个随机字符串！！ （multi-node deployment, set this to a random string!!!!!!!）
 #      - SESSION_COOKIE_SECURE=true  # 启用 Secure session cookie，必须同时配置 SESSION_COOKIE_TRUSTED_URL (Enable Secure session cookies; requires SESSION_COOKIE_TRUSTED_URL)
 #      - SESSION_COOKIE_TRUSTED_URL=https://example.com,https://admin.example.com  # 可信 HTTPS 入口地址，多个用英文逗号分隔 (Trusted HTTPS entry URLs, comma-separated)
+#      - TRUSTED_PROXIES=172.20.0.0/16  # 替换为实际可信代理网段；直接暴露服务时可设 none
+#      - PASSWORD_LOGIN_ENCRYPTION_ENABLED=false  # 按部署需要启用密码登录传输加密
+#      - ACCOUNT_PASSWORD_HASH_ALGORITHM=bcrypt  # 全部节点支持双格式后才切换 argon2id
 #      - SYNC_FREQUENCY=60  # Uncomment if regular database syncing is needed
 #      - GOOGLE_ANALYTICS_ID=G-XXXXXXXXXX  # Google Analytics 的测量 ID (Google Analytics Measurement ID)
 #      - UMAMI_WEBSITE_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  # Umami 网站 ID (Umami Website ID)
@@ -46,6 +57,7 @@ services:
       - redis
       - postgres
 #      - mysql  # Uncomment if using MySQL
+#      - clickhouse  # 使用上方 ClickHouse 日志连接时取消注释
     networks:
       - new-api-network
     healthcheck:
@@ -91,9 +103,26 @@ services:
 #    ports:
 #      - "3306:3306"  # Uncomment if you need to access MySQL from outside Docker
 
+# 可选日志数据库：只存日志，主数据库仍保留上方 PostgreSQL 或 MySQL
+#  clickhouse:
+#    image: clickhouse/clickhouse-server:24.8
+#    container_name: clickhouse
+#    restart: always
+#    environment:
+#      CLICKHOUSE_DB: new_api_logs
+#      CLICKHOUSE_USER: default
+#      CLICKHOUSE_PASSWORD: 123456  # 部署前替换，并与 LOG_SQL_DSN 中的密码保持一致
+#      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+#    volumes:
+#      - clickhouse_data:/var/lib/clickhouse
+#    networks:
+#      - new-api-network
+
+
 volumes:
   pg_data:
 #  mysql_data:
+#  clickhouse_data:
 
 networks:
   new-api-network:

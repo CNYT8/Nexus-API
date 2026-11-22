@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -49,6 +49,7 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 
 type AttachmentPreference = '' | 'platform' | 'cross-platform'
@@ -148,48 +149,34 @@ export function PasskeySection(props: PasskeySectionProps) {
     defaultValues: formDefaults,
   })
 
-  const baselineRef = useRef<FlatPasskeyDefaults>(props.defaultValues)
-  const baselineSerializedRef = useRef<string>(
-    JSON.stringify(props.defaultValues)
+  const submitForm = useResetForm(form, formDefaults, (value, path) =>
+    path === 'passkey.origins' && typeof value === 'string'
+      ? value.split('\n').map((origin) => origin.trim()).filter(Boolean)
+      : value
   )
-
-  useEffect(() => {
-    const serialized = JSON.stringify(props.defaultValues)
-    if (serialized === baselineSerializedRef.current) return
-    baselineRef.current = props.defaultValues
-    baselineSerializedRef.current = serialized
-    form.reset(buildFormDefaults(props.defaultValues))
-  }, [props.defaultValues, form])
 
   const onSubmit = async (values: PasskeyFormValues) => {
     const normalized = normalizeFormValues(values)
     const changedKeys = (
       Object.keys(normalized) as Array<keyof FlatPasskeyDefaults>
-    ).filter((key) => normalized[key] !== baselineRef.current[key])
+    ).filter((key) => normalized[key] !== props.defaultValues[key])
 
     if (changedKeys.length === 0) {
       toast.info(t('No changes to save'))
       return
     }
 
-    for (const key of changedKeys) {
-      await updateOption.mutateAsync({
-        key,
-        value: normalized[key],
-      })
-    }
-
-    baselineRef.current = normalized
-    baselineSerializedRef.current = JSON.stringify(normalized)
-    form.reset(buildFormDefaults(normalized))
+    await updateOption.saveOptions(
+      changedKeys.map((key) => ({ key, value: normalized[key] }))
+    )
   }
 
   return (
     <SettingsSection title={t('Passkey Authentication')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
           />
           <FormField

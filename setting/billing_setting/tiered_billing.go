@@ -30,7 +30,7 @@ var (
 	// A per-request charge may also be written by hand as "0.25 * 1000000"
 	// (the raw 1M-scale form) instead of call(0.25).
 	tieredCallConstPattern = regexp.MustCompile(`\b\d+(?:\.\d+)?\s*\*\s*(?:1_?000_?000|1000000|1e6)\b`)
-	tieredTokenPattern    = regexp.MustCompile(`\b(?:p|c|cr|cc|cc1h|img|img_o|ai|ao)\b\s*\*`)
+	tieredTokenPattern     = regexp.MustCompile(`\b(?:p|c|cr|cc|cc1h|cc12h|img|img_o|ai|ao)\b\s*\*`)
 )
 
 // ClassifyTieredExprQuotaType inspects a tiered billing expression and

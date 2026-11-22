@@ -1,10 +1,13 @@
 package openai
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -17,9 +20,7 @@ import (
 
 	"github.com/QuantumNous/new-api/types"
 
-	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 	"github.com/tidwall/gjson"
 )
 
@@ -29,16 +30,8 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 	}
 
 	if info != nil && info.ThinkingProcessStrip {
-		var response dto.ChatCompletionsStreamResponse
-		if err := common.UnmarshalJsonStr(data, &response); err != nil {
-			return err
-		}
-		relaycommon.StripChatCompletionsThinking(&response)
-		relaycommon.FilterChatCompletionsThinkingTags(&response, info.ThinkingTagFilter)
-		if !relaycommon.ChatCompletionsHasVisibleData(&response) {
-			return nil
-		}
-		return helper.ObjectData(c, response)
+		// 按最终协议集中剥离，避免共享标签状态、重复过滤和丢失扩展字段。
+		return helper.StringData(c, data)
 	}
 
 	if !forceFormat && !thinkToContent {
@@ -117,6 +110,24 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 	return helper.ObjectData(c, lastStreamResponse)
 }
 
+// 在协议转换前仅清理结构化思考，正文标签留给最终 writer 维护跨帧状态。
+// Claude 转换器对同帧 reasoning/content 有优先级，必须先分离以保留正文。
+func handleThinkingStreamFormat(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat, thinkToContent bool) error {
+	if info.ThinkingProcessStrip && info.RelayFormat != types.RelayFormatOpenAI {
+		var err error
+		data, err = prepareThinkingStreamConversion(data)
+		if err != nil {
+			return err
+		}
+	}
+	return HandleStreamFormat(c, info, data, forceFormat, thinkToContent)
+}
+
+func prepareThinkingStreamConversion(data string) (string, error) {
+	cleaned, err := relaycommon.StripStructuredThinkingJSON([]byte(data))
+	return string(cleaned), err
+}
+
 func shouldHoldOpenAIUsageChunk(info *relaycommon.RelayInfo, data string) bool {
 	if info == nil || info.RelayFormat != types.RelayFormatOpenAI || info.ShouldIncludeUsage ||
 		data == "" || !strings.Contains(data, `"usage"`) {
@@ -138,6 +149,7 @@ func shouldHoldOpenAIUsageChunk(info *relaycommon.RelayInfo, data string) bool {
 }
 
 func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	defer helper.FinalizeThinkingStream(c)
 	if resp == nil || resp.Body == nil {
 		logger.LogError(c, "invalid response or response body")
 		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
@@ -163,13 +175,13 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		if isDirectOpenAIStream && pendingOpenAIUsageData != "" {
-			if err := HandleStreamFormat(c, info, pendingOpenAIUsageData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+			if err := handleThinkingStreamFormat(c, info, pendingOpenAIUsageData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
 				sr.Error(err)
 			}
 			pendingOpenAIUsageData = ""
 		} else if !isDirectOpenAIStream && lastStreamData != "" {
-			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+			if err := handleThinkingStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
 				sr.Error(err)
 			}
@@ -189,7 +201,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			if isDirectOpenAIStream {
 				if shouldHoldOpenAIUsageChunk(info, data) {
 					pendingOpenAIUsageData = data
-				} else if err := HandleStreamFormat(c, info, data, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+				} else if err := handleThinkingStreamFormat(c, info, data, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 					common.SysLog("error handling stream format: " + err.Error())
 					sr.Error(err)
 				}
@@ -235,7 +247,13 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
 
-	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
+	finalData := lastStreamData
+	if info.ThinkingProcessStrip && info.RelayFormat != types.RelayFormatOpenAI {
+		if cleaned, err := prepareThinkingStreamConversion(finalData); err == nil {
+			finalData = cleaned
+		}
+	}
+	HandleFinalResponse(c, info, finalData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
 
 	return usage, nil
 }
@@ -249,7 +267,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
 	logger.LogDebug(c, "upstream response body received: bytes=%d", len(responseBody))
-	if matcher := relaycommon.NewOutputSensitiveMatcherForConfig(info.OutputSensitiveConfig); matcher != nil {
+	if matcher := relaycommon.NewOutputSensitiveMatcherForConfig(info.OutputSensitiveConfig); !info.ThinkingProcessStrip && matcher != nil {
 		cleaned, matched, _, scanErr := relaycommon.SanitizeOutputSensitiveJSONWithThinkingPolicy(responseBody, matcher, info.ThinkingProcessStrip)
 		if scanErr != nil {
 			return nil, types.NewOpenAIError(scanErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -320,7 +338,14 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
-		if usageModified {
+		if usageModified && info.ThinkingProcessStrip {
+			var bodyMap map[string]json.RawMessage
+			if err = common.Unmarshal(responseBody, &bodyMap); err != nil {
+				return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+			}
+			bodyMap["usage"], _ = common.Marshal(simpleResponse.Usage)
+			responseBody, _ = common.Marshal(bodyMap)
+		} else if usageModified {
 			var bodyMap map[string]interface{}
 			err = common.Unmarshal(responseBody, &bodyMap)
 			if err != nil {
@@ -353,7 +378,9 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		responseBody = geminiRespStr
 	}
 
-	service.IOCopyBytesGracefully(c, resp, responseBody)
+	if writeErr := service.WriteRelayJSON(c, resp, responseBody, info); writeErr != nil {
+		return nil, writeErr
+	}
 
 	return &simpleResponse.Usage, nil
 }
@@ -399,202 +426,117 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 	info.IsStream = true
 	clientConn := info.ClientWs
 	targetConn := info.TargetWs
-
-	clientClosed := make(chan struct{})
-	targetClosed := make(chan struct{})
-	sendChan := make(chan []byte, 100)
-	receiveChan := make(chan []byte, 100)
-	errChan := make(chan error, 2)
-
+	var stateMu sync.Mutex
 	usage := &dto.RealtimeUsage{}
 	localUsage := &dto.RealtimeUsage{}
 	sumUsage := &dto.RealtimeUsage{}
 
-	gopool.Go(func() {
-		defer func() {
-			if r := recover(); r != nil {
-				errChan <- fmt.Errorf("panic in client reader: %v", r)
+	err := runRealtimeWorkers(c.Request.Context(), func() {
+		_ = clientConn.Close()
+		_ = targetConn.Close()
+	}, func(ctx context.Context) error {
+		return relayRealtimeMessages(ctx, clientConn, targetConn, &stateMu, func(message []byte) error {
+			realtimeEvent := &dto.RealtimeEvent{}
+			if err := common.Unmarshal(message, realtimeEvent); err != nil {
+				return fmt.Errorf("error unmarshalling message: %w", err)
 			}
-		}()
-		for {
-			select {
-			case <-c.Done():
-				return
-			default:
-				_, message, err := clientConn.ReadMessage()
-				if err != nil {
-					if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-						errChan <- fmt.Errorf("error reading from client: %v", err)
-					}
-					close(clientClosed)
-					return
-				}
-
-				realtimeEvent := &dto.RealtimeEvent{}
-				err = common.Unmarshal(message, realtimeEvent)
-				if err != nil {
-					errChan <- fmt.Errorf("error unmarshalling message: %v", err)
-					return
-				}
-
-				if realtimeEvent.Type == dto.RealtimeEventTypeSessionUpdate {
-					if realtimeEvent.Session != nil {
-						if realtimeEvent.Session.Tools != nil {
-							info.RealtimeTools = realtimeEvent.Session.Tools
-						}
-					}
-				}
-
-				textToken, audioToken, err := service.CountTokenRealtime(info, *realtimeEvent, info.UpstreamModelName)
-				if err != nil {
-					errChan <- fmt.Errorf("error counting text token: %v", err)
-					return
-				}
-				logger.LogInfo(c, fmt.Sprintf("type: %s, textToken: %d, audioToken: %d", realtimeEvent.Type, textToken, audioToken))
-				localUsage.TotalTokens += textToken + audioToken
-				localUsage.InputTokens += textToken + audioToken
-				localUsage.InputTokenDetails.TextTokens += textToken
-				localUsage.InputTokenDetails.AudioTokens += audioToken
-
-				err = helper.WssString(c, targetConn, string(message))
-				if err != nil {
-					errChan <- fmt.Errorf("error writing to target: %v", err)
-					return
-				}
-
-				select {
-				case sendChan <- message:
-				default:
+			if realtimeEvent.Type == dto.RealtimeEventTypeSessionUpdate {
+				if realtimeEvent.Session != nil && realtimeEvent.Session.Tools != nil {
+					info.RealtimeTools = realtimeEvent.Session.Tools
 				}
 			}
-		}
-	})
-
-	gopool.Go(func() {
-		defer func() {
-			if r := recover(); r != nil {
-				errChan <- fmt.Errorf("panic in target reader: %v", r)
+			textToken, audioToken, err := service.CountTokenRealtime(info, *realtimeEvent, info.UpstreamModelName)
+			if err != nil {
+				return fmt.Errorf("error counting text token: %w", err)
 			}
-		}()
-		for {
-			select {
-			case <-c.Done():
-				return
-			default:
-				_, message, err := targetConn.ReadMessage()
-				if err != nil {
-					if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-						errChan <- fmt.Errorf("error reading from target: %v", err)
-					}
-					close(targetClosed)
-					return
+			logger.LogInfo(c, fmt.Sprintf("type: %s, textToken: %d, audioToken: %d", realtimeEvent.Type, textToken, audioToken))
+			localUsage.TotalTokens += textToken + audioToken
+			localUsage.InputTokens += textToken + audioToken
+			localUsage.InputTokenDetails.TextTokens += textToken
+			localUsage.InputTokenDetails.AudioTokens += audioToken
+			return nil
+		})
+	}, func(ctx context.Context) error {
+		return relayRealtimeMessages(ctx, targetConn, clientConn, &stateMu, func(message []byte) error {
+			info.SetFirstResponseTime()
+			realtimeEvent := &dto.RealtimeEvent{}
+			if err := common.Unmarshal(message, realtimeEvent); err != nil {
+				return fmt.Errorf("error unmarshalling message: %w", err)
+			}
+
+			if realtimeEvent.Type == dto.RealtimeEventTypeResponseDone {
+				if realtimeEvent.Response == nil {
+					return fmt.Errorf("response.done is missing response")
 				}
-				info.SetFirstResponseTime()
-				realtimeEvent := &dto.RealtimeEvent{}
-				err = common.Unmarshal(message, realtimeEvent)
-				if err != nil {
-					errChan <- fmt.Errorf("error unmarshalling message: %v", err)
-					return
-				}
-
-				if realtimeEvent.Type == dto.RealtimeEventTypeResponseDone {
-					realtimeUsage := realtimeEvent.Response.Usage
-					if realtimeUsage != nil {
-						usage.TotalTokens += realtimeUsage.TotalTokens
-						usage.InputTokens += realtimeUsage.InputTokens
-						usage.OutputTokens += realtimeUsage.OutputTokens
-						usage.InputTokenDetails.AudioTokens += realtimeUsage.InputTokenDetails.AudioTokens
-						usage.InputTokenDetails.CachedTokens += realtimeUsage.InputTokenDetails.CachedTokens
-						usage.InputTokenDetails.TextTokens += realtimeUsage.InputTokenDetails.TextTokens
-						usage.OutputTokenDetails.AudioTokens += realtimeUsage.OutputTokenDetails.AudioTokens
-						usage.OutputTokenDetails.TextTokens += realtimeUsage.OutputTokenDetails.TextTokens
-						err := preConsumeUsage(c, info, usage, sumUsage)
-						if err != nil {
-							errChan <- fmt.Errorf("error consume usage: %v", err)
-							return
-						}
-						// 本次计费完成，清除
-						usage = &dto.RealtimeUsage{}
-
-						localUsage = &dto.RealtimeUsage{}
-					} else {
-						textToken, audioToken, err := service.CountTokenRealtime(info, *realtimeEvent, info.UpstreamModelName)
-						if err != nil {
-							errChan <- fmt.Errorf("error counting text token: %v", err)
-							return
-						}
-						logger.LogInfo(c, fmt.Sprintf("type: %s, textToken: %d, audioToken: %d", realtimeEvent.Type, textToken, audioToken))
-						localUsage.TotalTokens += textToken + audioToken
-						info.IsFirstRequest = false
-						localUsage.InputTokens += textToken + audioToken
-						localUsage.InputTokenDetails.TextTokens += textToken
-						localUsage.InputTokenDetails.AudioTokens += audioToken
-						err = preConsumeUsage(c, info, localUsage, sumUsage)
-						if err != nil {
-							errChan <- fmt.Errorf("error consume usage: %v", err)
-							return
-						}
-						// 本次计费完成，清除
-						localUsage = &dto.RealtimeUsage{}
-						// print now usage
-					}
-					logger.LogInfo(c, fmt.Sprintf("realtime streaming sumUsage: %v", sumUsage))
-					logger.LogInfo(c, fmt.Sprintf("realtime streaming localUsage: %v", localUsage))
-					logger.LogInfo(c, fmt.Sprintf("realtime streaming localUsage: %v", localUsage))
-
-				} else if realtimeEvent.Type == dto.RealtimeEventTypeSessionUpdated || realtimeEvent.Type == dto.RealtimeEventTypeSessionCreated {
-					realtimeSession := realtimeEvent.Session
-					if realtimeSession != nil {
-						// update audio format
-						info.InputAudioFormat = common.GetStringIfEmpty(realtimeSession.InputAudioFormat, info.InputAudioFormat)
-						info.OutputAudioFormat = common.GetStringIfEmpty(realtimeSession.OutputAudioFormat, info.OutputAudioFormat)
+				realtimeUsage := realtimeEvent.Response.Usage
+				if realtimeUsage != nil {
+					usage.TotalTokens += realtimeUsage.TotalTokens
+					usage.InputTokens += realtimeUsage.InputTokens
+					usage.OutputTokens += realtimeUsage.OutputTokens
+					usage.InputTokenDetails.AudioTokens += realtimeUsage.InputTokenDetails.AudioTokens
+					usage.InputTokenDetails.CachedTokens += realtimeUsage.InputTokenDetails.CachedTokens
+					usage.InputTokenDetails.TextTokens += realtimeUsage.InputTokenDetails.TextTokens
+					usage.OutputTokenDetails.AudioTokens += realtimeUsage.OutputTokenDetails.AudioTokens
+					usage.OutputTokenDetails.TextTokens += realtimeUsage.OutputTokenDetails.TextTokens
+					// preConsumeUsage appends before calling the quota service.
+					// Retire the batch first so errors/panics cannot replay it in the tail.
+					batch := usage
+					usage = &dto.RealtimeUsage{}
+					localUsage = &dto.RealtimeUsage{}
+					if err := preConsumeUsage(c, info, batch, sumUsage); err != nil {
+						return fmt.Errorf("error consume usage: %w", err)
 					}
 				} else {
 					textToken, audioToken, err := service.CountTokenRealtime(info, *realtimeEvent, info.UpstreamModelName)
 					if err != nil {
-						errChan <- fmt.Errorf("error counting text token: %v", err)
-						return
+						return fmt.Errorf("error counting text token: %w", err)
 					}
 					logger.LogInfo(c, fmt.Sprintf("type: %s, textToken: %d, audioToken: %d", realtimeEvent.Type, textToken, audioToken))
 					localUsage.TotalTokens += textToken + audioToken
-					localUsage.OutputTokens += textToken + audioToken
-					localUsage.OutputTokenDetails.TextTokens += textToken
-					localUsage.OutputTokenDetails.AudioTokens += audioToken
+					info.IsFirstRequest = false
+					localUsage.InputTokens += textToken + audioToken
+					localUsage.InputTokenDetails.TextTokens += textToken
+					localUsage.InputTokenDetails.AudioTokens += audioToken
+					batch := localUsage
+					localUsage = &dto.RealtimeUsage{}
+					if err := preConsumeUsage(c, info, batch, sumUsage); err != nil {
+						return fmt.Errorf("error consume usage: %w", err)
+					}
 				}
-
-				err = helper.WssString(c, clientConn, string(message))
+				logger.LogInfo(c, fmt.Sprintf("realtime streaming sumUsage: %v", sumUsage))
+				logger.LogInfo(c, fmt.Sprintf("realtime streaming localUsage: %v", localUsage))
+			} else if realtimeEvent.Type == dto.RealtimeEventTypeSessionUpdated || realtimeEvent.Type == dto.RealtimeEventTypeSessionCreated {
+				if realtimeSession := realtimeEvent.Session; realtimeSession != nil {
+					info.InputAudioFormat = common.GetStringIfEmpty(realtimeSession.InputAudioFormat, info.InputAudioFormat)
+					info.OutputAudioFormat = common.GetStringIfEmpty(realtimeSession.OutputAudioFormat, info.OutputAudioFormat)
+				}
+			} else {
+				textToken, audioToken, err := service.CountTokenRealtime(info, *realtimeEvent, info.UpstreamModelName)
 				if err != nil {
-					errChan <- fmt.Errorf("error writing to client: %v", err)
-					return
+					return fmt.Errorf("error counting text token: %w", err)
 				}
-
-				select {
-				case receiveChan <- message:
-				default:
-				}
+				logger.LogInfo(c, fmt.Sprintf("type: %s, textToken: %d, audioToken: %d", realtimeEvent.Type, textToken, audioToken))
+				localUsage.TotalTokens += textToken + audioToken
+				localUsage.OutputTokens += textToken + audioToken
+				localUsage.OutputTokenDetails.TextTokens += textToken
+				localUsage.OutputTokenDetails.AudioTokens += audioToken
 			}
-		}
+			return nil
+		})
 	})
-
-	select {
-	case <-clientClosed:
-	case <-targetClosed:
-	case err := <-errChan:
-		//return service.OpenAIErrorWrapper(err, "realtime_error", http.StatusInternalServerError), nil
+	if err != nil {
 		logger.LogError(c, "realtime error: "+err.Error())
-	case <-c.Done():
 	}
 
+	// Both readers have exited. Keep the existing settlement/logging path, but
+	// make its quota-log update synchronous before the controller calls done.
+	c.Set("responses_websocket", true)
 	if usage.TotalTokens != 0 {
 		_ = preConsumeUsage(c, info, usage, sumUsage)
 	}
-
 	if localUsage.TotalTokens != 0 {
 		_ = preConsumeUsage(c, info, localUsage, sumUsage)
 	}
-
-	// check usage total tokens, if 0, use local usage
-
 	return nil, sumUsage
 }
 

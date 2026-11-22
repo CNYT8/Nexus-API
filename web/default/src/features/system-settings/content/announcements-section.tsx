@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -75,7 +75,7 @@ import { DateTimePicker } from '@/components/datetime-picker'
 import { StatusBadge } from '@/components/status-badge'
 import { SettingsSwitchField } from '../components/settings-form-layout'
 import { SettingsSection } from '../components/settings-section'
-import { useUpdateOption } from '../hooks/use-update-option'
+import { useSettingsList } from '../hooks/use-settings-list'
 
 type Announcement = {
   id: number
@@ -143,10 +143,28 @@ export function AnnouncementsSection({
   data,
 }: AnnouncementsSectionProps) {
   const { t } = useTranslation()
-  const updateOption = useUpdateOption()
-  const [announcements, setAnnouncements] = useState<Announcement[]>([])
-  const [isEnabled, setIsEnabled] = useState(enabled)
-  const [hasChanges, setHasChanges] = useState(false)
+  const {
+    items: announcements,
+    setItems: setAnnouncements,
+    isEnabled,
+    hasChanges,
+    isPending,
+    parseError,
+    save: handleSaveAll,
+    toggleEnabled: handleToggleEnabled,
+  } = useSettingsList<Announcement>({
+    enabled,
+    data,
+    dataKey: 'console_setting.announcements',
+    enabledKey: 'console_setting.announcements_enabled',
+    schema: z.object({
+      id: z.number().int().positive(),
+      content: z.string(),
+      publishDate: z.string(),
+      type: announcementSchema.shape.type,
+      extra: z.string().optional(),
+    }),
+  })
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [showDialog, setShowDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
@@ -163,39 +181,6 @@ export function AnnouncementsSection({
       extra: '',
     },
   })
-
-  useEffect(() => {
-    try {
-      const parsed = JSON.parse(data || '[]')
-      if (Array.isArray(parsed)) {
-        setAnnouncements(
-          parsed.map((item, idx) => ({
-            ...item,
-            id: item.id || idx + 1,
-          }))
-        )
-      }
-    } catch {
-      setAnnouncements([])
-    }
-  }, [data])
-
-  useEffect(() => {
-    setIsEnabled(enabled)
-  }, [enabled])
-
-  const handleToggleEnabled = async (checked: boolean) => {
-    try {
-      await updateOption.mutateAsync({
-        key: 'console_setting.announcements_enabled',
-        value: checked,
-      })
-      setIsEnabled(checked)
-      toast.success(t('Setting saved'))
-    } catch {
-      toast.error(t('Failed to update setting'))
-    }
-  }
 
   const handleAdd = () => {
     setEditingAnnouncement(null)
@@ -235,18 +220,17 @@ export function AnnouncementsSection({
   }
 
   const confirmDelete = () => {
+    if (parseError) return
     if (deleteTarget === 'single' && editingAnnouncement) {
       setAnnouncements((prev) =>
         prev.filter((item) => item.id !== editingAnnouncement.id)
       )
-      setHasChanges(true)
       toast.success(t('Announcement deleted. Click "Save Settings" to apply.'))
     } else if (deleteTarget === 'batch') {
       setAnnouncements((prev) =>
         prev.filter((item) => !selectedIds.includes(item.id))
       )
       setSelectedIds([])
-      setHasChanges(true)
       toast.success(
         t('{{count}} announcements deleted. Click "Save Settings" to apply.', {
           count: selectedIds.length,
@@ -258,6 +242,7 @@ export function AnnouncementsSection({
   }
 
   const handleSubmitForm = (values: AnnouncementFormValues) => {
+    if (parseError) return
     if (editingAnnouncement) {
       setAnnouncements((prev) =>
         prev.map((item) =>
@@ -270,21 +255,7 @@ export function AnnouncementsSection({
       setAnnouncements((prev) => [...prev, { id: newId, ...values }])
       toast.success(t('Announcement added. Click "Save Settings" to apply.'))
     }
-    setHasChanges(true)
     setShowDialog(false)
-  }
-
-  const handleSaveAll = async () => {
-    try {
-      await updateOption.mutateAsync({
-        key: 'console_setting.announcements',
-        value: JSON.stringify(announcements),
-      })
-      setHasChanges(false)
-      toast.success(t('Announcements saved successfully'))
-    } catch {
-      toast.error(t('Failed to save announcements'))
-    }
   }
 
   const toggleSelectAll = (checked: boolean) => {
@@ -320,10 +291,15 @@ export function AnnouncementsSection({
 
   return (
     <SettingsSection title={t('Announcements')}>
+      {parseError && (
+        <p role='alert' className='text-destructive break-words text-sm'>
+          {t('Invalid settings list. Fix the source data and reload before editing.')} {parseError}
+        </p>
+      )}
       <div className='space-y-4'>
         <div className='flex flex-wrap items-center justify-between gap-2'>
           <div className='flex flex-wrap items-center gap-2'>
-            <Button onClick={handleAdd} size='sm'>
+            <Button onClick={handleAdd} size='sm' disabled={!!parseError}>
               <Plus className='mr-2 h-4 w-4' />
               {t('Add Announcement')}
             </Button>
@@ -331,7 +307,7 @@ export function AnnouncementsSection({
               onClick={handleBatchDelete}
               size='sm'
               variant='destructive'
-              disabled={selectedIds.length === 0}
+              disabled={!!parseError || selectedIds.length === 0}
             >
               <Trash2 className='mr-2 h-4 w-4' />
               {t('Delete (')}
@@ -341,15 +317,16 @@ export function AnnouncementsSection({
               onClick={handleSaveAll}
               size='sm'
               variant='secondary'
-              disabled={!hasChanges || updateOption.isPending}
+              disabled={!!parseError || !hasChanges || isPending}
             >
               <Save className='mr-2 h-4 w-4' />
-              {updateOption.isPending ? t('Saving...') : t('Save Settings')}
+              {isPending ? t('Saving...') : t('Save Settings')}
             </Button>
           </div>
           <SettingsSwitchField
             checked={isEnabled}
             onCheckedChange={handleToggleEnabled}
+            disabled={isPending}
             label={t('Enabled')}
             className='border-b-0 py-0'
           />

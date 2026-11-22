@@ -21,6 +21,7 @@ import React from 'react';
 import { Tag, Space, Skeleton } from '@douyinfe/semi-ui';
 import { renderQuota } from '../../../helpers';
 import CompactModeToggle from '../../common/ui/CompactModeToggle';
+import LogExportActions from './LogExportActions';
 import { useMinimumLoadingTime } from '../../../hooks/common/useMinimumLoadingTime';
 
 const LogsActions = ({
@@ -29,6 +30,8 @@ const LogsActions = ({
   showStat,
   compactMode,
   setCompactMode,
+  getFormValues,
+  isAdminUser,
   t,
 }) => {
   const showSkeleton = useMinimumLoadingTime(loadingStat);
@@ -83,11 +86,14 @@ const LogsActions = ({
         </Space>
       </Skeleton>
 
-      <CompactModeToggle
-        compactMode={compactMode}
-        setCompactMode={setCompactMode}
-        t={t}
-      />
+      <Space wrap>
+        <LogExportActions getFormValues={getFormValues} isAdminUser={isAdminUser} />
+        <CompactModeToggle
+          compactMode={compactMode}
+          setCompactMode={setCompactMode}
+          t={t}
+        />
+      </Space>
     </div>
   );
 };

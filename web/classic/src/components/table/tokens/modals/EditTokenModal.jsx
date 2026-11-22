@@ -57,6 +57,7 @@ import {
 } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../../../context/Status';
+import AutoGroupsControl from './AutoGroupsControl';
 
 const { Text, Title } = Typography;
 
@@ -68,6 +69,7 @@ const EditTokenModal = (props) => {
   const formApiRef = useRef(null);
   const [models, setModels] = useState([]);
   const [groups, setGroups] = useState([]);
+  const [autoGroupLimit, setAutoGroupLimit] = useState(null);
   const [showQuotaInput, setShowQuotaInput] = useState(false);
   const isEdit = props.editingToken.id !== undefined;
 
@@ -82,6 +84,8 @@ const EditTokenModal = (props) => {
     allow_ips: '',
     group: '',
     cross_group_retry: false,
+    auto_groups_text: '',
+    allow_user_quota_query: true,
     tokenCount: 1,
   });
 
@@ -176,7 +180,12 @@ const EditTokenModal = (props) => {
         quotaToDisplayAmount(data.remain_quota || 0).toFixed(6),
       );
       if (formApiRef.current) {
-        formApiRef.current.setValues({ ...getInitValues(), ...data });
+        formApiRef.current.setValues({
+          ...getInitValues(),
+          ...data,
+          auto_groups_text: Array.isArray(data.auto_groups) ? data.auto_groups.join('\n') : '',
+          allow_user_quota_query: data.allow_user_quota_query ?? true,
+        });
       }
     } else {
       showError(message);
@@ -219,6 +228,23 @@ const EditTokenModal = (props) => {
   };
 
   const submit = async (values) => {
+    const autoGroups = values.group === 'auto'
+      ? (values.auto_groups_text || '').split('\n').map((group) => group.trim()).filter(Boolean)
+      : [];
+    if (new Set(autoGroups).size !== autoGroups.length || autoGroups.some((group) => group === 'auto' || !groups.some((option) => option.value === group))) {
+      showError(t('自动分组只能包含可用的非 auto 分组，且不能重复'));
+      return;
+    }
+    if (autoGroups.length && autoGroupLimit === null) {
+      showError(t('请先成功加载自动分组配置，再保存自定义顺序'));
+      return;
+    }
+    if (autoGroupLimit !== null && autoGroups.length > autoGroupLimit) {
+      showError(t('自动分组最多允许 {{max}} 个', { max: autoGroupLimit }));
+      return;
+    }
+    const { auto_groups_text: _autoGroupsText, ...payloadValues } = values;
+    values = { ...payloadValues, auto_groups: autoGroups, allow_user_quota_query: values.allow_user_quota_query ?? true };
     setLoading(true);
     if (isEdit) {
       let { tokenCount: _tc, ...localInputs } = values;
@@ -412,6 +438,14 @@ const EditTokenModal = (props) => {
                         style={{ width: '100%' }}
                       />
                     )}
+                  </Col>
+                  {values.group === 'auto' && (
+                    <Col span={24}>
+                      {props.visiable && <AutoGroupsControl key={props.editingToken.id ?? 'new'} onPolicy={setAutoGroupLimit} />}
+                    </Col>
+                  )}
+                  <Col span={24}>
+                    <Form.Switch field='allow_user_quota_query' label={t('允许使用令牌查询账号额度')} />
                   </Col>
                   <Col
                     span={24}

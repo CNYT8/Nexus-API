@@ -2,7 +2,9 @@ package controller
 
 import (
 	"fmt"
+	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -97,12 +99,98 @@ func recordManageAudit(c *gin.Context, action string, params map[string]interfac
 // recordManageAuditFor 记录一条归属于 logUserId 的管理审计日志（面向用户的操作：
 // 对目标用户的额度调整 / 解绑 / 2FA 等，使该用户也能在自己的日志中看到）。
 func recordManageAuditFor(c *gin.Context, logUserId int, action string, params map[string]interface{}) {
-	model.RecordOperationAuditLog(logUserId, auditContentEN(action, params), c.ClientIP(), action, params, auditOperatorInfo(c), nil)
+	model.RecordOperationAuditLog(logUserId, auditContentEN(action, params), c.ClientIP(), action, params, auditOperatorInfo(c), auditResultInfo(c, "", params))
 	markAuditLogged(c)
 }
 
 // recordUserSecurityAudit 记录普通用户自己的安全敏感操作（如 passkey 绑定/解绑）。
 // 这类日志没有管理员操作者，不写 admin_info；同时不依赖 AdminAuth/RootAuth 的兜底。
 func recordUserSecurityAudit(c *gin.Context, userId int, action string, params map[string]interface{}) {
-	model.RecordOperationAuditLog(userId, auditContentEN(action, params), c.ClientIP(), action, params, nil, nil)
+	model.RecordOperationAuditLog(userId, auditContentEN(action, params), c.ClientIP(), action, params, nil, auditResultInfo(c, model.AuditCategorySecurity, params))
+}
+
+func auditResultInfo(c *gin.Context, category string, params map[string]interface{}) map[string]interface{} {
+	success := c.Writer.Status() < http.StatusBadRequest
+	if explicit, ok := params["success"].(bool); ok {
+		success = explicit
+	}
+	info := map[string]interface{}{"success": success, "actor_role": c.GetInt("role")}
+	if category != "" {
+		info["category"] = category
+	}
+	// Only accept an already-derived fingerprint from authentication context.
+	// Never persist an Authorization header, raw key or a fabricated reference.
+	if ref := c.GetString("token_ref"); model.ValidAuditTokenRef(ref) {
+		info["token_ref"] = ref
+	}
+	return info
+}
+
+// GetAuditLogs requires the main router's admin authentication and retains an
+// internal guard so accidentally mounting it in a user group cannot expose it.
+func GetAuditLogs(c *gin.Context) {
+	if c.GetInt("id") <= 0 || c.GetInt("role") < common.RoleAdminUser {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	query := c.Request.URL.Query()
+	for _, key := range []string{"token_ref", "exclude_token_ref", "category", "success", "user_id", "username", "request_id"} {
+		if values, present := query[key]; present && len(values) != 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "审计筛选参数不可重复"})
+			return
+		}
+	}
+	filter := model.AuditLogFilter{
+		Username: c.Query("username"), TokenRef: c.Query("token_ref"),
+		ExcludeTokenRef: c.Query("exclude_token_ref"), Category: c.Query("category"),
+		RequestID: c.Query("request_id"),
+	}
+	if query.Has("success") {
+		raw := query.Get("success")
+		if raw != "true" && raw != "false" {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "success 必须为 true 或 false"})
+			return
+		}
+		value := raw == "true"
+		filter.Success = &value
+	}
+	if query.Has("user_id") {
+		value, err := strconv.Atoi(query.Get("user_id"))
+		if err != nil || value < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的审计用户"})
+			return
+		}
+		filter.UserID = value
+	}
+	var err error
+	filter.Start, filter.End, err = parseLogWindow(c)
+	if err == nil {
+		err = model.ValidateAuditLogFilter(filter)
+	}
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	page := common.GetPageQuery(c)
+	if page.Page < 1 || page.PageSize < 1 || page.Page-1 > int(^uint(0)>>1)/page.PageSize {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的审计分页参数"})
+		return
+	}
+	restricted, err := shouldRestrictAdminLogChannelInfo(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	logs, total, err := model.GetAuditLogs(c.Request.Context(), filter, page.GetStartIdx(), page.GetPageSize(), c.GetInt("role"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if restricted {
+		model.StripChannelRestrictedAdminLogFields(logs)
+	}
+	page.SetTotal(int(total))
+	page.SetItems(logs)
+	c.Header("Cache-Control", "no-store")
+	common.ApiSuccess(c, page)
 }

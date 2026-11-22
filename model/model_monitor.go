@@ -744,7 +744,7 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 	buckets := make(map[modelMonitorModelKey]modelMonitorBucket)
 	mergeModelMonitorBucketRows(buckets, rows, activeModelSet, activeEntrySet)
 
-	sampleGroupSQL := "COALESCE(NULLIF(TRIM(" + logGroupCol + "), ''), 'default')"
+	sampleGroupSQL := "COALESCE(NULLIF(TRIM(" + logMetaGroupColumn() + "), ''), 'default')"
 	sampleSelectSQL := "model_name, " + sampleGroupSQL + " AS group_name, " +
 		"SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS raw_error_log_count, " +
 		"SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS success_sample_count, " +
@@ -779,7 +779,7 @@ func buildModelMonitorSummary(now int64) (*ModelMonitorSummary, error) {
 
 	var sampleRows []modelMonitorBucketRow
 	if len(activeModels) > 0 {
-		if err := LOG_DB.Model(&ModelMonitorSample{}).
+		if err := logMetaDB().Model(&ModelMonitorSample{}).
 			Select(sampleSelectSQL, sampleSelectArgs...).
 			Where("created_at >= ? AND model_name IN ? AND status IN ?", since, activeModels, []int{ModelMonitorSampleStatusSuccess, ModelMonitorSampleStatusError}).
 			Group("model_name, " + sampleGroupSQL).

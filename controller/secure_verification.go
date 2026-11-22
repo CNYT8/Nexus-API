@@ -3,10 +3,10 @@ package controller
 import (
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -26,8 +26,9 @@ const (
 )
 
 type UniversalVerifyRequest struct {
-	Method string `json:"method"` // "2fa" 或 "passkey"
-	Code   string `json:"code,omitempty"`
+	Method   string `json:"method"` // "2fa" 或 "passkey"
+	Code     string `json:"code,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
 type VerificationStatusResponse struct {
@@ -53,29 +54,25 @@ func UniversalVerify(c *gin.Context) {
 		return
 	}
 
-	// 获取用户信息
-	user := &model.User{Id: userId}
-	if err := user.FillUserById(); err != nil {
-		common.ApiError(c, fmt.Errorf("获取用户信息失败: %v", err))
+	user, _, sessionErr := service.CurrentSessionUser(c)
+	if sessionErr != nil || user.Id != userId {
+		common.ApiErrorMsg(c, "未登录")
 		return
 	}
-
-	if user.Status != common.UserStatusEnabled {
-		common.ApiError(c, fmt.Errorf("该用户已被禁用"))
+	if !allowAccountSecurityAction(c, userId, "secure_verify") {
 		return
 	}
 
 	// 检查用户的验证方式
-	twoFA, _ := model.GetTwoFAByUserId(userId)
+	twoFA, twoFAErr := model.GetTwoFAByUserId(userId)
+	if twoFAErr != nil {
+		common.ApiError(c, twoFAErr)
+		return
+	}
 	has2FA := twoFA != nil && twoFA.IsEnabled
 
 	passkey, passkeyErr := model.GetPasskeyByUserID(userId)
 	hasPasskey := passkeyErr == nil && passkey != nil
-
-	if !has2FA && !hasPasskey {
-		common.ApiError(c, fmt.Errorf("用户未启用2FA或Passkey"))
-		return
-	}
 
 	// 根据验证方式进行验证
 	var verified bool
@@ -83,6 +80,19 @@ func UniversalVerify(c *gin.Context) {
 	var err error
 
 	switch req.Method {
+	case "password":
+		// Accounts with MFA must use a local second factor for step-up.
+		if has2FA {
+			common.ApiErrorMsg(c, "请先完成对应的安全验证")
+			return
+		}
+		fullUser, readErr := model.GetUserById(userId, true)
+		if readErr != nil {
+			common.ApiError(c, readErr)
+			return
+		}
+		verified = common.VerifyAccountPassword(req.Password, fullUser.Password)
+		verifyMethod = "Password"
 	case "2fa":
 		if !has2FA {
 			common.ApiError(c, fmt.Errorf("用户未启用2FA"))
@@ -145,35 +155,26 @@ func UniversalVerify(c *gin.Context) {
 func setSecureVerificationSession(c *gin.Context, method string) (int64, error) {
 	session := sessions.Default(c)
 	session.Delete(PasskeyReadySessionKey)
-	now := time.Now().Unix()
-	session.Set(SecureVerificationSessionKey, now)
-	session.Set(secureVerificationMethodSessionKey, method)
 	if err := session.Save(); err != nil {
 		return 0, err
 	}
-	return now, nil
+	return service.MarkSessionVerified(c, method)
 }
 
 func consumePasskeyReady(c *gin.Context) (bool, error) {
 	session := sessions.Default(c)
-	readyAtRaw := session.Get(PasskeyReadySessionKey)
-	if readyAtRaw == nil {
-		return false, nil
+	secret, _ := session.Get(PasskeyReadySessionKey).(string)
+	user, _, err := service.CurrentSessionUser(c)
+	if err != nil || secret == "" {
+		return false, model.ErrAuthStateInvalid
 	}
-
-	readyAt, ok := readyAtRaw.(int64)
-	if !ok {
-		session.Delete(PasskeyReadySessionKey)
-		_ = session.Save()
-		return false, fmt.Errorf("无效的 Passkey 验证状态")
+	_, err = model.ConsumeAuthFlow(secret, model.AuthFlowMatch{Purpose: "passkey_ready", Provider: "passkey", UserId: user.Id, Binding: service.SessionBinding(c)})
+	if err != nil {
+		return false, err
 	}
 	session.Delete(PasskeyReadySessionKey)
 	if err := session.Save(); err != nil {
 		return false, err
-	}
-	// Expired ready markers cannot be reused.
-	if time.Now().Unix()-readyAt >= PasskeyReadyTimeout {
-		return false, nil
 	}
 	return true, nil
 }

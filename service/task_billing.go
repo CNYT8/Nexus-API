@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,14 +21,14 @@ import (
 )
 
 const (
-	// ContextKeyTaskWalletBillingKey carries the durable pending wallet
-	// reservation key of the current asynchronous task submission. It is set
+	// ContextKeyTaskWalletBillingKey carries the durable funding reservation
+	// key of the current asynchronous task submission. It is set
 	// before the upstream submit and persisted onto the task row on success so
 	// polling completion can finalize exactly one settlement.
 	ContextKeyTaskWalletBillingKey = "task_wallet_billing_key"
-	// ContextKeyTaskWalletBillingQuota carries the amount reserved for
-	// ContextKeyTaskWalletBillingKey. The task row is inserted with this amount,
-	// then aligned to the final submit quota via ReserveTaskWalletQuota.
+	// ContextKeyTaskWalletBillingQuota carries the session's actual reserved
+	// quota, not the current quote (a lower retry quote does not shrink it).
+	// Task persistence aligns funding/token separately to the submit result.
 	ContextKeyTaskWalletBillingQuota = "task_wallet_billing_quota"
 )
 
@@ -92,6 +91,9 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 // task. A persisted BillingKey (created before the upstream submit) always
 // wins; historical tasks without one keep the legacy task.ID derivation.
 func TaskWalletBillingKey(task *model.Task) (string, error) {
+	if task.HasForeignExecutionEvidence() {
+		return "", model.ErrTaskExecutionProtected
+	}
 	if task == nil || task.UserId <= 0 {
 		return "", ErrWalletBillingIdentityRequired
 	}
@@ -113,7 +115,8 @@ func TaskWalletBillingKey(task *model.Task) (string, error) {
 // failure must refund it through RefundPendingTaskWalletQuota. A crash between
 // this call and the task insert intentionally leaves the reservation to the
 // existing stale-reservation TTL cleanup; no consumption or reward can be
-// produced without a persisted task identity.
+// produced without a persisted task identity. New submit traffic uses
+// BillingSession instead, which persists its token in the same transaction.
 func ReservePendingTaskWalletQuota(userID int, targetTotal int) (string, error) {
 	if userID <= 0 {
 		return "", ErrWalletBillingIdentityRequired
@@ -131,7 +134,10 @@ func ReservePendingTaskWalletQuota(userID int, targetTotal int) (string, error) 
 	return key, nil
 }
 
-// RefundPendingTaskWalletQuota refunds a pending reservation that never reached
+// RefundPendingTaskWalletQuota is the compatibility wallet-only refund for
+// legacy submit adapters that adjust their token separately. New task submits
+// use BillingSession and its atomic persisted-token refund.
+// It refunds a pending reservation that never reached
 // a persisted task row. Refunding an already-refunded reservation is a no-op;
 // a finalizing or finalized reservation returns a conflict instead of money.
 func RefundPendingTaskWalletQuota(key string, userID int) error {
@@ -171,6 +177,15 @@ func IsTaskWalletInsufficientQuota(err error) bool {
 // error surface as BillingSession.preConsume so task submit responses keep
 // their established status codes and codes.
 func TaskWalletReserveError(err error) *types.NewAPIError {
+	// BillingSession.Reserve already maps funding/token failures. Preserve its
+	// status and code when the task submit path adds the local-error marker.
+	var apiErr *types.NewAPIError
+	if errors.As(err, &apiErr) {
+		return apiErr
+	}
+	if errors.Is(err, model.ErrBillingTokenReserve) {
+		return TaskWalletTokenPreConsumeError(err)
+	}
 	mapped := mapWalletReserveError(err)
 	if errors.Is(mapped, model.ErrInsufficientQuota) {
 		return types.NewErrorWithStatusCode(fmt.Errorf("用户额度不足"), types.ErrorCodeInsufficientUserQuota, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
@@ -196,71 +211,32 @@ func TaskWalletQuotaClampError(clamp *common.QuotaClamp) *types.NewAPIError {
 // lockTaskBillingTx reloads the authoritative identity and serializes token,
 // quota and wallet changes. Do not save a stale polling snapshot over this row.
 func lockTaskBillingTx(tx *gorm.DB, task *model.Task) (*model.Task, string, error) {
-	key, err := TaskWalletBillingKey(task)
-	if err != nil {
+	if task.HasForeignExecutionEvidence() {
+		return nil, "", model.ErrTaskExecutionProtected
+	}
+	if task == nil || task.ID <= 0 || task.UserId <= 0 {
+		return nil, "", ErrWalletBillingIdentityRequired
+	}
+	if err := model.LockTaskBillingUserTx(tx, task.UserId); err != nil {
 		return nil, "", err
 	}
 	query := tx.Where("id = ? AND user_id = ?", task.ID, task.UserId)
-	if tx.Dialector.Name() == "sqlite" {
-		r := query.Model(&model.Task{}).UpdateColumn("quota", gorm.Expr("quota"))
-		if r.Error != nil {
-			return nil, "", r.Error
-		}
-		if r.RowsAffected != 1 {
-			return nil, "", ErrWalletBillingIdentityRequired
-		}
-	} else {
+	if tx.Dialector.Name() != "sqlite" {
 		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 	}
 	var stored model.Task
 	if err := query.First(&stored).Error; err != nil {
 		return nil, "", err
 	}
-	if stored.TaskID != task.TaskID || taskIsSubscription(&stored) || stored.Quota < 0 {
+	if stored.HasForeignExecutionEvidence() {
+		return nil, "", model.ErrTaskExecutionProtected
+	}
+	if stored.TaskID != task.TaskID || stored.Quota < 0 ||
+		(taskIsSubscription(&stored) && (stored.PrivateData.BillingKey == "" || stored.PrivateData.SubscriptionId <= 0)) {
 		return nil, "", ErrWalletBillingIdentityRequired
 	}
-	return &stored, key, nil
-}
-
-// adjustTaskTokenTx is part of the same transaction as the reservation. A
-// deleted token is no longer spendable; it must not prevent a wallet refund.
-// A present token with different ownership, or a failed write, aborts everything.
-func adjustTaskTokenTx(tx *gorm.DB, task *model.Task, delta int, reserve bool) error {
-	if task.PrivateData.TokenId <= 0 || delta == 0 {
-		return nil
-	}
-	var token model.Token
-	q := tx.Where("id = ?", task.PrivateData.TokenId)
-	if tx.Dialector.Name() != "sqlite" {
-		q = q.Clauses(clause.Locking{Strength: "UPDATE"})
-	}
-	if err := q.First(&token).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) && !reserve {
-			return nil
-		}
-		return err
-	}
-	if token.UserId != task.UserId {
-		return errors.New("task token ownership mismatch")
-	}
-	if (delta > 0 && (token.RemainQuota < math.MinInt+delta || token.UsedQuota > math.MaxInt-delta)) ||
-		(delta < 0 && (token.RemainQuota > math.MaxInt+delta || token.UsedQuota < math.MinInt-delta)) {
-		return errors.New("task token quota adjustment overflows")
-	}
-	remaining, used := token.RemainQuota-delta, token.UsedQuota+delta
-	if reserve && !token.UnlimitedQuota && remaining < 0 {
-		return model.ErrInsufficientQuota
-	}
-	r := tx.Model(&model.Token{}).
-		Where("id = ? AND user_id = ? AND remain_quota = ? AND used_quota = ?", token.Id, task.UserId, token.RemainQuota, token.UsedQuota).
-		Updates(map[string]interface{}{"remain_quota": remaining, "used_quota": used, "accessed_time": common.GetTimestamp()})
-	if r.Error != nil {
-		return r.Error
-	}
-	if r.RowsAffected != 1 {
-		return errors.New("task token quota changed during billing")
-	}
-	return nil
+	key, err := TaskWalletBillingKey(&stored)
+	return &stored, key, err
 }
 
 func updateTaskBillingQuotaTx(tx *gorm.DB, task *model.Task, quota int) error {
@@ -303,7 +279,10 @@ func ReserveTaskWalletQuota(task *model.Task, targetTotal int) error {
 		if err != nil {
 			return err
 		}
-		if stored.Status == model.TaskStatusSuccess || stored.Status == model.TaskStatusFailure {
+		if taskIsSubscription(stored) {
+			return ErrWalletBillingIdentityRequired
+		}
+		if stored.Status == model.TaskStatusSuccess || stored.Status == model.TaskStatusFailure || stored.BillingState != "" {
 			return errors.New("cannot reserve quota for a terminal task")
 		}
 		var reservation model.WalletReservation
@@ -327,13 +306,42 @@ func ReserveTaskWalletQuota(task *model.Task, targetTotal int) error {
 			if err := model.ReleaseWalletReservationToTx(tx, key, stored.UserId, reservation.ReservedQuota, int64(targetTotal)); err != nil {
 				return err
 			}
-		} else if err := model.ReserveWalletQuotaTx(tx, key, stored.UserId, int64(targetTotal)); err != nil {
+		} else if err := model.ReserveBillingWalletFundingTx(tx, key, stored.UserId, int64(targetTotal)); err != nil {
 			return err
 		}
-		if err := adjustTaskTokenTx(tx, stored, targetTotal-stored.Quota, true); err != nil {
+		if err := model.BindWalletReservationTaskTx(tx, key, stored.UserId, "task", stored.ID); err != nil {
 			return err
 		}
-		return updateTaskBillingQuotaTx(tx, stored, targetTotal)
+		tokenID := stored.PrivateData.TokenId
+		if reservationExists {
+			tokenID = model.BillingReservationTokenID(&reservation, tokenID)
+		} else if tokenID > 0 {
+			result := tx.Model(&model.WalletReservation{}).Where("reservation_key = ? AND user_id = ? AND token_id = 0", key, stored.UserId).UpdateColumn("token_id", tokenID)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return model.ErrWalletReservationConflict
+			}
+		}
+		if err := model.AdjustTaskTokenTx(tx, stored.UserId, tokenID, targetTotal-stored.Quota, targetTotal > stored.Quota); err != nil {
+			return err
+		}
+		if stored.PrivateData.BillingKey == "" {
+			stored.PrivateData.BillingKey = key
+			result := tx.Model(stored).UpdateColumn("private_data", stored.PrivateData)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return model.ErrWalletReservationConflict
+			}
+		}
+		if err := updateTaskBillingQuotaTx(tx, stored, targetTotal); err != nil {
+			return err
+		}
+		task.PrivateData = stored.PrivateData
+		return nil
 	})
 	if err != nil {
 		return err
@@ -343,40 +351,62 @@ func ReserveTaskWalletQuota(task *model.Task, targetTotal int) error {
 	return nil
 }
 
-// prepareTaskWalletFinalization commits the durable finalizing barrier before
-// the final accounting transaction. Without it, a crash or transient DB error
-// between a terminal task status and finalization would leave the reservation
-// refundable by the stale-reservation TTL. Recovery replays finalizing wallet
-// settlements; token/quota rows remain request-local as documented there.
+// prepareTaskWalletFinalization also upgrades old terminal rows into the durable
+// task recovery queue. New polling writes the target together with SUCCESS.
 func prepareTaskWalletFinalization(task *model.Task, actual int) error {
-	key, err := TaskWalletBillingKey(task)
-	if err != nil {
-		return err
-	}
-	// Free or zero-reservation tasks have no wallet debit to finalize.
-	if task.Quota == 0 && actual == 0 {
+	return model.DB.Transaction(func(tx *gorm.DB) error {
+		stored, key, err := lockTaskBillingTx(tx, task)
+		if err != nil {
+			return err
+		}
+		if stored.Status != model.TaskStatusSuccess {
+			return errors.New("task status does not permit this billing outcome")
+		}
+		if stored.BillingState != "" && stored.BillingQuota != actual {
+			return model.ErrWalletReservationConflict
+		}
+		if stored.BillingState == model.TaskBillingDone {
+			return nil
+		}
+		var r model.WalletReservation
+		err = tx.Where("reservation_key = ? AND user_id = ?", key, stored.UserId).First(&r).Error
+		if err == nil {
+			if taskIsSubscription(stored) {
+				if err := model.ValidateSubscriptionTaskReservation(stored, &r, true); err != nil {
+					return err
+				}
+				if r.ReservedQuota != int64(stored.Quota) || (r.State != model.WalletReservationReserved && r.State != model.WalletReservationFinalizing) {
+					return model.ErrWalletReservationConflict
+				}
+			}
+			if err := model.BindWalletReservationTaskTx(tx, key, stored.UserId, "task", stored.ID); err != nil {
+				return err
+			}
+			if r.State == model.WalletReservationFinalized {
+				if r.FinalQuota != int64(actual) {
+					return model.ErrWalletReservationConflict
+				}
+			} else if err := model.PrepareWalletFinalizationTx(tx, key, stored.UserId, r.ReservedQuota, int64(actual)); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		} else if stored.PrivateData.BillingKey != "" || (stored.Quota == 0 && actual != 0) {
+			return fmt.Errorf("task wallet reservation unavailable: %w", err)
+		}
+		if stored.BillingState == model.TaskBillingPending {
+			return nil
+		}
+		result := tx.Model(stored).Where("billing_state = ?", stored.BillingState).
+			Updates(map[string]interface{}{"billing_state": model.TaskBillingPending, "billing_quota": actual})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return model.ErrWalletReservationConflict
+		}
 		return nil
-	}
-	var stored model.Task
-	if err := model.DB.Where("id = ? AND user_id = ?", task.ID, task.UserId).First(&stored).Error; err != nil {
-		return err
-	}
-	if stored.Status != model.TaskStatusSuccess || taskIsSubscription(&stored) || stored.Quota < 0 {
-		return errors.New("task status does not permit this billing outcome")
-	}
-	var r model.WalletReservation
-	if err := model.DB.Where("reservation_key = ? AND user_id = ?", key, stored.UserId).First(&r).Error; err != nil {
-		return fmt.Errorf("task wallet reservation unavailable: %w", err)
-	}
-	// An identical retry after a committed finalization must be a clean no-op;
-	// the final transaction returns the existing settlement unchanged.
-	if r.State == model.WalletReservationFinalized && r.FinalQuota == int64(actual) {
-		return nil
-	}
-	if int64(stored.Quota) != r.ReservedQuota {
-		return model.ErrWalletReservationConflict
-	}
-	return model.PrepareWalletFinalization(model.DB, key, stored.UserId, r.ReservedQuota, int64(actual))
+	})
 }
 
 // settleTaskWalletQuota atomically terminates a task reservation together with
@@ -384,80 +414,84 @@ func prepareTaskWalletFinalization(task *model.Task, actual int) error {
 // not task.Quota (which now holds the final total). Changed final totals conflict
 // rather than turning adjustments into additional reward-bearing consumptions.
 func settleTaskWalletQuota(task *model.Task, actual int, refund bool) (bool, int, error) {
-	if actual < 0 {
-		return false, 0, errors.New("actual task quota cannot be negative")
+	applied, delta, _, err := settleTaskQuota(task, actual, refund)
+	return applied, delta, err
+}
+
+// settleTaskQuota commits both funding sources with the token and task marker.
+// fundingApplied=false preserves the expired-period subscription refund signal.
+func settleTaskQuota(task *model.Task, actual int, refund bool) (bool, int, bool, error) {
+	if task.HasForeignExecutionEvidence() {
+		return false, 0, false, nil
+	}
+	if actual < 0 || (refund && actual != 0) {
+		return false, 0, false, errors.New("invalid actual task quota")
 	}
 	// Finalization is two-phase: the durable finalizing barrier must commit
 	// before the accounting transaction, so a crash can be replayed safely.
 	if !refund {
 		if err := prepareTaskWalletFinalization(task, actual); err != nil {
-			return false, 0, err
+			if errors.Is(err, model.ErrTaskExecutionProtected) {
+				return false, 0, false, nil
+			}
+			return false, 0, false, err
 		}
 	}
 	applied, delta, paidInviterID := false, 0, 0
+	fundingApplied := true
 	err := model.DB.Transaction(func(tx *gorm.DB) error {
 		stored, key, err := lockTaskBillingTx(tx, task)
 		if err != nil {
 			return err
 		}
-		if (!refund && stored.Status != model.TaskStatusSuccess) || (refund && stored.Status == model.TaskStatusSuccess) {
+		if (!refund && stored.Status != model.TaskStatusSuccess) || (refund && stored.Status == model.TaskStatusSuccess) ||
+			(refund && taskIsSubscription(stored) && stored.Status != model.TaskStatusFailure) {
 			return errors.New("task status does not permit this billing outcome")
 		}
-		var r model.WalletReservation
-		if err := tx.Where("reservation_key = ? AND user_id = ?", key, stored.UserId).First(&r).Error; err != nil {
-			// A free or legacy task has no wallet debit to settle or refund.
-			if errors.Is(err, gorm.ErrRecordNotFound) && stored.Quota == 0 && actual == 0 && !refund {
-				return nil
+		if stored.BillingState == model.TaskBillingDone || stored.BillingState == model.TaskBillingSkipped {
+			if stored.BillingQuota != actual {
+				return model.ErrWalletReservationConflict
 			}
-			return fmt.Errorf("task wallet reservation unavailable: %w", err)
+			return nil
 		}
-		if r.ReservedQuota < 0 || r.ReservedQuota > int64(math.MaxInt) {
+		if stored.BillingState == model.TaskBillingPending && stored.BillingQuota != actual {
 			return model.ErrWalletReservationConflict
 		}
-		if refund {
-			if err := model.RefundWalletReservationTx(tx, key, stored.UserId); err != nil {
-				return err
-			}
-			if r.State == model.WalletReservationRefunded {
-				return nil
-			}
-			delta = -int(r.ReservedQuota)
+		if taskIsSubscription(stored) {
+			delta = actual - stored.Quota
+			fundingApplied, err = model.SettleSubscriptionTaskBillingTx(tx, stored, actual, refund)
 		} else {
-			res, err := model.FinalizeWalletConsumptionTx(tx, key, stored.UserId, r.ReservedQuota, int64(actual))
-			if err != nil {
-				return err
-			}
-			if res != nil && res.PaidInviterID > 0 {
-				paidInviterID = res.PaidInviterID
-			}
-			if r.State == model.WalletReservationFinalized {
-				return nil
-			}
-			delta = actual - int(r.ReservedQuota)
+			delta, paidInviterID, err = settleTaskFundsTx(tx, key, stored, actual, refund)
 		}
-		if stored.Quota != int(r.ReservedQuota) {
+		if err != nil {
+			return err
+		}
+		result := tx.Model(stored).Where("quota = ? AND billing_state = ?", stored.Quota, stored.BillingState).
+			Updates(map[string]interface{}{"quota": actual, "billing_quota": actual, "billing_state": model.TaskBillingDone})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
 			return model.ErrWalletReservationConflict
 		}
-		if err := adjustTaskTokenTx(tx, stored, delta, false); err != nil {
-			return err
-		}
-		if err := updateTaskBillingQuotaTx(tx, stored, actual); err != nil {
-			return err
-		}
+		task.PrivateData = stored.PrivateData
 		applied = true
 		return nil
 	})
-	if err != nil {
-		return false, 0, err
+	if errors.Is(err, model.ErrTaskExecutionProtected) {
+		return false, 0, false, nil
 	}
-	task.Quota = actual
+	if err != nil {
+		return false, 0, false, err
+	}
+	task.Quota, task.BillingQuota, task.BillingState = actual, actual, model.TaskBillingDone
 	invalidateTaskBillingCache(task)
 	if paidInviterID > 0 {
 		if err := model.InvalidateUserCache(paidInviterID); err != nil {
 			common.SysError(fmt.Sprintf("task rebate inviter cache invalidation: %v", err))
 		}
 	}
-	return applied, delta, nil
+	return applied, delta, fundingApplied, nil
 }
 
 // quotaNotifySender consumes a post-settlement user snapshot. Never pass this
@@ -522,31 +556,13 @@ func resolveTokenKey(ctx context.Context, tokenId int, taskID string) string {
 
 // taskIsSubscription 判断任务是否通过订阅计费。
 func taskIsSubscription(task *model.Task) bool {
-	return task.PrivateData.BillingSource == BillingSourceSubscription && task.PrivateData.SubscriptionId > 0
+	return task.PrivateData.BillingSource == BillingSourceSubscription
 }
 
-// taskAdjustFunding 调整任务的资金来源（钱包或订阅），delta > 0 表示扣费，delta < 0 表示退还。
-// applied=false 表示订阅已进入新额度周期，旧周期退款被安全丢弃。
+// taskAdjustFunding 仅兼容无持久身份的旧钱包调用；订阅必须走任务原子结算。
 func taskAdjustFunding(task *model.Task, delta int) (applied bool, err error) {
 	if taskIsSubscription(task) {
-		operationTime := task.SubmitTime
-		if operationTime <= 0 {
-			operationTime = task.CreatedAt
-		}
-		if delta > 0 {
-			return model.SettleUserSubscriptionDelta(
-				task.PrivateData.SubscriptionId,
-				int64(delta),
-				task.PrivateData.SubscriptionPeriodStart,
-				operationTime,
-			)
-		}
-		return model.RefundUserSubscriptionDelta(
-			task.PrivateData.SubscriptionId,
-			int64(-delta),
-			task.PrivateData.SubscriptionPeriodStart,
-			operationTime,
-		)
+		return false, ErrWalletBillingIdentityRequired
 	}
 	if delta > 0 {
 		return true, model.DecreaseUserQuotaDirect(task.UserId, delta)
@@ -557,7 +573,7 @@ func taskAdjustFunding(task *model.Task, delta int) (applied bool, err error) {
 // taskAdjustTokenQuota 调整任务的令牌额度，delta > 0 表示扣费，delta < 0 表示退还。
 // 需要通过 resolveTokenKey 运行时获取 key（不从 PrivateData 中读取）。
 func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
-	if task.PrivateData.TokenId <= 0 || delta == 0 {
+	if taskIsSubscription(task) || task.PrivateData.TokenId <= 0 || delta == 0 {
 		return
 	}
 	tokenKey := resolveTokenKey(ctx, task.PrivateData.TokenId, task.TaskID)
@@ -609,20 +625,21 @@ func taskModelName(task *model.Task) string {
 // RefundTaskQuota 统一的任务失败退款逻辑。
 // 当异步任务失败时，将预扣的 quota 退还给用户（支持钱包和订阅），并退还令牌额度。
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
-	if task == nil || task.Quota < 0 {
+	if task == nil || task.HasForeignExecutionEvidence() || task.Quota < 0 {
+		return
+	}
+	if taskIsSubscription(task) {
+		settleSubscriptionTaskQuota(ctx, task, 0, true, reason)
 		return
 	}
 	quota := task.Quota
-	if quota == 0 {
-		return
-	}
 	if !taskIsSubscription(task) {
 		active, err := model.WalletCreditLedgerActive(model.DB)
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("查询任务钱包账本失败: %v", err))
 			return
 		}
-		if active {
+		if active || task.ID > 0 || task.Status == model.TaskStatusFailure {
 			applied, delta, err := settleTaskWalletQuota(task, 0, true)
 			if err != nil {
 				logger.LogError(ctx, fmt.Sprintf("任务钱包退款失败 task %s: %v", task.TaskID, err))
@@ -637,6 +654,9 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 		}
 	}
 
+	if quota == 0 {
+		return
+	}
 	// 1. 退还资金来源（钱包或订阅）
 	fundingRefunded, err := taskAdjustFunding(task, -quota)
 	if err != nil {
@@ -679,10 +699,11 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 // actualQuota 是任务完成后的实际应扣额度，与预扣额度 (task.Quota) 做差额结算。
 // reason 用于日志记录（例如 "token重算" 或 "adaptor调整"）。
 func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, clamps ...*common.QuotaClamp) {
-	if task == nil || task.Quota < 0 || actualQuota < 0 {
+	if task == nil || task.HasForeignExecutionEvidence() || task.Quota < 0 || actualQuota < 0 {
 		return
 	}
-	if actualQuota == 0 && task.Quota == 0 {
+	if taskIsSubscription(task) {
+		settleSubscriptionTaskQuota(ctx, task, actualQuota, false, reason, clamps...)
 		return
 	}
 	if !taskIsSubscription(task) {
@@ -691,7 +712,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 			logger.LogError(ctx, fmt.Sprintf("查询任务钱包账本失败: %v", err))
 			return
 		}
-		if active {
+		if active || task.ID > 0 || task.Status == model.TaskStatusSuccess {
 			applied, delta, err := settleTaskWalletQuota(task, actualQuota, false)
 			if err != nil {
 				logger.LogError(ctx, fmt.Sprintf("任务钱包最终结算失败 task %s: %v", task.TaskID, err))
@@ -802,8 +823,13 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 // 当任务成功且返回了 totalTokens 时，根据模型倍率和分组倍率重新计算实际扣费额度，
 // 与预扣费的差额进行补扣或退还。支持钱包和订阅计费来源。
 func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTokens int) {
+	actual, reason, clamp := taskQuotaByTokens(task, totalTokens)
+	RecalculateTaskQuota(ctx, task, actual, reason, clamp)
+}
+
+func taskQuotaByTokens(task *model.Task, totalTokens int) (int, string, *common.QuotaClamp) {
 	if totalTokens <= 0 {
-		return
+		return task.Quota, "预扣额度即最终额度", nil
 	}
 
 	modelName := taskModelName(task)
@@ -812,7 +838,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	modelRatio, hasRatioSetting, _ := ratio_setting.GetModelRatio(modelName)
 	// 只有配置了倍率(非固定价格)时才按 token 重新计费
 	if !hasRatioSetting || modelRatio <= 0 {
-		return
+		return task.Quota, "模型无 token 倍率，按预扣额度结算", nil
 	}
 
 	// 获取用户和组的倍率信息
@@ -824,7 +850,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		}
 	}
 	if group == "" {
-		return
+		return task.Quota, "缺少分组，按预扣额度结算", nil
 	}
 
 	groupRatio := ratio_setting.GetGroupRatio(group)
@@ -852,5 +878,5 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	actualQuota, clamp := common.QuotaFromFloatChecked(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
 
 	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f", totalTokens, modelRatio, finalGroupRatio, otherMultiplier)
-	RecalculateTaskQuota(ctx, task, actualQuota, reason, clamp)
+	return actualQuota, reason, clamp
 }

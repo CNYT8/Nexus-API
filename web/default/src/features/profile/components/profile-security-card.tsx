@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Shield, Key, Trash2 } from 'lucide-react'
+import { Shield, Key, Trash2, Monitor } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useDialogs } from '@/hooks/use-dialog'
+import { useAuthStore } from '@/stores/auth-store'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TitledCard } from '@/components/ui/titled-card'
@@ -26,6 +27,7 @@ import type { UserProfile } from '../types'
 import { AccessTokenDialog } from './dialogs/access-token-dialog'
 import { ChangePasswordDialog } from './dialogs/change-password-dialog'
 import { DeleteAccountDialog } from './dialogs/delete-account-dialog'
+import { LoginDevicesDialog } from './dialogs/login-devices-dialog'
 
 // ============================================================================
 // Profile Security Card Component
@@ -36,7 +38,7 @@ interface ProfileSecurityCardProps {
   loading: boolean
 }
 
-type DialogKey = 'password' | 'token' | 'delete'
+type DialogKey = 'password' | 'token' | 'delete' | 'devices'
 
 export function ProfileSecurityCard({
   profile,
@@ -44,6 +46,7 @@ export function ProfileSecurityCard({
 }: ProfileSecurityCardProps) {
   const { t } = useTranslation()
   const dialogs = useDialogs<DialogKey>()
+  const owner = useAuthStore((state) => state.auth.user?.id)
 
   if (loading) {
     return (
@@ -73,9 +76,16 @@ export function ProfileSecurityCard({
     },
     {
       icon: Key,
-      title: t('Access Token'),
-      description: t('Generate and manage your API access token'),
+      title: t('个人管理令牌'),
+      description: t('创建、查看权限和撤销个人管理令牌'),
       action: () => dialogs.open('token'),
+      variant: 'default' as const,
+    },
+    {
+      icon: Monitor,
+      title: t('登录设备'),
+      description: t('查看并撤销浏览器登录会话'),
+      action: () => dialogs.open('devices'),
       variant: 'default' as const,
     },
     {
@@ -94,7 +104,7 @@ export function ProfileSecurityCard({
         description={t('Manage your security settings and account access')}
         icon={<Shield className='h-4 w-4' />}
       >
-        <div className='grid grid-cols-1 gap-2.5 sm:gap-3 md:grid-cols-3'>
+        <div className='grid grid-cols-1 gap-2.5 sm:gap-3 md:grid-cols-2'>
           {securityActions.map((item) => (
             <button
               key={item.title}
@@ -135,12 +145,21 @@ export function ProfileSecurityCard({
         username={profile.username}
       />
 
-      <AccessTokenDialog
-        open={dialogs.isOpen('token')}
+      {profile.id === owner && dialogs.isOpen('token') && <AccessTokenDialog
+        key={profile.id}
+        role={profile.role}
+        open
         onOpenChange={(open) =>
           open ? dialogs.open('token') : dialogs.close('token')
         }
-      />
+      />}
+
+      {profile.id === owner && dialogs.isOpen('devices') && <LoginDevicesDialog
+        key={profile.id}
+        onOpenChange={(open) =>
+          open ? dialogs.open('devices') : dialogs.close('devices')
+        }
+      />}
 
       <DeleteAccountDialog
         open={dialogs.isOpen('delete')}

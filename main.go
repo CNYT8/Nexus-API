@@ -112,6 +112,10 @@ func main() {
 	// 数据看板
 	go model.UpdateQuotaData()
 
+	// 日志清理使用持久检查点和数据库租约，启动后恢复中断的任务。
+	service.StartLogCleanupTaskRunner()
+	service.StartAuthenticationCleanupTask()
+
 	if os.Getenv("CHANNEL_UPDATE_FREQUENCY") != "" {
 		frequency, err := strconv.Atoi(os.Getenv("CHANNEL_UPDATE_FREQUENCY"))
 		if err != nil {
@@ -176,7 +180,14 @@ func main() {
 
 	// Initialize HTTP server
 	server := gin.New()
+	if err := middleware.ConfigureTrustedProxies(server); err != nil {
+		common.SysError("failed to configure trusted proxies: " + err.Error())
+		return
+	}
 	server.Use(gin.CustomRecoveryWithWriter(common.ErrorLogWriter, func(c *gin.Context, err any) {
+		if err == http.ErrAbortHandler {
+			panic(err)
+		}
 		common.SysLog(fmt.Sprintf("panic detected: %v", err))
 		statusCode, message := service.ApplyErrorMaskToMessage(
 			c,
@@ -229,9 +240,9 @@ func main() {
 	// Log startup success message
 	common.LogStartupSuccess(startTime, port)
 
-	err = server.Run(":" + port)
+	err = runServerWithGracefulShutdown(&http.Server{Addr: ":" + port, Handler: server})
 	if err != nil {
-		common.FatalLog("failed to start HTTP server: " + err.Error())
+		common.SysError("HTTP server stopped: " + err.Error())
 	}
 }
 

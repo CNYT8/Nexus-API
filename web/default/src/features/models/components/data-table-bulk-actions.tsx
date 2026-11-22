@@ -25,14 +25,6 @@ import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/copy-to-clipboard'
 import { Button } from '@/components/ui/button'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -41,9 +33,9 @@ import { DataTableBulkActions as BulkActionsToolbar } from '@/components/data-ta
 import {
   handleBatchEnableModels,
   handleBatchDisableModels,
-  handleBatchDeleteModels,
 } from '../lib'
 import type { Model } from '../types'
+import { ModelDeleteDialog } from './model-delete-dialog'
 
 interface DataTableBulkActionsProps<TData> {
   table: Table<TData>
@@ -81,10 +73,9 @@ export function DataTableBulkActions<TData>({
     handleBatchDisableModels(selectedIds, queryClient, handleClearSelection)
   }
 
-  const handleDeleteAll = () => {
-    handleBatchDeleteModels(selectedIds, queryClient, () => {
-      setShowDeleteConfirm(false)
-      handleClearSelection()
+  const handleDeleted = (ids: number[]) => {
+    selectedRows.forEach((row) => {
+      if (ids.includes((row.original as Model).id)) row.toggleSelected(false)
     })
   }
 
@@ -186,32 +177,13 @@ export function DataTableBulkActions<TData>({
         </Tooltip>
       </BulkActionsToolbar>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('Delete Models?')}</DialogTitle>
-            <DialogDescription>
-              {t(
-                'Are you sure you want to delete {{count}} model(s)? This action cannot be undone.',
-                { count: selectedIds.length }
-              )}
-            </DialogDescription>
-          </DialogHeader>
-
-          <DialogFooter>
-            <Button
-              variant='outline'
-              onClick={() => setShowDeleteConfirm(false)}
-            >
-              {t('Cancel')}
-            </Button>
-            <Button variant='destructive' onClick={handleDeleteAll}>
-              {t('Delete')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {showDeleteConfirm && (
+        <ModelDeleteDialog
+          models={selectedModels}
+          onClose={() => setShowDeleteConfirm(false)}
+          onDeleted={handleDeleted}
+        />
+      )}
     </>
   )
 }

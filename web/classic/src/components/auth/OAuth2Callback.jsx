@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect, useRef } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -29,6 +29,8 @@ import {
 } from '../../helpers';
 import { UserContext } from '../../context/User';
 import Loading from '../common/ui/Loading';
+import { consumeOAuthReturn } from './oauth-return-target';
+import TwoFAVerification from './TwoFAVerification';
 
 const OAuth2Callback = (props) => {
   const { t } = useTranslation();
@@ -38,14 +40,36 @@ const OAuth2Callback = (props) => {
   
   // 防止 React 18 Strict Mode 下重复执行
   const hasExecuted = useRef(false);
+  const [showVerification, setShowVerification] = useState(false);
 
-  // 最大重试次数
-  const MAX_RETRIES = 3;
+  const returnTo = useRef({ target: null, bind: false });
+  const finishFailure = () => {
+    const { target, bind } = returnTo.current;
+    navigate(bind ? '/console/personal' : '/login', {
+      replace: true,
+      state: target ? { from: target } : undefined,
+    });
+  };
 
-  const sendCode = async (code, state, retry = 0) => {
+  const finishLogin = (data) => {
+    if (data?.id == null) {
+      showError(t('授权失败'));
+      finishFailure();
+      return;
+    }
+    userDispatch({ type: 'login', payload: data });
+    localStorage.setItem('user', JSON.stringify(data));
+    setUserData(data);
+    updateAPI();
+    showSuccess(t('登录成功！'));
+    navigate(returnTo.current.target || '/console/token', { replace: true });
+  };
+
+  const sendCode = async (code, state) => {
     try {
       const { data: resData } = await API.get(
-        `/api/oauth/${props.type}?code=${code}&state=${state}`,
+        `/api/oauth/${encodeURIComponent(props.type)}?${new URLSearchParams({ code, state })}`,
+        { skipErrorHandler: true },
       );
 
       const { success, message, data } = resData;
@@ -53,31 +77,25 @@ const OAuth2Callback = (props) => {
       if (!success) {
         // 业务错误不重试，直接显示错误
         showError(message || t('授权失败'));
+        finishFailure();
         return;
       }
 
-      if (data?.action === 'bind') {
+      if (data?.action === 'bind' || message === 'bind') {
         showSuccess(t('绑定成功！'));
-        navigate('/console/personal');
+        navigate('/console/personal', { replace: true });
+      } else if (returnTo.current.bind) {
+        showError(t('授权失败'));
+        finishFailure();
+      } else if (data?.require_2fa === true) {
+        setShowVerification(true);
       } else {
-        userDispatch({ type: 'login', payload: data });
-        localStorage.setItem('user', JSON.stringify(data));
-        setUserData(data);
-        updateAPI();
-        showSuccess(t('登录成功！'));
-        navigate('/console/token');
+        finishLogin(data);
       }
     } catch (error) {
-      // 网络错误等可重试
-      if (retry < MAX_RETRIES) {
-        // 递增的退避等待
-        await new Promise((resolve) => setTimeout(resolve, (retry + 1) * 2000));
-        return sendCode(code, state, retry + 1);
-      }
-
-      // 重试次数耗尽，提示错误并返回设置页面
+      // Authorization codes are single-use: never replay after an uncertain response.
       showError(error.message || t('授权失败'));
-      navigate('/console/personal');
+      finishFailure();
     }
   };
 
@@ -91,17 +109,19 @@ const OAuth2Callback = (props) => {
     const code = searchParams.get('code');
     const state = searchParams.get('state');
 
-    // 参数缺失直接返回
-    if (!code) {
-      showError(t('未获取到授权码'));
-      navigate('/console/personal');
+    returnTo.current = consumeOAuthReturn(state);
+    if (!code || !state || searchParams.has('error') || (returnTo.current.bind && !returnTo.current.matched)) {
+      showError(t('授权失败'));
+      finishFailure();
       return;
     }
 
     sendCode(code, state);
   }, []);
 
-  return <Loading />;
+  return showVerification
+    ? <TwoFAVerification onSuccess={finishLogin} onBack={finishFailure} />
+    : <Loading />;
 };
 
 export default OAuth2Callback;

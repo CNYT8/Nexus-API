@@ -15,36 +15,12 @@ import (
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func applyExplicitLogTextFilter(tx *gorm.DB, column string, value string) (*gorm.DB, error) {
-	if value == "" {
-		return tx, nil
-	}
-	if strings.Contains(value, "%") {
-		condition, pattern, err := buildLogLikeCondition(column, value)
-		if err != nil {
-			return nil, err
-		}
-		return tx.Where(condition, pattern), nil
-	}
-	return tx.Where(column+" = ?", value), nil
-}
-
-func buildLogLikeCondition(column string, value string) (string, string, error) {
-	if common.UsingClickHouse {
-		pattern, err := sanitizeClickHouseLikePattern(value)
-		if err != nil {
-			return "", "", err
-		}
-		return column + " LIKE ?", pattern, nil
-	}
-
-	pattern, err := sanitizeLikePattern(value)
-	if err != nil {
-		return "", "", err
-	}
-	return column + " LIKE ? ESCAPE '!'", pattern, nil
+	// 列表、统计与导出共用筛选规则，方言由实际日志连接决定。
+	return applyLogExportTextFilter(tx, strings.TrimPrefix(column, "logs."), value)
 }
 
 func sanitizeClickHouseLikePattern(input string) (string, error) {
@@ -117,6 +93,10 @@ func formatUserLogs(logs []*Log, startIdx int) {
 		}
 		log.ChannelId = 0
 		log.ChannelName = ""
+		// 充值回调和管理操作的来源地址属于支付方或管理员，不是用户请求地址。
+		if log.Type == LogTypeManage || log.Type == LogTypeTopup {
+			log.Ip = ""
+		}
 		log.Other = formatUserLogOther(log.Other)
 		log.Id = startIdx + i + 1
 	}
@@ -170,7 +150,7 @@ func RecordLog(userId int, logType int, content string) {
 		Type:      logType,
 		Content:   content,
 	}
-	err := LOG_DB.Create(log).Error
+	err := createLog(log)
 	if err != nil {
 		common.SysLog("failed to record log: " + err.Error())
 	}
@@ -195,7 +175,7 @@ func RecordLogWithAdminInfo(userId int, logType int, content string, adminInfo m
 		}
 		log.Other = common.MapToJsonStr(other)
 	}
-	if err := LOG_DB.Create(log).Error; err != nil {
+	if err := createLog(log); err != nil {
 		common.SysLog("failed to record log: " + err.Error())
 	}
 }
@@ -286,7 +266,7 @@ func RecordLoginLog(userId int, username string, content string, ip string, acti
 		Ip:        ip,
 		Other:     common.MapToJsonStr(other),
 	}
-	if err := LOG_DB.Create(log).Error; err != nil {
+	if err := createLog(log); err != nil {
 		common.SysLog("failed to record login log: " + err.Error())
 	}
 }
@@ -318,7 +298,7 @@ func RecordOperationAuditLog(logUserId int, content string, ip string, action st
 		Ip:        ip,
 		Other:     common.MapToJsonStr(other),
 	}
-	if err := LOG_DB.Create(log).Error; err != nil {
+	if err := createLog(log); err != nil {
 		common.SysLog("failed to record operation audit log: " + err.Error())
 	}
 }
@@ -345,7 +325,7 @@ func RecordTopupLog(userId int, content string, callerIp string, paymentMethod s
 		Ip:        callerIp,
 		Other:     common.MapToJsonStr(other),
 	}
-	err := LOG_DB.Create(log).Error
+	err := createLog(log)
 	if err != nil {
 		common.SysLog("failed to record topup log: " + err.Error())
 	}
@@ -403,7 +383,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		UpstreamRequestId: upstreamRequestId,
 		Other:             otherStr,
 	}
-	err := LOG_DB.Create(log).Error
+	err := createLog(log)
 	if err != nil {
 		logger.LogError(c, "failed to record log: "+err.Error())
 	}
@@ -461,14 +441,19 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		UpstreamRequestId: upstreamRequestId,
 		Other:             otherStr,
 	}
-	err := LOG_DB.Create(log).Error
+	err := createLog(log)
 	if err != nil {
 		logger.LogError(c, "failed to record log: "+err.Error())
 	}
 	if common.DataExportEnabled {
-		gopool.Go(func() {
+		recordQuota := func() {
 			LogQuotaData(userId, username, params.ModelName, params.Quota, common.GetTimestamp(), params.PromptTokens+params.CompletionTokens)
-		})
+		}
+		if c.GetBool("responses_websocket") {
+			recordQuota()
+		} else {
+			gopool.Go(recordQuota)
+		}
 	}
 }
 
@@ -509,7 +494,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 		Group:     params.Group,
 		Other:     common.MapToJsonStr(params.Other),
 	}
-	err := LOG_DB.Create(log).Error
+	err := createLog(log)
 	if err != nil {
 		common.SysLog("failed to record task billing log: " + err.Error())
 	}
@@ -548,7 +533,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 		tx = tx.Where("logs.channel_id = ?", channel)
 	}
 	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+		tx = tx.Where(clause.Eq{Column: clause.Column{Table: "logs", Name: "group"}, Value: group})
 	}
 	err = tx.Model(&Log{}).Count(&total).Error
 	if err != nil {
@@ -606,6 +591,10 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 const logSearchCountLimit = 10000
 
 func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {
+	startTimestamp, endTimestamp, err = NormalizeUserLogWindow(startTimestamp, endTimestamp)
+	if err != nil {
+		return nil, 0, err
+	}
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB.Where("logs.user_id = ?", userId)
@@ -632,7 +621,7 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 		tx = tx.Where("logs.created_at <= ?", endTimestamp)
 	}
 	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+		tx = tx.Where(clause.Eq{Column: clause.Column{Table: "logs", Name: "group"}, Value: group})
 	}
 	err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error
 	if err != nil {
@@ -656,6 +645,21 @@ type Stat struct {
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
+	return sumUsedQuota(0, logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
+}
+
+func SumUserUsedQuota(userID, logType int, start, end int64, modelName, tokenName, group string) (Stat, error) {
+	start, end, err := NormalizeUserLogWindow(start, end)
+	if err != nil {
+		return Stat{}, err
+	}
+	if userID <= 0 {
+		return Stat{}, errors.New("无效的用户")
+	}
+	return sumUsedQuota(userID, logType, start, end, modelName, "", tokenName, 0, group)
+}
+
+func sumUsedQuota(userID, logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
 	quotaCondition := "1 = 1"
 	quotaArgs := make([]any, 0, 2)
 	if startTimestamp != 0 && endTimestamp != 0 {
@@ -678,6 +682,9 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 		selectArgs...,
 	)
 
+	if userID > 0 {
+		tx = tx.Where("user_id = ?", userID)
+	}
 	if tx, err = applyExplicitLogTextFilter(tx, "username", username); err != nil {
 		return stat, err
 	}
@@ -691,7 +698,7 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 		tx = tx.Where("channel_id = ?", channel)
 	}
 	if group != "" {
-		tx = tx.Where(logGroupCol+" = ?", group)
+		tx = tx.Where(clause.Eq{Column: clause.Column{Table: "logs", Name: "group"}, Value: group})
 	}
 
 	tx = tx.Where("type = ?", LogTypeConsume)
@@ -738,14 +745,14 @@ func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64,
 			return total, ctx.Err()
 		}
 
-		result := LOG_DB.Where("created_at < ?", targetTimestamp).Limit(limit).Delete(&Log{})
-		if nil != result.Error {
-			return total, result.Error
+		deleted, err := DeleteOldLogBatch(ctx, targetTimestamp, limit)
+		if err != nil {
+			return total, err
 		}
 
-		total += result.RowsAffected
+		total += deleted
 
-		if result.RowsAffected < int64(limit) {
+		if deleted == 0 {
 			break
 		}
 	}

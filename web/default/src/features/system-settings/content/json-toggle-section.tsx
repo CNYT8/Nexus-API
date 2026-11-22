@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -39,6 +39,7 @@ import {
   SettingsSwitchItem,
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
+import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { formatJsonForEditor, normalizeJsonString } from './utils'
 
@@ -125,47 +126,29 @@ export function JsonToggleSection({
     },
   })
 
-  const initialNormalizedRef = useRef(
-    normalizeJsonString(defaultValue, fallbackValue)
-  )
-  const initialEnabledRef = useRef(defaultEnabled)
-
-  useEffect(() => {
-    initialNormalizedRef.current = normalizeJsonString(
-      defaultValue,
-      fallbackValue
-    )
-    initialEnabledRef.current = defaultEnabled
-    form.reset({
-      enabled: defaultEnabled,
-      json: formatJsonForEditor(defaultValue, fallbackValue),
-    })
-  }, [defaultEnabled, defaultValue, fallbackValue, form])
+  const submitForm = useResetForm(form, { enabled: defaultEnabled, json: formattedDefault })
 
   const onSubmit = async (values: JsonToggleFormValues) => {
     const updates: Array<{ key: string; value: string | boolean }> = []
 
-    if (values.enabled !== initialEnabledRef.current) {
+    if (values.enabled !== defaultEnabled) {
       updates.push({ key: enabledKey, value: values.enabled })
     }
 
     const normalized = normalizeJsonString(values.json, fallbackValue)
-    if (normalized !== initialNormalizedRef.current) {
+    if (normalized !== normalizeJsonString(defaultValue, fallbackValue)) {
       updates.push({ key: optionKey, value: normalized })
     }
 
-    for (const update of updates) {
-      await updateOption.mutateAsync(update)
-    }
+    await updateOption.saveOptions(updates)
   }
 
   return (
     <SettingsAccordion value={value} title={title}>
       <Form {...form}>
-        {/* eslint-disable-next-line react-hooks/refs */}
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
             saveLabel={submitLabel}
           />

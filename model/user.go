@@ -84,7 +84,8 @@ func resolveUserSortOptions(sortOptions []UserSortOptions) UserSortOptions {
 type User struct {
 	Id               int            `json:"id"`
 	Username         string         `json:"username" gorm:"unique;index" validate:"max=20"`
-	Password         string         `json:"password" gorm:"not null;" validate:"min=8,max=20"`
+	Password         string         `json:"password" gorm:"not null;" validate:"min=8,max=128"`
+	AuthVersion      int64          `json:"-" gorm:"not null;default:1"`
 	OriginalPassword string         `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
 	DisplayName      string         `json:"display_name" gorm:"index" validate:"max=20"`
 	Role             int            `json:"role" gorm:"type:int;default:1"`   // admin, common
@@ -123,14 +124,15 @@ type User struct {
 
 func (user *User) ToBaseUser() *UserBase {
 	cache := &UserBase{
-		Id:       user.Id,
-		Role:     user.Role,
-		Group:    user.Group,
-		Quota:    user.Quota,
-		Status:   user.Status,
-		Username: user.Username,
-		Setting:  user.Setting,
-		Email:    user.Email,
+		Id:          user.Id,
+		Role:        user.Role,
+		Group:       user.Group,
+		Quota:       user.Quota,
+		Status:      user.Status,
+		Username:    user.Username,
+		Setting:     user.Setting,
+		Email:       user.Email,
+		AuthVersion: user.AuthVersion,
 	}
 	return cache
 }
@@ -162,19 +164,28 @@ func UpdateUserAccessToken(id int, token string) error {
 	return nil
 }
 
-// UpdateUserSetting updates only the serialized user setting column. It must
-// be used instead of User.Update for settings-only changes so a stale user
-// snapshot cannot overwrite accounting or other concurrently updated fields.
+// UpdateUserSetting changes serialized settings without overwriting accounting.
+// Effective permission changes also revoke credentials through the account version.
 func UpdateUserSetting(id int, setting string) error {
 	if id == 0 {
 		return errors.New("id 为空！")
 	}
-	result := DB.Model(&User{}).Where("id = ?", id).Update("setting", setting)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&User{}).Where("id = ?", id).UpdateColumn("auth_version", gorm.Expr("auth_version")).Error; err != nil {
+			return err
+		}
+		var current User
+		if err := tx.Select("id", "setting").First(&current, id).Error; err != nil {
+			return err
+		}
+		updates := map[string]any{"setting": setting}
+		if adminPermissionsChanged(current.Setting, setting) {
+			updates["auth_version"] = gorm.Expr("auth_version + 1")
+			updates["access_token"] = nil
+		}
+		return tx.Model(&User{}).Where("id = ?", id).Updates(updates).Error
+	}); err != nil {
+		return err
 	}
 	return updateUserSettingCache(id, setting)
 }
@@ -445,7 +456,7 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	var active bool
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var err error
-		active, err = walletCreditBaselineState(tx)
+		active, err = LockWalletCreditBaselineTx(tx)
 		if err != nil {
 			return err
 		}
@@ -524,7 +535,7 @@ func applyRegistrationCreditsTx(tx *gorm.DB, userID, inviterID int) (int, error)
 func (user *User) Insert(inviterId int) error {
 	var err error
 	if user.Password != "" {
-		user.Password, err = common.Password2Hash(user.Password)
+		user.Password, err = common.HashAccountPassword(user.Password)
 		if err != nil {
 			return err
 		}
@@ -597,7 +608,7 @@ func writeRegistrationLogs(userID, inviterID int) {
 func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 	var err error
 	if user.Password != "" {
-		user.Password, err = common.Password2Hash(user.Password)
+		user.Password, err = common.HashAccountPassword(user.Password)
 		if err != nil {
 			return err
 		}
@@ -654,18 +665,30 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 func (user *User) Update(updatePassword bool) error {
 	var err error
 	if updatePassword {
-		user.Password, err = common.Password2Hash(user.Password)
+		user.Password, err = common.HashAccountPassword(user.Password)
 		if err != nil {
 			return err
 		}
 	}
 	newUser := *user
 	if err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&User{}).Where("id = ?", user.Id).UpdateColumn("auth_version", gorm.Expr("auth_version")).Error; err != nil {
+			return err
+		}
 		current := User{}
 		if err := tx.First(&current, user.Id).Error; err != nil {
 			return err
 		}
+		permissionsChanged := newUser.Setting != "" && adminPermissionsChanged(current.Setting, newUser.Setting)
+		if updatePassword || (newUser.Status != 0 && newUser.Status != current.Status) || (newUser.Role != 0 && newUser.Role != current.Role) || permissionsChanged {
+			if err := tx.Model(&current).Updates(map[string]any{
+				"auth_version": gorm.Expr("auth_version + 1"), "access_token": nil,
+			}).Error; err != nil {
+				return err
+			}
+		}
 		if err := tx.Model(&current).Omit(
+			"auth_version",
 			"access_token",
 			"quota",
 			"used_quota",
@@ -688,7 +711,7 @@ func (user *User) Update(updatePassword bool) error {
 func (user *User) Edit(updatePassword bool) error {
 	var err error
 	if updatePassword {
-		user.Password, err = common.Password2Hash(user.Password)
+		user.Password, err = common.HashAccountPassword(user.Password)
 		if err != nil {
 			return err
 		}
@@ -703,6 +726,8 @@ func (user *User) Edit(updatePassword bool) error {
 	}
 	if updatePassword {
 		updates["password"] = newUser.Password
+		updates["auth_version"] = gorm.Expr("auth_version + 1")
+		updates["access_token"] = nil
 	}
 
 	DB.First(&user, user.Id)
@@ -801,6 +826,9 @@ func deleteUserAuthenticationData(tx *gorm.DB, userId int) error {
 		&TwoFA{},
 		&PasskeyCredential{},
 		&Token{},
+		&UserSession{},
+		&AuthFlow{},
+		&UserAccessToken{},
 		&UserMembership{},
 		&MembershipQuotaGrant{},
 		&UserGroupRatioOverride{},
@@ -842,9 +870,22 @@ func (user *User) ValidateAndFill() (err error) {
 		}
 		return fmt.Errorf("%w: %v", ErrDatabase, err)
 	}
-	okay := common.ValidatePasswordAndHash(password, user.Password)
+	okay := common.VerifyAccountPassword(password, user.Password)
 	if !okay || user.Status != common.UserStatusEnabled {
 		return ErrInvalidCredentials
+	}
+	if common.AccountPasswordNeedsUpgrade(user.Password) {
+		if upgraded, hashErr := common.HashAccountPassword(password); hashErr == nil {
+			// CAS avoids replacing a password changed while login was hashing.
+			result := DB.Model(&User{}).Where("id = ? AND password = ? AND auth_version = ?", user.Id, user.Password, user.AuthVersion).Update("password", upgraded)
+			if result.Error != nil {
+				return fmt.Errorf("%w: %v", ErrDatabase, result.Error)
+			}
+			if result.RowsAffected != 1 {
+				return ErrInvalidCredentials
+			}
+			user.Password = upgraded
+		}
 	}
 	return nil
 }
@@ -974,11 +1015,13 @@ func ResetUserPasswordByEmail(email string, password string) error {
 	if email == "" || password == "" {
 		return errors.New("邮箱地址或密码为空！")
 	}
-	hashedPassword, err := common.Password2Hash(password)
+	hashedPassword, err := common.HashAccountPassword(password)
 	if err != nil {
 		return err
 	}
-	err = DB.Model(&User{}).Where("email = ?", email).Update("password", hashedPassword).Error
+	err = DB.Model(&User{}).Where("email = ?", email).Updates(map[string]any{
+		"password": hashedPassword, "auth_version": gorm.Expr("auth_version + 1"), "access_token": nil,
+	}).Error
 	return err
 }
 
@@ -1026,19 +1069,8 @@ func IsAdmin(userId int) bool {
 //}
 
 func ValidateAccessToken(token string) (*User, error) {
-	if token == "" {
-		return nil, nil
-	}
-	token = strings.Replace(token, "Bearer ", "", 1)
-	user := &User{}
-	err := DB.Where("access_token = ?", token).First(user).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("%w: %v", ErrDatabase, err)
-	}
-	return user, nil
+	user, _, err := ValidateDashboardAccessToken(token)
+	return user, err
 }
 
 // GetUserQuota gets quota from Redis first, falls back to DB if needed
@@ -1155,16 +1187,8 @@ func IncreaseUserQuota(id int, quota int, db bool) (err error) {
 			common.SysLog("failed to increase user quota: " + err.Error())
 		}
 	})
-	if !db && common.BatchUpdateEnabled {
-		active, activeErr := WalletCreditLedgerActive(DB)
-		if activeErr != nil {
-			return activeErr
-		}
-		if !active {
-			addNewRecord(BatchUpdateTypeUserQuota, id, quota)
-			return nil
-		}
-	}
+	// Wallet deltas must commit under the baseline gate before returning;
+	// an in-memory batch can otherwise outlive the baseline snapshot.
 	return increaseUserQuota(id, quota)
 }
 
@@ -1176,7 +1200,7 @@ func increaseUserQuota(id int, quota int) (err error) {
 		return nil
 	}
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		active, err := walletCreditBaselineState(tx)
+		active, err := LockWalletCreditBaselineTx(tx)
 		if err != nil {
 			return err
 		}
@@ -1206,16 +1230,7 @@ func DecreaseUserQuota(id int, quota int, db bool) (err error) {
 			common.SysLog("failed to decrease user quota: " + err.Error())
 		}
 	})
-	if !db && common.BatchUpdateEnabled {
-		active, activeErr := WalletCreditLedgerActive(DB)
-		if activeErr != nil {
-			return activeErr
-		}
-		if !active {
-			addNewRecord(BatchUpdateTypeUserQuota, id, -quota)
-			return nil
-		}
-	}
+	// Keep wallet mutations synchronous even when statistics are batched.
 	return decreaseUserQuota(id, quota)
 }
 
@@ -1227,7 +1242,7 @@ func decreaseUserQuota(id int, quota int) (err error) {
 		return nil
 	}
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		active, err := walletCreditBaselineState(tx)
+		active, err := LockWalletCreditBaselineTx(tx)
 		if err != nil {
 			return err
 		}
@@ -1241,7 +1256,9 @@ func decreaseUserQuota(id int, quota int) (err error) {
 			}
 			return nil
 		}
-		return AdjustWalletDebitUniqueTx(tx, id, int64(quota), "legacy_decrease")
+		// The debit helper also reads the marker; preserve current reads after
+		// waiting for activation, with isolated statements for each query.
+		return AdjustWalletDebitUniqueTx(walletCurrentTx(tx).Session(&gorm.Session{}), id, int64(quota), "legacy_decrease")
 	})
 	return err
 }
@@ -1261,7 +1278,7 @@ func ReserveUserQuota(id int, quota int) error {
 		return nil
 	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		active, err := walletCreditBaselineState(tx)
+		active, err := LockWalletCreditBaselineTx(tx)
 		if err != nil {
 			return err
 		}
@@ -1284,7 +1301,7 @@ func ReserveUserQuota(id int, quota int) error {
 		if int64(user.Quota) < int64(quota) {
 			return ErrInsufficientQuota
 		}
-		return AdjustWalletDebitUniqueTx(tx, id, int64(quota), "reserve")
+		return AdjustWalletDebitUniqueTx(walletCurrentTx(tx).Session(&gorm.Session{}), id, int64(quota), "reserve")
 	})
 	if err != nil {
 		return err
@@ -1313,7 +1330,7 @@ func DecreaseUserQuotaDirect(id int, quota int) error {
 		return nil
 	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		active, err := walletCreditBaselineState(tx)
+		active, err := LockWalletCreditBaselineTx(tx)
 		if err != nil {
 			return err
 		}
@@ -1329,7 +1346,7 @@ func DecreaseUserQuotaDirect(id int, quota int) error {
 			}
 			return nil
 		}
-		return AdjustWalletDebitUniqueTx(tx, id, int64(quota), "direct_debit")
+		return AdjustWalletDebitUniqueTx(walletCurrentTx(tx).Session(&gorm.Session{}), id, int64(quota), "direct_debit")
 	})
 	if err != nil {
 		return err
@@ -1357,7 +1374,7 @@ func IncreaseUserQuotaDirect(id int, quota int) error {
 		return nil
 	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		active, err := walletCreditBaselineState(tx)
+		active, err := LockWalletCreditBaselineTx(tx)
 		if err != nil {
 			return err
 		}
@@ -1389,15 +1406,15 @@ func IncreaseUserQuotaDirect(id int, quota int) error {
 
 // SetUserQuotaAbsolute applies an administrator override to an absolute wallet
 // balance inside one transaction. Before the wallet ledger is initialized it
-// keeps the legacy raw update; afterwards an increase becomes a non-eligible
-// administrator gift lot and a decrease retires source lots through a
-// non-consumption adjustment, so no manual change can earn rebates.
+// keeps the legacy raw update; afterwards an increase becomes an administrator
+// ordinary lot and a decrease retires source lots through a non-consumption
+// adjustment.
 func SetUserQuotaAbsolute(userID int, target int) error {
 	if userID <= 0 {
 		return errors.New("invalid user id")
 	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		active, err := walletCreditBaselineState(tx)
+		active, err := LockWalletCreditBaselineTx(tx)
 		if err != nil {
 			return err
 		}
@@ -1406,7 +1423,7 @@ func SetUserQuotaAbsolute(userID int, target int) error {
 			// NULL. Read first so an unchanged value stays a successful no-op
 			// even on MySQL changed-rows semantics.
 			var current int64
-			if err := tx.Model(&User{}).Select("COALESCE(quota, 0)").Where("id = ?", userID).Scan(&current).Error; err != nil {
+			if err := walletCurrentTx(tx).Model(&User{}).Select("COALESCE(quota, 0)").Where("id = ?", userID).Scan(&current).Error; err != nil {
 				return err
 			}
 			if current == int64(target) {
@@ -1433,7 +1450,7 @@ func SetUserQuotaAbsolute(userID int, target int) error {
 			_, err := CreditWalletSourceUniqueTx(tx, userID, WalletCreditSourceAdmin, "ordinary", int(delta))
 			return err
 		}
-		return AdjustWalletDebitUniqueTx(tx, userID, -delta, "admin_override")
+		return AdjustWalletDebitUniqueTx(walletCurrentTx(tx).Session(&gorm.Session{}), userID, -delta, "admin_override")
 	})
 	if err != nil {
 		return err
@@ -1534,34 +1551,58 @@ func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
 	//}
 }
 
-func updateUserQuotaUsedQuotaAndRequestCount(id int, quota int, usedQuota int, requestCount int) {
+// updateUserQuotaUsedQuotaAndRequestCount also drains deltas queued by legacy
+// writers. It returns retryable only when the transaction body did not finish;
+// a commit error can mean the server committed and must not be replayed blindly.
+func updateUserQuotaUsedQuotaAndRequestCount(id int, quota int, usedQuota int, requestCount int) (retryable bool, err error) {
 	if quota == 0 && usedQuota == 0 && requestCount == 0 {
-		return
+		return false, nil
 	}
-	if quota != 0 {
-		active, err := WalletCreditLedgerActive(DB)
-		if err != nil {
-			common.SysError("failed to check wallet credit baseline for batch quota update: " + err.Error())
-			quota = 0
-		} else if active {
-			common.SysError(fmt.Sprintf("refusing batch quota delta for user %d after wallet credit baseline initialization", id))
-			quota = 0
-		}
-		if quota == 0 && usedQuota == 0 && requestCount == 0 {
-			return
-		}
-	}
-
-	err := DB.Model(&User{}).Where("id = ?", id).Updates(
-		map[string]interface{}{
-			"quota":         gorm.Expr("quota + ?", quota),
+	bodyFinished := false
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		updates := map[string]interface{}{
 			"used_quota":    gorm.Expr("used_quota + ?", usedQuota),
 			"request_count": gorm.Expr("request_count + ?", requestCount),
-		},
-	).Error
-	if err != nil {
-		common.SysLog("failed to batch update user quota, used quota and request count: " + err.Error())
+		}
+		if quota != 0 {
+			active, err := LockWalletCreditBaselineTx(tx)
+			if err != nil {
+				return err
+			}
+			if !active {
+				updates["quota"] = gorm.Expr("quota + ?", quota)
+			} else if quota > 0 {
+				if _, err := CreditWalletSourceUniqueTx(tx, id, WalletCreditSourcePromotion, "compensation", quota); err != nil {
+					return err
+				}
+			} else {
+				debit := -int64(quota)
+				if debit <= 0 {
+					return ErrInvalidTopUpQuota
+				}
+				if err := AdjustWalletDebitUniqueTx(walletCurrentTx(tx).Session(&gorm.Session{}), id, debit, "legacy_batch"); err != nil {
+					return err
+				}
+			}
+		}
+		result := tx.Model(&User{}).Where("id = ?", id).Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 && (usedQuota != 0 || requestCount != 0 || quota != 0) {
+			// Active wallet helpers already validated the user. A zero stats
+			// update can report zero changed rows on MySQL.
+			if usedQuota != 0 || requestCount != 0 || len(updates) == 3 {
+				return fmt.Errorf("user %d not found while flushing quota batch", id)
+			}
+		}
+		bodyFinished = true
+		return nil
+	})
+	if err == nil && quota != 0 {
+		invalidateWalletCreditCache(id)
 	}
+	return err != nil && !bodyFinished, err
 }
 
 func updateUserUsedQuota(id int, quota int) {

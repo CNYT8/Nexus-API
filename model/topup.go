@@ -122,7 +122,7 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, ta
 	})
 }
 
-func Recharge(referenceId string, customerId string, callerIp string) (err error) {
+func Recharge(referenceId string, customerId string, callerIp string, identities ...TopUpPaymentIdentity) (err error) {
 	if referenceId == "" {
 		return errors.New("未提供支付单号")
 	}
@@ -150,7 +150,7 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		}
 
 		if topUp.Status == common.TopUpStatusSuccess {
-			return nil
+			return bindTopUpPaymentIfProvidedTx(tx, topUp, identities, 0)
 		}
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("充值订单状态错误")
@@ -168,6 +168,9 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		}
 
 		if _, err := CreditTopUpTx(tx, topUp.UserId, topUp.TradeNo, quota); err != nil {
+			return err
+		}
+		if err := bindTopUpPaymentIfProvidedTx(tx, topUp, identities, int64(quota)); err != nil {
 			return err
 		}
 		if customerId != "" {
@@ -356,9 +359,12 @@ func SearchAllTopUps(keyword string, pageInfo *common.PageInfo) (topups []*TopUp
 }
 
 // ManualCompleteTopUp 管理员手动完成订单并给用户充值
-func ManualCompleteTopUp(tradeNo string, callerIp string) error {
+func ManualCompleteTopUp(tradeNo string, callerIp string, operatorID int) error {
 	if tradeNo == "" {
 		return errors.New("未提供订单号")
+	}
+	if operatorID <= 0 {
+		return errors.New("无权限执行此操作")
 	}
 
 	refCol := "`trade_no`"
@@ -372,13 +378,44 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 	var paymentMethod string
 	var completed bool
 
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err := walletAdminTransaction(DB, func(tx *gorm.DB) error {
+		// A rolled-back attempt must not publish cache/log effects, including
+		// when another writer completes the order before the next attempt.
+		completed = false
+		if _, err := LockWalletCreditBaselineTx(tx); err != nil {
+			return err
+		}
 		topUp := &TopUp{}
 		// 行级锁，避免并发补单
 		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
-			return errors.New("充值订单不存在")
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("充值订单不存在")
+			}
+			return err
 		}
 
+		// 在入账事务内重新读取角色，不能依赖请求上下文中的旧权限。
+		// ID 顺序仅统一补单之间的锁序；消费按被邀请人 -> 邀请人锁定，
+		// active 屏障不串行化它们，交叉死锁由外层整事务有界重试处理。
+		var users []User
+		if err := lockForUpdate(tx).Select("id", "role", "status").
+			Where("id IN ?", []int{operatorID, topUp.UserId}).Order("id ASC").Find(&users).Error; err != nil {
+			return err
+		}
+		var operator, target *User
+		for i := range users {
+			if users[i].Id == operatorID {
+				operator = &users[i]
+			}
+			if users[i].Id == topUp.UserId {
+				target = &users[i]
+			}
+		}
+		if operator == nil || target == nil || operator.Status != common.UserStatusEnabled ||
+			operator.Role < common.RoleAdminUser ||
+			(operator.Role != common.RoleRootUser && operator.Role <= target.Role) {
+			return errors.New("无权限执行此操作")
+		}
 		// 幂等处理：已成功直接返回
 		if topUp.Status == common.TopUpStatusSuccess {
 			return nil
@@ -504,7 +541,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string, c
 	return nil
 }
 
-func RechargeCreem(referenceId string, callerIp string, confirmation PaymentConfirmation) (err error) {
+func RechargeCreem(referenceId string, callerIp string, confirmation PaymentConfirmation, identities ...TopUpPaymentIdentity) (err error) {
 	if referenceId == "" {
 		return errors.New("未提供支付单号")
 	}
@@ -532,7 +569,7 @@ func RechargeCreem(referenceId string, callerIp string, confirmation PaymentConf
 		}
 
 		if topUp.Status == common.TopUpStatusSuccess {
-			return nil
+			return bindTopUpPaymentIfProvidedTx(tx, topUp, identities, 0)
 		}
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("充值订单状态错误")
@@ -556,6 +593,9 @@ func RechargeCreem(referenceId string, callerIp string, confirmation PaymentConf
 		if _, err := CreditTopUpTx(tx, topUp.UserId, topUp.TradeNo, quota); err != nil {
 			return err
 		}
+		if err := bindTopUpPaymentIfProvidedTx(tx, topUp, identities, int64(quota)); err != nil {
+			return err
+		}
 
 		credited = true
 		return nil
@@ -575,7 +615,7 @@ func RechargeCreem(referenceId string, callerIp string, confirmation PaymentConf
 	return nil
 }
 
-func RechargeWaffo(tradeNo string, callerIp string, confirmation PaymentConfirmation) (err error) {
+func RechargeWaffo(tradeNo string, callerIp string, confirmation PaymentConfirmation, identities ...TopUpPaymentIdentity) (err error) {
 	if tradeNo == "" {
 		return errors.New("未提供支付单号")
 	}
@@ -602,7 +642,7 @@ func RechargeWaffo(tradeNo string, callerIp string, confirmation PaymentConfirma
 		}
 
 		if topUp.Status == common.TopUpStatusSuccess {
-			return nil // 幂等：已成功直接返回
+			return bindTopUpPaymentIfProvidedTx(tx, topUp, identities, 0)
 		}
 
 		if topUp.Status != common.TopUpStatusPending {
@@ -627,7 +667,7 @@ func RechargeWaffo(tradeNo string, callerIp string, confirmation PaymentConfirma
 			return err
 		}
 
-		return nil
+		return bindTopUpPaymentIfProvidedTx(tx, topUp, identities, int64(quotaToAdd))
 	})
 
 	if err != nil {

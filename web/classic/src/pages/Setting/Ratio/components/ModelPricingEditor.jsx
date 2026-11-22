@@ -49,7 +49,7 @@ import {
   useModelPricingEditorState,
 } from '../hooks/useModelPricingEditorState';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
-import TieredPricingEditor from './TieredPricingEditor';
+import TieredPricingEditor from './TieredPricingWithSimulation';
 
 const { Text } = Typography;
 const EMPTY_CANDIDATE_MODEL_NAMES = [];

@@ -37,6 +37,7 @@ export const normalizeLanguage = (language) => {
 
   if (
     lower === 'zh' ||
+    lower === 'zhcn' ||
     lower === 'zh-cn' ||
     lower === 'zh-sg' ||
     lower.startsWith('zh-hans')
@@ -45,6 +46,7 @@ export const normalizeLanguage = (language) => {
   }
 
   if (
+    lower === 'zhtw' ||
     lower === 'zh-tw' ||
     lower === 'zh-hk' ||
     lower === 'zh-mo' ||
@@ -54,7 +56,7 @@ export const normalizeLanguage = (language) => {
   }
 
   const matchedLanguage = supportedLanguages.find(
-    (supportedLanguage) => supportedLanguage.toLowerCase() === lower,
+    (supportedLanguage) => supportedLanguage.toLowerCase() === lower.split('-')[0],
   );
 
   return matchedLanguage || normalized;

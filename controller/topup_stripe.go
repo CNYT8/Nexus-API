@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -124,13 +125,6 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	reference := fmt.Sprintf("new-api-ref-%d-%d-%s", user.Id, time.Now().UnixMilli(), randstr.String(4))
 	referenceId := "ref_" + common.Sha1([]byte(reference))
 
-	payLink, err := genStripeLink(referenceId, user.StripeCustomer, user.Email, req.Amount, req.SuccessURL, req.CancelURL)
-	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Stripe 创建 Checkout Session 失败 user_id=%d trade_no=%s amount=%d error=%q", id, referenceId, req.Amount, err.Error()))
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
-		return
-	}
-
 	topUp := &model.TopUp{
 		UserId:          id,
 		Amount:          req.Amount,
@@ -145,6 +139,12 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Stripe 创建充值订单失败 user_id=%d trade_no=%s amount=%d error=%q", id, referenceId, req.Amount, err.Error()))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
+		return
+	}
+	payLink, err := genStripeLink(referenceId, user.StripeCustomer, user.Email, req.Amount, req.SuccessURL, req.CancelURL)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Stripe 创建或绑定 Checkout Session 失败 user_id=%d trade_no=%s error=%q", id, referenceId, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
 	}
 	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Stripe 充值订单创建成功 user_id=%d trade_no=%s amount=%d money=%.2f", id, referenceId, req.Amount, chargedMoney))
@@ -222,6 +222,8 @@ func StripeWebhook(c *gin.Context) {
 		processingErr = sessionAsyncPaymentSucceeded(ctx, event, callerIp)
 	case stripe.EventTypeCheckoutSessionAsyncPaymentFailed:
 		processingErr = sessionAsyncPaymentFailed(ctx, event, callerIp)
+	case stripe.EventTypeChargeRefunded, stripe.EventTypeChargeDisputeCreated, stripe.EventTypeChargeDisputeUpdated, stripe.EventTypeChargeDisputeClosed:
+		processingErr = stripeTopUpReversal(event)
 	default:
 		logger.LogInfo(ctx, fmt.Sprintf("Stripe webhook 忽略事件 event_type=%s client_ip=%s", string(event.Type), callerIp))
 	}
@@ -308,7 +310,18 @@ func fulfillOrder(ctx context.Context, event stripe.Event, referenceId string, c
 		return err
 	}
 
-	err := model.Recharge(referenceId, customerId, callerIp)
+	var checkout stripe.CheckoutSession
+	if event.Data == nil {
+		return model.ErrTopUpReversalConflict
+	}
+	if err := json.Unmarshal(event.Data.Raw, &checkout); err != nil {
+		return err
+	}
+	if checkout.ID == "" || checkout.ClientReferenceID != referenceId || checkout.PaymentIntent == nil || checkout.PaymentIntent.ID == "" || checkout.PaymentStatus != stripe.CheckoutSessionPaymentStatusPaid || checkout.AmountTotal <= 0 {
+		return model.ErrTopUpReversalConflict
+	}
+	identity := model.TopUpPaymentIdentity{Provider: model.PaymentProviderStripe, CheckoutID: checkout.ID, PaymentID: checkout.PaymentIntent.ID, Currency: string(checkout.Currency), PaidMinor: checkout.AmountTotal}
+	err := model.Recharge(referenceId, customerId, callerIp, identity)
 	if err != nil {
 		if errors.Is(err, model.ErrTopUpNotFound) {
 			logger.LogInfo(ctx, fmt.Sprintf("Stripe webhook 忽略非本系统订单 trade_no=%s event_type=%s client_ip=%s", referenceId, string(event.Type), callerIp))
@@ -421,7 +434,70 @@ func genStripeLink(referenceId string, customerId string, email string, amount i
 		return "", err
 	}
 
+	if err := model.RegisterTopUpCheckout(referenceId, model.PaymentProviderStripe, result.ID); err != nil {
+		return "", err
+	}
 	return result.URL, nil
+}
+
+// stripeTopUpReversal is reached only after Stripe webhook signature verification.
+// Charge.amount_refunded is cumulative; individual refund deltas are not summed.
+func stripeTopUpReversal(event stripe.Event) error {
+	reversal, apply, err := stripeReversalFromEvent(event)
+	if err != nil || !apply {
+		return err
+	}
+	return model.ApplyVerifiedTopUpReversal(model.DB, reversal)
+}
+
+func stripeReversalFromEvent(event stripe.Event) (model.VerifiedTopUpReversal, bool, error) {
+	result := model.VerifiedTopUpReversal{Provider: model.PaymentProviderStripe, EventID: event.ID, OccurredAt: event.Created}
+	if event.Data == nil || event.ID == "" || event.Created <= 0 {
+		return result, false, model.ErrTopUpReversalConflict
+	}
+	if event.Type == stripe.EventTypeChargeRefunded {
+		var charge stripe.Charge
+		if err := json.Unmarshal(event.Data.Raw, &charge); err != nil {
+			return result, false, err
+		}
+		if charge.ID == "" || charge.PaymentIntent == nil || charge.PaymentIntent.ID == "" || !charge.Paid || charge.Amount <= 0 || charge.AmountRefunded <= 0 || charge.AmountRefunded > charge.Amount {
+			return result, false, model.ErrTopUpReversalConflict
+		}
+		result.PaymentID, result.ObjectID = charge.PaymentIntent.ID, charge.ID
+		result.Kind, result.Currency = "refund_total", string(charge.Currency)
+		result.AmountMinor, result.OriginalMinor, result.Terminal = charge.AmountRefunded, charge.Amount, true
+		return result, true, nil
+	}
+	switch event.Type {
+	case stripe.EventTypeChargeDisputeCreated, stripe.EventTypeChargeDisputeUpdated, stripe.EventTypeChargeDisputeClosed:
+	default:
+		return result, false, model.ErrTopUpReversalConflict
+	}
+	var dispute stripe.Dispute
+	if err := json.Unmarshal(event.Data.Raw, &dispute); err != nil {
+		return result, false, err
+	}
+	if dispute.ID == "" || dispute.PaymentIntent == nil || dispute.PaymentIntent.ID == "" || dispute.Amount <= 0 {
+		return result, false, model.ErrTopUpReversalConflict
+	}
+	result.PaymentID, result.ObjectID = dispute.PaymentIntent.ID, dispute.ID
+	result.Kind, result.Currency, result.AmountMinor = "dispute", string(dispute.Currency), dispute.Amount
+	switch dispute.Status {
+	case stripe.DisputeStatusNeedsResponse, stripe.DisputeStatusUnderReview:
+		if event.Type == stripe.EventTypeChargeDisputeClosed {
+			return result, false, model.ErrTopUpReversalConflict
+		}
+	case stripe.DisputeStatusLost:
+		result.Terminal = true
+	case stripe.DisputeStatusWon:
+		result.Terminal, result.Released = true, true
+	case stripe.DisputeStatusWarningClosed, stripe.DisputeStatusWarningNeedsResponse, stripe.DisputeStatusWarningUnderReview:
+		// Inquiries are not a cash chargeback. Do not debit an informational warning.
+		return result, false, nil
+	default:
+		return result, false, model.ErrTopUpReversalConflict
+	}
+	return result, true, nil
 }
 
 // stripeTopUpGroupRatio returns the top-up group ratio with the legacy zero

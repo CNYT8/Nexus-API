@@ -27,6 +27,7 @@ import {
   verifyJSON,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
+import { isValidTaskPublicAddress } from './task-public-address';
 
 export default function SettingsGeneralPayment(props) {
   const { t } = useTranslation();
@@ -34,6 +35,7 @@ export default function SettingsGeneralPayment(props) {
   const [loading, setLoading] = useState(false);
   const [inputs, setInputs] = useState({
     ServerAddress: '',
+    TaskPublicAddress: '',
     CustomCallbackAddress: '',
     TopupGroupRatio: '',
     PayMethods: '',
@@ -47,6 +49,7 @@ export default function SettingsGeneralPayment(props) {
     if (props.options && formApiRef.current) {
       const currentInputs = {
         ServerAddress: props.options.ServerAddress || '',
+        TaskPublicAddress: props.options.TaskPublicAddress || '',
         CustomCallbackAddress: props.options.CustomCallbackAddress || '',
         TopupGroupRatio: props.options.TopupGroupRatio || '',
         PayMethods: props.options.PayMethods || '',
@@ -64,6 +67,10 @@ export default function SettingsGeneralPayment(props) {
   };
 
   const submitGeneralSettings = async () => {
+    if (!isValidTaskPublicAddress(inputs.TaskPublicAddress ?? '')) {
+      showError(t('任务公开地址须为完整的 HTTP(S) 地址，不能包含凭据、空白、查询参数或片段'));
+      return;
+    }
     if (
       originInputs.TopupGroupRatio !== inputs.TopupGroupRatio &&
       !verifyJSON(inputs.TopupGroupRatio)
@@ -107,6 +114,12 @@ export default function SettingsGeneralPayment(props) {
         },
       ];
 
+      if (originInputs.TaskPublicAddress !== inputs.TaskPublicAddress) {
+        options.push({
+          key: 'TaskPublicAddress',
+          value: removeTrailingSlash(inputs.TaskPublicAddress ?? ''),
+        });
+      }
       if (inputs.CustomCallbackAddress !== '') {
         options.push({
           key: 'CustomCallbackAddress',
@@ -173,6 +186,13 @@ export default function SettingsGeneralPayment(props) {
             extraText={t(
               '该服务器地址将影响支付回调地址以及默认首页展示的地址，请确保正确配置',
             )}
+          />
+          <Form.Input
+            field='TaskPublicAddress'
+            label={t('任务公开地址')}
+            placeholder='https://tasks.example.com'
+            showClear
+            extraText={t('用于生成任务文件和回调的公开链接；留空时回退到服务器地址，可包含路径前缀')}
           />
           <Row
             gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}

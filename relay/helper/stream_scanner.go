@@ -92,6 +92,17 @@ func (w *streamResponseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
+// EnsureStreamWriteBudget 让等待上游期间的保活和后续流输出共用写入预算。
+// 必须在启动写入协程前调用，重复安装不会重置已经累计的预算。
+func EnsureStreamWriteBudget(c *gin.Context) {
+	if c == nil || c.Writer == nil {
+		return
+	}
+	if _, ok := c.Writer.(*streamResponseWriter); !ok {
+		c.Writer = &streamResponseWriter{ResponseWriter: c.Writer}
+	}
+}
+
 func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string, sr *StreamResult)) {
 
 	if resp == nil || dataHandler == nil {
@@ -103,7 +114,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	// grows with the data size. A fixed per-write deadline cut slow clients
 	// off in the middle of large events; the budget lets a client reading at
 	// streamMinClientRate keep up while still cutting off a stalled client.
-	c.Writer = &streamResponseWriter{ResponseWriter: c.Writer}
+	EnsureStreamWriteBudget(c)
 	// 无条件新建 StreamStatus
 	info.StreamStatus = relaycommon.NewStreamStatus()
 
@@ -134,9 +145,11 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		stopOnce    sync.Once
 	)
 
+	thinkingWriter := installThinkingStreamWriter(c, info)
+	var scanEndReason relaycommon.StreamEndReason
 	var outputSensitiveMatchers map[string]*relaycommon.OutputSensitiveMatcher
 	outputSensitiveConfig := info.OutputSensitiveConfig
-	if outputSensitiveConfig.Enabled && len(outputSensitiveConfig.Patterns) > 0 {
+	if thinkingWriter == nil && outputSensitiveConfig.Enabled && len(outputSensitiveConfig.Patterns) > 0 {
 		outputSensitiveMatchers = make(map[string]*relaycommon.OutputSensitiveMatcher)
 	}
 
@@ -264,6 +277,13 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				defer writeMutex.Unlock()
 				// The streamResponseWriter budget sets the deadline on every write.
 				dataHandler(data, sr)
+				if thinkingWriter != nil && thinkingWriter.err != nil {
+					if outputSensitiveStreamBlocked(c) {
+						sr.Stop(nil)
+					} else {
+						sr.Stop(thinkingWriter.err)
+					}
+				}
 			}()
 			if sr.IsStopped() {
 				return
@@ -307,7 +327,11 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				continue
 			}
 			if data == "[DONE]" {
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
+				if thinkingWriter == nil {
+					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
+				} else {
+					scanEndReason = relaycommon.StreamEndReasonDone
+				}
 				logger.LogDebug(c, "received [DONE], stopping scanner")
 				return
 			}
@@ -363,7 +387,11 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
 			}
 		}
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
+		if thinkingWriter == nil {
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
+		} else {
+			scanEndReason = relaycommon.StreamEndReasonEOF
+		}
 	})
 
 	// 主循环等待完成或超时
@@ -379,6 +407,14 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	}
 
 	cleanup()
+	// 剥离策略在写出时检查；排空回调后再记录正常结束，避免上游提前
+	// EOF/DONE 抢占实际的策略终止或写入失败原因。
+	if thinkingWriter != nil {
+		if scanEndReason != relaycommon.StreamEndReasonNone {
+			info.StreamStatus.SetEndReason(scanEndReason, nil)
+		}
+		thinkingWriter.finishStatus()
+	}
 	// All stream goroutines have joined. Done from a successfully delivered
 	// protocol completion can now correct a cancellation that won while its
 	// callback was still running. Bare EOF and failed writes never qualify.

@@ -51,6 +51,8 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { usePlayground } from '../../contexts/PlaygroundContext';
+import PlaygroundParameterPanel from './PlaygroundParameterPanel';
 import {
   IMAGE_FILE_ACCEPT,
   MAX_IMAGE_FILE_BYTES,
@@ -114,11 +116,14 @@ const renderGroupOption = ({
 const ChatArea = ({
   message = [],
   inputs = {},
+  parameterEnabled = {},
+  customRequestMode = false,
   models = [],
   groups = [],
   styleState = {},
   isGenerating = false,
   onInputChange,
+  onParameterToggle,
   onMessageSend,
   onStopGenerator,
   onClearMessages,
@@ -126,6 +131,22 @@ const ChatArea = ({
   renderChatBoxAction,
 }) => {
   const { t } = useTranslation();
+  const [visibleCount, setVisibleCount] = useState(60);
+  const startIndex = Math.max(0, message.length - visibleCount);
+  const { session } = usePlayground();
+  const mountedRef = useRef(true);
+  const parsingRef = useRef(false);
+  const submittingRef = useRef(false);
+  const isCurrent = useCallback(
+    () => mountedRef.current && session.isCurrent(),
+    [session],
+  );
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const [inputText, setInputText] = useState('');
   const [attachments, setAttachments] = useState([]);
   const [parsingAttachment, setParsingAttachment] = useState(false);
@@ -226,21 +247,34 @@ const ChatArea = ({
     [inputs.imageUrls],
   );
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     const trimmed = inputText.trim();
     const attachmentText = buildAttachmentTextBlock(attachments);
     const combined = [attachmentText, trimmed].filter(Boolean).join('\n\n');
-    if ((!combined && validImageUrls.length === 0) || isGenerating) return;
-    shouldAutoScrollRef.current = true;
-    onMessageSend(combined);
-    setInputText('');
-    setAttachments([]);
+    if (
+      (!combined && validImageUrls.length === 0) ||
+      isGenerating ||
+      submittingRef.current ||
+      parsingRef.current ||
+      !isCurrent()
+    )
+      return;
+    submittingRef.current = true;
+    try {
+      if ((await onMessageSend(combined)) === false || !isCurrent()) return;
+      shouldAutoScrollRef.current = true;
+      setInputText((current) => current === inputText ? '' : current);
+      setAttachments((current) => current.filter((item) => !attachments.includes(item)));
+    } finally {
+      submittingRef.current = false;
+    }
   }, [
     inputText,
     attachments,
     validImageUrls.length,
     isGenerating,
     onMessageSend,
+    isCurrent,
   ]);
 
   const handleKeyDown = (e) => {
@@ -254,8 +288,9 @@ const ChatArea = ({
   const handleTextFilesSelected = async (event) => {
     const files = Array.from(event.target.files || []);
     event.target.value = '';
-    if (files.length === 0) return;
+    if (files.length === 0 || parsingRef.current || !isCurrent()) return;
 
+    parsingRef.current = true;
     setParsingAttachment(true);
     try {
       for (const file of files) {
@@ -268,6 +303,7 @@ const ChatArea = ({
         }
 
         const result = await parseTextAttachment(file);
+        if (!isCurrent()) return;
         if (!result.ok) {
           Toast.warning({
             content:
@@ -290,7 +326,8 @@ const ChatArea = ({
         ]);
       }
     } finally {
-      setParsingAttachment(false);
+      parsingRef.current = false;
+      if (isCurrent()) setParsingAttachment(false);
     }
   };
 
@@ -300,8 +337,9 @@ const ChatArea = ({
   const handleImageFilesSelected = async (event) => {
     const files = Array.from(event.target.files || []);
     event.target.value = '';
-    if (files.length === 0) return;
+    if (files.length === 0 || parsingRef.current || !isCurrent()) return;
 
+    parsingRef.current = true;
     setParsingAttachment(true);
     try {
       const nextUrls = [...validImageUrls];
@@ -316,6 +354,7 @@ const ChatArea = ({
         }
 
         const result = await parseImageAttachment(file);
+        if (!isCurrent()) return;
         if (!result.ok) {
           Toast.warning({
             content:
@@ -334,7 +373,8 @@ const ChatArea = ({
         onInputChange('imageUrls', nextUrls);
       }
     } finally {
-      setParsingAttachment(false);
+      parsingRef.current = false;
+      if (isCurrent()) setParsingAttachment(false);
     }
   };
 
@@ -360,9 +400,10 @@ const ChatArea = ({
         if (file) imageFiles.push(file);
       }
     }
-    if (imageFiles.length === 0) return;
+    if (imageFiles.length === 0 || parsingRef.current || !isCurrent()) return;
 
     event.preventDefault();
+    parsingRef.current = true;
     setParsingAttachment(true);
     try {
       const nextUrls = (inputs.imageUrls || []).filter(
@@ -377,6 +418,7 @@ const ChatArea = ({
           continue;
         }
         const result = await parseImageAttachment(file);
+        if (!isCurrent()) return;
         if (!result.ok) {
           Toast.warning({
             content: t('仅支持图片文件（PNG、JPEG、WebP、GIF、BMP）'),
@@ -390,7 +432,8 @@ const ChatArea = ({
         onInputChange('imageUrls', nextUrls);
       }
     } finally {
-      setParsingAttachment(false);
+      parsingRef.current = false;
+      if (isCurrent()) setParsingAttachment(false);
     }
   };
 
@@ -418,7 +461,13 @@ const ChatArea = ({
         className='flex-1 overflow-y-auto overscroll-contain'
       >
         <div className='mx-auto w-full max-w-4xl px-4 py-6 space-y-6'>
-          {message.map((msg, index) => {
+          {startIndex > 0 && (
+            <Button theme='borderless' onClick={() => setVisibleCount((count) => count + 60)}>
+              {t('加载更早的消息')}
+            </Button>
+          )}
+          {message.slice(startIndex).map((msg, visibleIndex) => {
+            const index = startIndex + visibleIndex;
             const isUser = msg.role === 'user';
             const isLastAssistant =
               index === message.length - 1 && msg.role === 'assistant';
@@ -656,6 +705,15 @@ const ChatArea = ({
               >
                 <span className='hidden sm:inline'>{t('联网')}</span>
               </Button>
+
+              <PlaygroundParameterPanel
+                inputs={inputs}
+                parameterEnabled={parameterEnabled}
+                onInputChange={onInputChange}
+                onParameterToggle={onParameterToggle}
+                isMobile={styleState.isMobile}
+                disabled={isGenerating || customRequestMode}
+              />
 
               {message.length > 0 && (
                 <Tooltip content={t('清空对话')} position='top'>

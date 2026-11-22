@@ -36,13 +36,18 @@ func VideoProxy(c *gin.Context) {
 	}
 
 	userID := c.GetInt("id")
+	c.Header("Cache-Control", "private, no-store")
+	if userID <= 0 {
+		videoProxyError(c, http.StatusUnauthorized, "invalid_request_error", "Authentication required")
+		return
+	}
 	task, exists, err := model.GetByTaskId(userID, taskID)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to query task %s: %s", taskID, err.Error()))
 		videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to query task")
 		return
 	}
-	if !exists || task == nil {
+	if !exists || task == nil || task.UserId != userID || !task.ResultRetrievable() {
 		videoProxyError(c, http.StatusNotFound, "invalid_request_error", "Task not found")
 		return
 	}

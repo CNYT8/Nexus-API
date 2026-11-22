@@ -136,7 +136,29 @@ func AdminListSubscriptionPlans(c *gin.Context) {
 }
 
 type AdminUpsertSubscriptionPlanRequest struct {
-	Plan model.SubscriptionPlan `json:"plan"`
+	Plan                   model.SubscriptionPlan `json:"plan"`
+	downgradeGroupProvided bool
+}
+
+func (r *AdminUpsertSubscriptionPlanRequest) UnmarshalJSON(data []byte) error {
+	type request AdminUpsertSubscriptionPlanRequest
+	var decoded request
+	if err := common.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields struct {
+		Plan struct {
+			DowngradeGroup *string `json:"downgrade_group"`
+		} `json:"plan"`
+	}
+	if err := common.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*r = AdminUpsertSubscriptionPlanRequest(decoded)
+	// Older clients omit this field. Treat null as omission; only an explicit
+	// string (including "") replaces the saved downgrade policy.
+	r.downgradeGroupProvided = fields.Plan.DowngradeGroup != nil
+	return nil
 }
 
 func AdminCreateSubscriptionPlan(c *gin.Context) {
@@ -150,6 +172,10 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		return
 	}
 	req.Plan.Id = 0
+	req.Plan.NormalizeDefaults()
+	if !validateSubscriptionDowngradeGroup(c, &req.Plan) {
+		return
+	}
 	if strings.TrimSpace(req.Plan.Title) == "" {
 		common.ApiErrorMsg(c, "套餐标题不能为空")
 		return
@@ -232,6 +258,9 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		return
 	}
 	req.Plan.Id = id
+	if !validateSubscriptionDowngradeGroup(c, &req.Plan) {
+		return
+	}
 	if req.Plan.Currency == "" {
 		req.Plan.Currency = "USD"
 	}
@@ -285,8 +314,14 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"quota_reset_custom_seconds": req.Plan.QuotaResetCustomSeconds,
 			"updated_at":                 common.GetTimestamp(),
 		}
+		if req.downgradeGroupProvided {
+			updateMap["downgrade_group"] = req.Plan.DowngradeGroup
+		}
 		if req.Plan.AllowBalancePay != nil {
 			updateMap["allow_balance_pay"] = *req.Plan.AllowBalancePay
+		}
+		if req.Plan.AllowWalletOverflow != nil {
+			updateMap["allow_wallet_overflow"] = *req.Plan.AllowWalletOverflow
 		}
 		if err := tx.Model(&model.SubscriptionPlan{}).Where("id = ?", id).Updates(updateMap).Error; err != nil {
 			return err
@@ -299,6 +334,17 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 	}
 	model.InvalidateSubscriptionPlanCache(id)
 	common.ApiSuccess(c, nil)
+}
+
+func validateSubscriptionDowngradeGroup(c *gin.Context, plan *model.SubscriptionPlan) bool {
+	plan.DowngradeGroup = strings.TrimSpace(plan.DowngradeGroup)
+	if plan.DowngradeGroup != "" {
+		if _, ok := ratio_setting.GetGroupRatioCopy()[plan.DowngradeGroup]; !ok {
+			common.ApiErrorMsg(c, "降级分组不存在")
+			return false
+		}
+	}
+	return true
 }
 
 type AdminUpdateSubscriptionPlanStatusRequest struct {

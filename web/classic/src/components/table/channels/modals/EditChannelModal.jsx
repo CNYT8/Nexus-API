@@ -58,6 +58,9 @@ import {
   selectFilter,
 } from '../../../../helpers';
 import ModelSelectModal from './ModelSelectModal';
+import { supportsResponsesWebSocket } from './responsesWebSocket';
+import ChannelHTTPSettings from './ChannelHTTPSettings';
+import AdvancedRouteOptions from './AdvancedRouteOptions';
 import SingleModelSelectModal from './SingleModelSelectModal';
 import OllamaModelModal from './OllamaModelModal';
 import CodexOAuthModal from './CodexOAuthModal';
@@ -427,7 +430,7 @@ const normalizeCodexKeyJSONList = (source) => {
   return normalizedKeys;
 };
 
-const DEPRECATED_DOUBAO_CODING_PLAN_BASE_URL = 'doubao-coding-plan';
+const LEGACY_DOUBAO_CODING_PLAN_BASE_URL = 'doubao-coding-plan';
 
 // 支持并且已适配通过接口获取模型列表的渠道类型
 const MODEL_FETCHABLE_TYPES = new Set([
@@ -489,11 +492,15 @@ const EditChannelModal = (props) => {
     tag: '',
     multi_key_mode: 'random',
     // 渠道额外设置的默认值
+    http_protocol: 'auto',
+    http2_connection_shards: 1,
+    tls_insecure_skip_verify: false,
     force_format: false,
     thinking_to_content: false,
     thinking_process_strip: false,
     proxy: '',
     pass_through_body_enabled: false,
+    responses_websocket_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
     settings: '',
@@ -549,6 +556,9 @@ const EditChannelModal = (props) => {
   const loadChannelRequestRef = useRef(0);
   const loadedChannelIdRef = useRef(null);
   const [channelLoaded, setChannelLoaded] = useState(!isEdit);
+  const [legacyDoubaoChannelId, setLegacyDoubaoChannelId] = useState(null);
+  const isLegacyDoubaoCodingPlan =
+    isEdit && channelLoaded && legacyDoubaoChannelId === channelId;
   const [vertexKeys, setVertexKeys] = useState([]);
   const [vertexFileList, setVertexFileList] = useState([]);
   const vertexErroredNames = useRef(new Set()); // 避免重复报错
@@ -738,21 +748,9 @@ const EditChannelModal = (props) => {
   };
   const formContainerRef = useRef(null);
   const doubaoApiClickCountRef = useRef(0);
-  const initialBaseUrlRef = useRef('');
   const initialModelsRef = useRef([]);
   const initialModelMappingRef = useRef('');
   const initialStatusCodeMappingRef = useRef('');
-  const doubaoCodingPlanDeprecationMessage =
-    'Doubao Coding Plan 不再允许新增。根据火山方舟文档，Coding 套餐额度仅适用于 AI Coding 产品内调用，不适用于单独 API 调用；在非 AI Coding 产品中使用对应的 Base URL 和 API Key 可能被视为违规，并可能导致订阅停用或账号封禁。';
-  const canKeepDeprecatedDoubaoCodingPlan =
-    initialBaseUrlRef.current === DEPRECATED_DOUBAO_CODING_PLAN_BASE_URL;
-  const doubaoCodingPlanOptionLabel = (
-    <Tooltip content={doubaoCodingPlanDeprecationMessage} position='left'>
-      <span className='inline-flex items-center gap-2'>
-        <span>Doubao Coding Plan</span>
-      </span>
-    </Tooltip>
-  );
 
   // 2FA状态更新辅助函数
   const updateTwoFAState = (updates) => {
@@ -820,11 +818,15 @@ const EditChannelModal = (props) => {
 
   // 渠道额外设置状态
   const [channelSettings, setChannelSettings] = useState({
+    http_protocol: 'auto',
+    http2_connection_shards: 1,
+    tls_insecure_skip_verify: false,
     force_format: false,
     thinking_to_content: false,
     thinking_process_strip: false,
     proxy: '',
     pass_through_body_enabled: false,
+    responses_websocket_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
   });
@@ -1131,6 +1133,7 @@ const EditChannelModal = (props) => {
   const loadChannel = async (requestedChannelId) => {
     const requestId = ++loadChannelRequestRef.current;
     loadedChannelIdRef.current = null;
+    setLegacyDoubaoChannelId(null);
     setChannelLoaded(false);
     setLoading(true);
     try {
@@ -1204,8 +1207,15 @@ const EditChannelModal = (props) => {
           data.thinking_process_strip =
             parsedSettings.thinking_process_strip || false;
           data.proxy = parsedSettings.proxy || '';
+          data.http_protocol = parsedSettings.http_protocol === 'http1' ? 'http1' : 'auto';
+          data.http2_connection_shards = Number.isInteger(parsedSettings.http2_connection_shards)
+            ? Math.max(1, Math.min(8, parsedSettings.http2_connection_shards))
+            : 1;
+          data.tls_insecure_skip_verify = parsedSettings.tls_insecure_skip_verify === true;
           data.pass_through_body_enabled =
             parsedSettings.pass_through_body_enabled || false;
+          data.responses_websocket_enabled =
+            parsedSettings.responses_websocket_enabled === true;
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
@@ -1217,7 +1227,11 @@ const EditChannelModal = (props) => {
         data.force_format = false;
         data.thinking_to_content = false;
         data.proxy = '';
+        data.http_protocol = 'auto';
+        data.http2_connection_shards = 1;
+        data.tls_insecure_skip_verify = false;
         data.pass_through_body_enabled = false;
+        data.responses_websocket_enabled = false;
         data.system_prompt = '';
         data.system_prompt_override = false;
       }
@@ -1290,15 +1304,17 @@ const EditChannelModal = (props) => {
         data.advanced_custom = '';
       }
 
-      if (
+      const legacyCodingPlan =
         data.type === 45 &&
-        (!data.base_url ||
-          (typeof data.base_url === 'string' && data.base_url.trim() === ''))
-      ) {
+        data.base_url?.trim() === LEGACY_DOUBAO_CODING_PLAN_BASE_URL;
+      setLegacyDoubaoChannelId(legacyCodingPlan ? requestedChannelId : null);
+      // Preserve the sentinel: the backend uses it to select Coding endpoints.
+      if (legacyCodingPlan) {
+        data.base_url = LEGACY_DOUBAO_CODING_PLAN_BASE_URL;
+      } else if (data.type === 45 && !data.base_url?.trim()) {
         data.base_url = 'https://ark.cn-beijing.volces.com';
       }
 
-      initialBaseUrlRef.current = data.base_url || '';
       setInputs(data);
       if (formApiRef.current) {
         formApiRef.current.setValues(data);
@@ -1313,11 +1329,16 @@ const EditChannelModal = (props) => {
       setBasicModels(getChannelModels(data.type));
       // 同步更新channelSettings状态显示
       const loadedChannelSettings = {
+        ...JSON.parse(data.setting || '{}'),
+        http_protocol: data.http_protocol,
+        http2_connection_shards: data.http2_connection_shards,
+        tls_insecure_skip_verify: data.tls_insecure_skip_verify,
         force_format: data.force_format,
         thinking_to_content: data.thinking_to_content,
         thinking_process_strip: data.thinking_process_strip || false,
         proxy: data.proxy,
         pass_through_body_enabled: data.pass_through_body_enabled,
+        responses_websocket_enabled: data.responses_websocket_enabled,
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
       };
@@ -1360,10 +1381,14 @@ const EditChannelModal = (props) => {
         (data.priority && data.priority !== 0) ||
         (data.weight && data.weight !== 0) ||
         (data.proxy && data.proxy.trim()) ||
+        data.http_protocol === 'http1' ||
+        data.http2_connection_shards > 1 ||
+        data.tls_insecure_skip_verify ||
         (data.system_prompt && data.system_prompt.trim()) ||
         data.thinking_to_content ||
         data.thinking_process_strip ||
         data.pass_through_body_enabled ||
+        data.responses_websocket_enabled ||
         data.force_format ||
         data.claude_beta_query ||
         data.system_prompt_override;
@@ -1659,7 +1684,6 @@ const EditChannelModal = (props) => {
     fetchModels().then();
     fetchGroups().then();
     if (!isEdit) {
-      initialBaseUrlRef.current = '';
       setInputs(originInputs);
       if (formApiRef.current) {
         formApiRef.current.setValues(originInputs);
@@ -1683,6 +1707,7 @@ const EditChannelModal = (props) => {
         loadChannel(channelId);
       } else {
         loadedChannelIdRef.current = null;
+        setLegacyDoubaoChannelId(null);
         setChannelLoaded(true);
         formApiRef.current?.setValues(getInitValues());
         try {
@@ -1731,17 +1756,22 @@ const EditChannelModal = (props) => {
   // 统一的模态框重置函数
   const resetModalState = () => {
     loadedChannelIdRef.current = null;
+    setLegacyDoubaoChannelId(null);
     setChannelLoaded(!isEdit);
     setLoading(false);
     resolveStatusCodeRiskConfirm(false);
     formApiRef.current?.reset();
     // 重置渠道设置状态
     const emptyChannelSettings = {
+      http_protocol: 'auto',
+      http2_connection_shards: 1,
+      tls_insecure_skip_verify: false,
       force_format: false,
       thinking_to_content: false,
       thinking_process_strip: false,
       proxy: '',
       pass_through_body_enabled: false,
+      responses_websocket_enabled: false,
       system_prompt: '',
       system_prompt_override: false,
     };
@@ -2054,12 +2084,19 @@ const EditChannelModal = (props) => {
       showInfo(t('请至少选择一个模型！'));
       return;
     }
-    if (
-      localInputs.type === 45 &&
-      (!localInputs.base_url || localInputs.base_url.trim() === '')
-    ) {
-      showInfo(t('请输入API地址！'));
-      return;
+    if (localInputs.type === 45) {
+      const normalizedBaseUrl = (localInputs.base_url || '')
+        .trim()
+        .replace(/\/+$/, '');
+      const usesLegacyCodingPlan =
+        normalizedBaseUrl === LEGACY_DOUBAO_CODING_PLAN_BASE_URL;
+      if (!normalizedBaseUrl || (usesLegacyCodingPlan && !isLegacyDoubaoCodingPlan)) {
+        showInfo(t('请输入API地址！'));
+        return;
+      }
+      if (usesLegacyCodingPlan) {
+        localInputs.base_url = LEGACY_DOUBAO_CODING_PLAN_BASE_URL;
+      }
     }
     const hasModelMapping =
       typeof localInputs.model_mapping === 'string' &&
@@ -2164,13 +2201,30 @@ const EditChannelModal = (props) => {
       }
     }
 
-    // 生成渠道额外设置JSON
+    // Preserve extension fields while updating the visible settings.
+    let existingSetting = {};
+    try {
+      existingSetting = JSON.parse(localInputs.setting || '{}');
+      if (!existingSetting || typeof existingSetting !== 'object' || Array.isArray(existingSetting)) {
+        throw new Error('invalid setting');
+      }
+    } catch {
+      showError(t('渠道设置必须是合法 JSON 对象'));
+      return;
+    }
     const channelExtraSettings = {
+      ...existingSetting,
       force_format: localInputs.force_format || false,
       thinking_to_content: localInputs.thinking_to_content || false,
       thinking_process_strip: localInputs.thinking_process_strip || false,
       proxy: localInputs.proxy || '',
+      http_protocol: localInputs.http_protocol || 'auto',
+      http2_connection_shards: localInputs.http_protocol === 'http1'
+        ? 1
+        : localInputs.http2_connection_shards || 1,
+      tls_insecure_skip_verify: localInputs.tls_insecure_skip_verify === true,
       pass_through_body_enabled: localInputs.pass_through_body_enabled || false,
+      responses_websocket_enabled: localInputs.responses_websocket_enabled === true,
       system_prompt: localInputs.system_prompt || '',
       system_prompt_override: localInputs.system_prompt_override || false,
     };
@@ -2269,7 +2323,11 @@ const EditChannelModal = (props) => {
     delete localInputs.thinking_to_content;
     delete localInputs.thinking_process_strip;
     delete localInputs.proxy;
+    delete localInputs.http_protocol;
+    delete localInputs.http2_connection_shards;
+    delete localInputs.tls_insecure_skip_verify;
     delete localInputs.pass_through_body_enabled;
+    delete localInputs.responses_websocket_enabled;
     delete localInputs.system_prompt;
     delete localInputs.system_prompt_override;
     delete localInputs.is_enterprise_account;
@@ -2694,6 +2752,13 @@ const EditChannelModal = (props) => {
                         '高级自定义渠道支持按路径转发；启用上游模型检测时必须配置 /v1/models 路由。',
                       )}
                     />
+                    <AdvancedRouteOptions
+                      value={inputs.advanced_custom}
+                      onChange={(value) => {
+                        formApiRef.current?.setValue('advanced_custom', value);
+                        handleInputChange('advanced_custom', value);
+                      }}
+                    />
                   </div>
                 )}
 
@@ -3011,9 +3076,20 @@ const EditChannelModal = (props) => {
 
                   <Form.Switch field='thinking_to_content' label={t('思考内容转换')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('thinking_to_content', value)} extraText={t('将 reasoning_content 转换为 <think> 标签拼接到内容中')} />
                   <Form.Switch field='thinking_process_strip' label={t('思考过程剥离')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('thinking_process_strip', value)} extraText={t('保留上游完整思考和用量统计，仅向下游显示正文')} />
+                  {supportsResponsesWebSocket(inputs.type, inputs.advanced_custom) && (
+                    <Form.Switch
+                      field='responses_websocket_enabled'
+                      label={t('Responses WebSocket')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) => handleChannelSettingsChange('responses_websocket_enabled', value)}
+                      extraText={t('允许此渠道使用原生 Responses WebSocket 连接，默认关闭。')}
+                    />
+                  )}
                   <Form.Switch field='pass_through_body_enabled' label={t('透传请求体')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('pass_through_body_enabled', value)} extraText={t('启用请求体透传功能')} />
 
                   <Form.Input field='proxy' label={t('代理地址')} placeholder={t('例如: socks5://user:pass@host:port')} onChange={(value) => handleChannelSettingsChange('proxy', value)} showClear extraText={t('用于配置网络代理，支持 socks5 协议')} />
+                  <ChannelHTTPSettings settings={channelSettings} onChange={handleChannelSettingsChange} />
 
                   <Form.TextArea field='system_prompt' label={t('系统提示词')} placeholder={t('输入系统提示词，用户的系统提示词将优先于此设置')} onChange={(value) => handleChannelSettingsChange('system_prompt', value)} autosize showClear extraText={t('用户优先：如果用户在请求中指定了系统提示词，将优先使用用户的设置')} />
                   <Form.Switch field='system_prompt_override' label={t('系统提示词拼接')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('system_prompt_override', value)} extraText={t('如果用户请求中包含系统提示词，则使用此设置拼接到用户的系统提示词前面')} />
@@ -4035,6 +4111,14 @@ const EditChannelModal = (props) => {
                               handleInputChange('base_url', value)
                             }
                             optionList={[
+                              ...(isLegacyDoubaoCodingPlan
+                                ? [
+                                    {
+                                      value: LEGACY_DOUBAO_CODING_PLAN_BASE_URL,
+                                      label: t('Doubao Coding Plan'),
+                                    },
+                                  ]
+                                : []),
                               {
                                 value: 'https://ark.cn-beijing.volces.com',
                                 label: 'https://ark.cn-beijing.volces.com',
@@ -4044,11 +4128,6 @@ const EditChannelModal = (props) => {
                                   'https://ark.ap-southeast.bytepluses.com',
                                 label:
                                   'https://ark.ap-southeast.bytepluses.com',
-                              },
-                              {
-                                value: DEPRECATED_DOUBAO_CODING_PLAN_BASE_URL,
-                                label: doubaoCodingPlanOptionLabel,
-                                disabled: !canKeepDeprecatedDoubaoCodingPlan,
                               },
                             ]}
                             defaultValue='https://ark.cn-beijing.volces.com'

@@ -40,6 +40,7 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 
@@ -97,6 +98,8 @@ export function GrokSettingsCard(props: Props) {
     defaultValues: formDefaults,
   })
 
+  const submitForm = useResetForm(form, formDefaults)
+
   const baselineRef = useRef<FlatGrokDefaults>(props.defaultValues)
   const baselineSerializedRef = useRef<string>(
     JSON.stringify(props.defaultValues)
@@ -107,8 +110,7 @@ export function GrokSettingsCard(props: Props) {
     if (serialized === baselineSerializedRef.current) return
     baselineRef.current = props.defaultValues
     baselineSerializedRef.current = serialized
-    form.reset(buildFormDefaults(props.defaultValues))
-  }, [props.defaultValues, form])
+  }, [props.defaultValues])
 
   const onSubmit = async (values: GrokFormValues) => {
     const normalized = normalizeFormValues(values)
@@ -121,16 +123,13 @@ export function GrokSettingsCard(props: Props) {
       return
     }
 
-    for (const key of changedKeys) {
-      await updateOption.mutateAsync({
-        key,
-        value: normalized[key],
-      })
+    try {
+      await updateOption.mutateAsync(
+        changedKeys.map((key) => ({ key, value: normalized[key] }))
+      )
+    } catch {
+      // The batch reports the failure; the refetch rebases surviving drafts.
     }
-
-    baselineRef.current = normalized
-    baselineSerializedRef.current = JSON.stringify(normalized)
-    form.reset(buildFormDefaults(normalized))
   }
 
   const enabled = form.watch('grok.violation_deduction_enabled')
@@ -138,9 +137,9 @@ export function GrokSettingsCard(props: Props) {
   return (
     <SettingsSection title={t('Grok Settings')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
           />
           <FormField

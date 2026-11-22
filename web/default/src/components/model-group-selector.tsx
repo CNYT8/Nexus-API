@@ -267,7 +267,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = React.memo(
                       <div className='flex min-w-0 flex-1 items-center gap-1'>
                         <div
                           className={cn(
-                            'truncate font-medium',
+                            'min-w-0 flex-1 font-medium [overflow-wrap:anywhere] whitespace-normal',
                             isMobile ? 'text-sm' : 'text-[11px]'
                           )}
                         >
@@ -415,11 +415,11 @@ export const GroupSelector: React.FC<GroupSelectorProps> = React.memo(
               >
                 <div className='flex min-w-0 flex-1 items-center gap-2 pr-4'>
                   <div className='flex min-w-0 flex-1 flex-col'>
-                    <span className='text-foreground truncate text-[11px] font-medium'>
+                    <span className='text-foreground text-[11px] font-medium [overflow-wrap:anywhere] whitespace-normal'>
                       {group.label}
                     </span>
                     {(group.desc || group.description) && (
-                      <div className='text-muted-foreground truncate text-[9px] leading-tight'>
+                      <div className='text-muted-foreground text-[9px] leading-tight [overflow-wrap:anywhere] whitespace-normal'>
                         {group.desc || group.description}
                         {group.ratio && (
                           <>
@@ -433,7 +433,7 @@ export const GroupSelector: React.FC<GroupSelectorProps> = React.memo(
                 </div>
                 <Check
                   className={cn(
-                    'ml-auto h-4 w-4',
+                    'ml-auto h-4 w-4 shrink-0',
                     selectedGroup === group.value ? 'opacity-100' : 'opacity-0'
                   )}
                 />
@@ -477,11 +477,11 @@ export const GroupSelector: React.FC<GroupSelectorProps> = React.memo(
                     >
                       <div className='flex min-w-0 flex-1 items-center gap-3'>
                         <div className='flex min-w-0 flex-1 flex-col'>
-                          <span className='text-foreground text-sm font-medium'>
+                          <span className='text-foreground text-sm font-medium [overflow-wrap:anywhere] whitespace-normal'>
                             {group.label}
                           </span>
                           {(group.desc || group.description) && (
-                            <div className='text-muted-foreground mt-0.5 text-xs'>
+                            <div className='text-muted-foreground mt-0.5 text-xs [overflow-wrap:anywhere] whitespace-normal'>
                               {group.desc || group.description}
                               {group.ratio && (
                                 <>

@@ -21,18 +21,16 @@ import {
   STORAGE_KEYS,
   DEFAULT_CONFIG,
 } from '../../constants/playground.constants';
-import { stripInlineImageDataForStorage } from '../../helpers/playgroundAttachments';
+import { messageHistoryAdapter, restoreMessages } from '../../helpers/playgroundMessages';
+import { trimHistory, writeHistory } from '../../../../shared/playground-history-storage';
 
 const LEGACY_SHARED_KEYS = [
   ...Object.values(STORAGE_KEYS),
   'playground_parameter_enabled',
 ];
 
-const getStorageKey = (baseKey) => {
+const getStorageKey = (baseKey, userId) => {
   try {
-    const rawUser = localStorage.getItem('user');
-    if (!rawUser) return null;
-    const userId = JSON.parse(rawUser)?.id;
     if (!userId) return null;
     for (const legacyKey of LEGACY_SHARED_KEYS) {
       localStorage.removeItem(legacyKey);
@@ -46,7 +44,7 @@ const getStorageKey = (baseKey) => {
  * 保存配置到 localStorage
  * @param {Object} config - 要保存的配置对象
  */
-export const saveConfig = (config) => {
+export const saveConfig = (config, userId) => {
   try {
     const sanitizedInputs = config?.inputs
       ? {
@@ -66,7 +64,7 @@ export const saveConfig = (config) => {
       ...(sanitizedInputs ? { inputs: sanitizedInputs } : {}),
       timestamp: new Date().toISOString(),
     };
-    const key = getStorageKey(STORAGE_KEYS.CONFIG);
+    const key = getStorageKey(STORAGE_KEYS.CONFIG, userId);
     if (!key) return;
     localStorage.setItem(key, JSON.stringify(configToSave));
   } catch (error) {
@@ -78,19 +76,14 @@ export const saveConfig = (config) => {
  * 保存消息到 localStorage
  * @param {Array} messages - 要保存的消息数组
  */
-export const saveMessages = (messages) => {
+export const saveMessages = (messages, userId) => {
   try {
-    // 内联 base64 图片体积很大（单张可达数 MB），直接写入 localStorage 会撑爆配额
-    // 导致整个历史记录保存失败；存入前先剔除图片数据，仅保留占位标记。
-    const messagesToSave = {
-      messages: stripInlineImageDataForStorage(messages),
-      timestamp: new Date().toISOString(),
-    };
-    const key = getStorageKey(STORAGE_KEYS.MESSAGES);
-    if (!key) return;
-    localStorage.setItem(key, JSON.stringify(messagesToSave));
+    const key = getStorageKey(STORAGE_KEYS.MESSAGES, userId);
+    if (!key) return false;
+    return writeHistory(localStorage, key, messages, messageHistoryAdapter);
   } catch (error) {
     console.error('保存消息失败:', error);
+    return false;
   }
 };
 
@@ -98,9 +91,9 @@ export const saveMessages = (messages) => {
  * 从 localStorage 加载配置
  * @returns {Object} 配置对象，如果不存在则返回默认配置
  */
-export const loadConfig = () => {
+export const loadConfig = (userId) => {
   try {
-    const key = getStorageKey(STORAGE_KEYS.CONFIG);
+    const key = getStorageKey(STORAGE_KEYS.CONFIG, userId);
     const savedConfig = key ? localStorage.getItem(key) : null;
     if (savedConfig) {
       const parsedConfig = JSON.parse(savedConfig);
@@ -139,13 +132,15 @@ export const loadConfig = () => {
  * 从 localStorage 加载消息
  * @returns {Array} 消息数组，如果不存在则返回 null
  */
-export const loadMessages = () => {
+export const loadMessages = (userId) => {
   try {
-    const key = getStorageKey(STORAGE_KEYS.MESSAGES);
+    const key = getStorageKey(STORAGE_KEYS.MESSAGES, userId);
     const savedMessages = key ? localStorage.getItem(key) : null;
     if (savedMessages) {
       const parsedMessages = JSON.parse(savedMessages);
-      return parsedMessages.messages || null;
+      // Accept both legacy timestamp envelopes and plain arrays without
+      // rewriting the previous snapshot during recovery.
+      return trimHistory(restoreMessages(parsedMessages), messageHistoryAdapter);
     }
   } catch (error) {
     console.error('加载消息失败:', error);
@@ -157,12 +152,10 @@ export const loadMessages = () => {
 /**
  * 清除保存的配置
  */
-export const clearConfig = () => {
+export const clearConfig = (userId) => {
   try {
-    const configKey = getStorageKey(STORAGE_KEYS.CONFIG);
-    const messagesKey = getStorageKey(STORAGE_KEYS.MESSAGES);
+    const configKey = getStorageKey(STORAGE_KEYS.CONFIG, userId);
     if (configKey) localStorage.removeItem(configKey);
-    if (messagesKey) localStorage.removeItem(messagesKey); // 同时清除消息
   } catch (error) {
     console.error('清除配置失败:', error);
   }
@@ -171,9 +164,9 @@ export const clearConfig = () => {
 /**
  * 清除保存的消息
  */
-export const clearMessages = () => {
+export const clearMessages = (userId) => {
   try {
-    const key = getStorageKey(STORAGE_KEYS.MESSAGES);
+    const key = getStorageKey(STORAGE_KEYS.MESSAGES, userId);
     if (key) localStorage.removeItem(key);
   } catch (error) {
     console.error('清除消息失败:', error);
@@ -184,9 +177,9 @@ export const clearMessages = () => {
  * 检查是否有保存的配置
  * @returns {boolean} 是否存在保存的配置
  */
-export const hasStoredConfig = () => {
+export const hasStoredConfig = (userId) => {
   try {
-    const key = getStorageKey(STORAGE_KEYS.CONFIG);
+    const key = getStorageKey(STORAGE_KEYS.CONFIG, userId);
     return key ? localStorage.getItem(key) !== null : false;
   } catch (error) {
     console.error('检查配置失败:', error);
@@ -198,9 +191,9 @@ export const hasStoredConfig = () => {
  * 获取配置的最后保存时间
  * @returns {string|null} 最后保存时间的 ISO 字符串
  */
-export const getConfigTimestamp = () => {
+export const getConfigTimestamp = (userId) => {
   try {
-    const key = getStorageKey(STORAGE_KEYS.CONFIG);
+    const key = getStorageKey(STORAGE_KEYS.CONFIG, userId);
     const savedConfig = key ? localStorage.getItem(key) : null;
     if (savedConfig) {
       const parsedConfig = JSON.parse(savedConfig);
@@ -217,11 +210,11 @@ export const getConfigTimestamp = () => {
  * @param {Object} config - 要导出的配置
  * @param {Array} messages - 要导出的消息
  */
-export const exportConfig = (config, messages = null) => {
+export const exportConfig = (config, messages = null, userId) => {
   try {
     const configToExport = {
       ...config,
-      messages: messages || loadMessages(), // 包含消息数据
+      messages: messages || loadMessages(userId), // 包含消息数据
       exportTime: new Date().toISOString(),
       version: '1.0',
     };
@@ -254,14 +247,6 @@ export const importConfig = (file) => {
           const importedConfig = JSON.parse(e.target.result);
 
           if (importedConfig.inputs && importedConfig.parameterEnabled) {
-            // 如果导入的配置包含消息，也一起导入
-            if (
-              importedConfig.messages &&
-              Array.isArray(importedConfig.messages)
-            ) {
-              saveMessages(importedConfig.messages);
-            }
-
             resolve(importedConfig);
           } else {
             reject(new Error('配置文件格式无效'));

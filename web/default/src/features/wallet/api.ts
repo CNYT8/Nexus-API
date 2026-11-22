@@ -205,6 +205,17 @@ export async function requestCreemPayment(
   return res.data
 }
 
+export async function calculateWaffoAmount(
+  request: AmountRequest,
+  signal: AbortSignal
+): Promise<AmountResponse> {
+  const res = await api.post('/api/user/waffo/amount', request, {
+    signal,
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
 /**
  * Request Waffo payment
  */

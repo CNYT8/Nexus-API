@@ -20,7 +20,6 @@ For commercial licensing, please contact support@quantumnous.com
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  DEFAULT_MESSAGES,
   getDefaultMessages,
   DEFAULT_CONFIG,
   DEBUG_TABS,
@@ -34,14 +33,34 @@ import {
   clearMessages,
 } from '../../components/playground/configStorage';
 import { processIncompleteThinkTags } from '../../helpers';
+import { restoreMessages } from '../../helpers/playgroundMessages';
 
-export const usePlaygroundState = () => {
+const finalizePendingMessages = (messages) => {
+  let changed = false;
+  const result = messages.map((message) => {
+    if (message.role !== 'assistant' || ![MESSAGE_STATUS.LOADING, MESSAGE_STATUS.INCOMPLETE].includes(message.status)) return message;
+    changed = true;
+    const processed = typeof message.content === 'string'
+      ? processIncompleteThinkTags(message.content, message.reasoningContent || '')
+      : { content: message.content, reasoningContent: message.reasoningContent };
+    return {
+      ...message,
+      content: processed.content,
+      reasoningContent: processed.reasoningContent || null,
+      status: MESSAGE_STATUS.COMPLETE,
+      isThinkingComplete: true,
+    };
+  });
+  return changed ? result : messages;
+};
+
+export const usePlaygroundState = (session) => {
   const { t } = useTranslation();
 
   // 使用惰性初始化，确保只在组件首次挂载时加载配置和消息
-  const [savedConfig] = useState(() => loadConfig());
+  const [savedConfig] = useState(() => loadConfig(session.userId));
   const [initialMessages] = useState(() => {
-    const loaded = loadMessages();
+    const loaded = loadMessages(session.userId);
     // 检查是否是旧的中文默认消息，如果是则清除
     if (
       loaded &&
@@ -56,7 +75,7 @@ export const usePlaygroundState = () => {
 
       if (hasOldChinese) {
         // 清除旧的默认消息
-        clearMessages();
+        clearMessages(session.userId);
         return null;
       }
     }
@@ -87,17 +106,9 @@ export const usePlaygroundState = () => {
   const [status, setStatus] = useState({});
 
   // 消息相关状态 - 使用加载的消息或默认消息初始化
-  const [message, setMessage] = useState(
+  const [message, setMessageState] = useState(
     () => initialMessages || getDefaultMessages(t),
   );
-
-  // 当语言改变时，如果是默认消息则更新
-  useEffect(() => {
-    // 只在没有保存的消息时才更新默认消息
-    if (!initialMessages) {
-      setMessage(getDefaultMessages(t));
-    }
-  }, [t, initialMessages]); // 当语言改变时
 
   // 调试状态
   const [debugData, setDebugData] = useState({
@@ -118,27 +129,69 @@ export const usePlaygroundState = () => {
   const sseSourceRef = useRef(null);
   const chatRef = useRef(null);
   const saveConfigTimeoutRef = useRef(null);
-  const saveMessagesTimeoutRef = useRef(null);
+  const messageRef = useRef(message);
+  const saveMessagesTimerRef = useRef(null);
+  const messagesDirtyRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  // 同步提交并保存同一份快照，避免 React updater 重放或延时保存覆盖终态。
+  const setMessage = useCallback(
+    (updater) => {
+      if (!mountedRef.current || !session.isCurrent()) return;
+      const next =
+        typeof updater === 'function' ? updater(messageRef.current) : updater;
+      if (next === messageRef.current) return;
+      messageRef.current = next;
+      setMessageState(next);
+      messagesDirtyRef.current = true;
+      const streaming = next.some((m) => ['loading', 'incomplete'].includes(m.status));
+      if (!streaming) {
+        clearTimeout(saveMessagesTimerRef.current);
+        saveMessagesTimerRef.current = null;
+        messagesDirtyRef.current = !saveMessages(next, session.userId);
+      } else if (!saveMessagesTimerRef.current) {
+        saveMessagesTimerRef.current = setTimeout(() => {
+          saveMessagesTimerRef.current = null;
+          if (!mountedRef.current || !session.isCurrent()) return;
+          messagesDirtyRef.current = !saveMessages(messageRef.current, session.userId);
+        }, 500);
+      }
+    },
+    [session],
+  );
+  const getMessages = useCallback(() => messageRef.current, []);
+
+  // 语言切换只更新仍未使用的示例，不能覆盖本次新建的对话。
+  useEffect(() => {
+    const current = messageRef.current;
+    if (
+      !initialMessages &&
+      current.length === 2 &&
+      current[0].id === '2' &&
+      current[1].id === '3'
+    ) {
+      setMessage(getDefaultMessages(t));
+    }
+  }, [t, initialMessages, setMessage]);
 
   // 配置更新函数
-  const handleInputChange = useCallback((name, value) => {
-    setInputs((prev) => ({ ...prev, [name]: value }));
-  }, []);
-
-  const handleParameterToggle = useCallback((paramName) => {
-    setParameterEnabled((prev) => ({
-      ...prev,
-      [paramName]: !prev[paramName],
-    }));
-  }, []);
-
-  // 消息保存函数 - 改为立即保存，可以接受参数
-  const saveMessagesImmediately = useCallback(
-    (messagesToSave) => {
-      // 如果提供了参数，使用参数；否则使用当前状态
-      saveMessages(messagesToSave || message);
+  const handleInputChange = useCallback(
+    (name, value) => {
+      if (!mountedRef.current || !session.isCurrent()) return;
+      setInputs((prev) => ({ ...prev, [name]: value }));
     },
-    [message],
+    [session],
+  );
+
+  const handleParameterToggle = useCallback(
+    (paramName) => {
+      if (!mountedRef.current || !session.isCurrent()) return;
+      setParameterEnabled((prev) => ({
+        ...prev,
+        [paramName]: !prev[paramName],
+      }));
+    },
+    [session],
   );
 
   // 配置保存
@@ -155,7 +208,8 @@ export const usePlaygroundState = () => {
         customRequestMode,
         customRequestBody,
       };
-      saveConfig(configToSave);
+      if (mountedRef.current && session.isCurrent())
+        saveConfig(configToSave, session.userId);
     }, 1000);
   }, [
     inputs,
@@ -163,96 +217,101 @@ export const usePlaygroundState = () => {
     showDebugPanel,
     customRequestMode,
     customRequestBody,
+    session,
   ]);
 
   // 配置导入/重置
-  const handleConfigImport = useCallback((importedConfig) => {
-    if (importedConfig.inputs) {
-      const parsedMaxTokens = parseInt(importedConfig.inputs.max_tokens, 10);
-      setInputs((prev) => ({
-        ...prev,
-        ...importedConfig.inputs,
-        max_tokens: Number.isNaN(parsedMaxTokens)
-          ? importedConfig.inputs.max_tokens
-          : parsedMaxTokens,
-      }));
-    }
-    if (importedConfig.parameterEnabled) {
-      setParameterEnabled((prev) => ({
-        ...prev,
-        ...importedConfig.parameterEnabled,
-      }));
-    }
-    if (typeof importedConfig.showDebugPanel === 'boolean') {
-      setShowDebugPanel(importedConfig.showDebugPanel);
-    }
-    if (importedConfig.customRequestMode) {
-      setCustomRequestMode(importedConfig.customRequestMode);
-    }
-    if (importedConfig.customRequestBody) {
-      setCustomRequestBody(importedConfig.customRequestBody);
-    }
-    // 如果导入的配置包含消息，也恢复消息
-    if (importedConfig.messages && Array.isArray(importedConfig.messages)) {
-      setMessage(importedConfig.messages);
-    }
-  }, []);
+  const handleConfigImport = useCallback(
+    (importedConfig) => {
+      if (!mountedRef.current || !session.isCurrent()) return;
+      if (importedConfig.inputs) {
+        const parsedMaxTokens = parseInt(importedConfig.inputs.max_tokens, 10);
+        setInputs((prev) => ({
+          ...prev,
+          ...importedConfig.inputs,
+          max_tokens: Number.isNaN(parsedMaxTokens)
+            ? importedConfig.inputs.max_tokens
+            : parsedMaxTokens,
+        }));
+      }
+      if (importedConfig.parameterEnabled) {
+        setParameterEnabled((prev) => ({
+          ...prev,
+          ...importedConfig.parameterEnabled,
+        }));
+      }
+      if (typeof importedConfig.showDebugPanel === 'boolean') {
+        setShowDebugPanel(importedConfig.showDebugPanel);
+      }
+      if (importedConfig.customRequestMode) {
+        setCustomRequestMode(importedConfig.customRequestMode);
+      }
+      if (importedConfig.customRequestBody) {
+        setCustomRequestBody(importedConfig.customRequestBody);
+      }
+      // 如果导入的配置包含消息，也恢复消息
+      if (importedConfig.messages && Array.isArray(importedConfig.messages)) {
+        setMessage(restoreMessages(importedConfig.messages));
+      }
+    },
+    [session, setMessage],
+  );
 
-  const handleConfigReset = useCallback((options = {}) => {
-    const { resetMessages = false } = options;
+  const handleConfigReset = useCallback(
+    (options = {}) => {
+      if (!mountedRef.current || !session.isCurrent()) return;
+      const { resetMessages = false } = options;
 
-    setInputs(DEFAULT_CONFIG.inputs);
-    setParameterEnabled(DEFAULT_CONFIG.parameterEnabled);
-    setShowDebugPanel(DEFAULT_CONFIG.showDebugPanel);
-    setCustomRequestMode(DEFAULT_CONFIG.customRequestMode);
-    setCustomRequestBody(DEFAULT_CONFIG.customRequestBody);
+      setInputs(DEFAULT_CONFIG.inputs);
+      setParameterEnabled(DEFAULT_CONFIG.parameterEnabled);
+      setShowDebugPanel(DEFAULT_CONFIG.showDebugPanel);
+      setCustomRequestMode(DEFAULT_CONFIG.customRequestMode);
+      setCustomRequestBody(DEFAULT_CONFIG.customRequestBody);
 
-    // 只有在明确指定时才重置消息
-    if (resetMessages) {
-      setMessage([]);
-      setTimeout(() => {
+      // 只有在明确指定时才重置消息
+      if (resetMessages) {
         setMessage(getDefaultMessages(t));
-      }, 0);
-    }
-  }, []);
+      }
+    },
+    [session, setMessage, t],
+  );
 
-  // 清理定时器
   useEffect(() => {
-    return () => {
-      if (saveConfigTimeoutRef.current) {
-        clearTimeout(saveConfigTimeoutRef.current);
+    mountedRef.current = true;
+    let finalized = false;
+    const finalize = () => {
+      if (finalized) return;
+      finalized = true;
+      clearTimeout(saveConfigTimeoutRef.current);
+      clearTimeout(saveMessagesTimerRef.current);
+      saveMessagesTimerRef.current = null;
+      const saved = finalizePendingMessages(messageRef.current);
+      if (messagesDirtyRef.current || saved !== messageRef.current) {
+        messageRef.current = saved;
+        messagesDirtyRef.current = !saveMessages(saved, session.userId);
       }
     };
-  }, []);
+    const persist = () => {
+      if (!session.isCurrent() || finalized || !messagesDirtyRef.current) return;
+      clearTimeout(saveMessagesTimerRef.current);
+      saveMessagesTimerRef.current = null;
+      messagesDirtyRef.current = !saveMessages(messageRef.current, session.userId);
+    };
+    window.addEventListener('pagehide', persist);
+    window.addEventListener('beforeunload', persist);
+    const unsubscribe = session.onInvalidate(finalize);
+    return () => {
+      window.removeEventListener('pagehide', persist);
+      window.removeEventListener('beforeunload', persist);
+      mountedRef.current = false;
+      unsubscribe();
+      finalize();
+    };
+  }, [session]);
 
   // 页面首次加载时，若最后一条消息仍处于 LOADING/INCOMPLETE 状态，自动修复
   useEffect(() => {
-    if (!Array.isArray(message) || message.length === 0) return;
-
-    const lastMsg = message[message.length - 1];
-    if (
-      lastMsg.status === MESSAGE_STATUS.LOADING ||
-      lastMsg.status === MESSAGE_STATUS.INCOMPLETE
-    ) {
-      const processed = processIncompleteThinkTags(
-        lastMsg.content || '',
-        lastMsg.reasoningContent || '',
-      );
-
-      const fixedLastMsg = {
-        ...lastMsg,
-        status: MESSAGE_STATUS.COMPLETE,
-        content: processed.content,
-        reasoningContent: processed.reasoningContent || null,
-        isThinkingComplete: true,
-      };
-
-      const updatedMessages = [...message.slice(0, -1), fixedLastMsg];
-      setMessage(updatedMessages);
-
-      // 保存修复后的消息列表
-      setTimeout(() => saveMessagesImmediately(updatedMessages), 0);
-    }
+    setMessage(finalizePendingMessages(messageRef.current));
   }, []);
 
   return {
@@ -307,7 +366,7 @@ export const usePlaygroundState = () => {
     handleInputChange,
     handleParameterToggle,
     debouncedSaveConfig,
-    saveMessagesImmediately,
+    getMessages,
     handleConfigImport,
     handleConfigReset,
   };

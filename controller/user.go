@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -24,12 +25,13 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username          string `json:"username"`
+	Password          string `json:"password"`
+	PasswordEncrypted string `json:"password_encrypted"`
+	EncryptionKeyID   string `json:"encryption_key_id"`
 }
 
 func Login(c *gin.Context) {
@@ -45,6 +47,17 @@ func Login(c *gin.Context) {
 	}
 	username := loginRequest.Username
 	password := loginRequest.Password
+	if common.PasswordLoginEncryptionEnabled {
+		if loginRequest.PasswordEncrypted == "" || loginRequest.EncryptionKeyID == "" {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+		password, err = common.DecryptPassword(loginRequest.PasswordEncrypted, loginRequest.EncryptionKeyID)
+		if err != nil {
+			common.ApiErrorI18n(c, i18n.MsgUserUsernameOrPasswordError)
+			return
+		}
+	}
 	if username == "" || password == "" {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -67,40 +80,15 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	// 检查是否启用2FA
-	twoFAEnabled, err := model.IsTwoFAEnabled(user.Id)
-	if err != nil {
-		common.SysLog(fmt.Sprintf("Login failed to load 2FA status for user %d: %v", user.Id, err))
-		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
-		return
-	}
-	if twoFAEnabled {
-		// 设置pending session，等待2FA验证
-		session := sessions.Default(c)
-		session.Set("pending_username", user.Username)
-		session.Set("pending_user_id", user.Id)
-		err := session.Save()
-		if err != nil {
-			common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"message": i18n.T(c, i18n.MsgUserRequire2FA),
-			"success": true,
-			"data": map[string]interface{}{
-				"require_2fa": true,
-			},
-		})
-		return
-	}
-
-	setupLogin(&user, c)
+	completePrimaryLogin(&user, c, "password")
 }
 
 // setup session & cookies and then return user info
 // loginMethodFromContext 根据请求路径推导登录方式，用于登录审计日志。
 func loginMethodFromContext(c *gin.Context) string {
+	if method := c.GetString("login_method"); method != "" {
+		return method
+	}
 	switch c.FullPath() {
 	case "/api/user/login":
 		return "password"
@@ -136,19 +124,36 @@ func recordLoginAudit(user *model.User, c *gin.Context) {
 }
 
 func setupLogin(user *model.User, c *gin.Context) {
-	model.UpdateUserLastLoginAt(user.Id)
-	model.UpdateUserLastLoginIp(user.Id, c.ClientIP())
+	secret, err := model.CreateUserSession(user, loginMethodFromContext(c), c.ClientIP(), c.Request.UserAgent())
+	if err != nil {
+		if WriteSessionLimitError(c, err) {
+			return
+		}
+		common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
+		return
+	}
 	session := sessions.Default(c)
+	oldSecret, _ := session.Get(service.AuthSessionKey).(string)
+	oldID, _ := session.Get("id").(int)
+	if err := model.RevokeUserSession(oldSecret, oldID); err != nil {
+		_ = model.RevokeUserSession(secret, user.Id)
+		common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
+		return
+	}
+	session.Clear()
+	session.Set(service.AuthSessionKey, secret)
 	session.Set("id", user.Id)
 	session.Set("username", user.Username)
 	session.Set("role", user.Role)
 	session.Set("status", user.Status)
 	session.Set("group", user.Group)
-	err := session.Save()
-	if err != nil {
+	if err := session.Save(); err != nil {
+		_ = model.RevokeUserSession(secret, user.Id)
 		common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
 		return
 	}
+	model.UpdateUserLastLoginAt(user.Id)
+	model.UpdateUserLastLoginIp(user.Id, c.ClientIP())
 	recordLoginAudit(user, c)
 	c.JSON(http.StatusOK, gin.H{
 		"message": "",
@@ -166,6 +171,24 @@ func setupLogin(user *model.User, c *gin.Context) {
 
 func Logout(c *gin.Context) {
 	session := sessions.Default(c)
+	secret, _ := session.Get(service.AuthSessionKey).(string)
+	id, _ := session.Get("id").(int)
+	if secret == "" && id > 0 {
+		// Register the legacy fingerprint before revocation so replaying the
+		// pre-migration cookie cannot silently create another active session.
+		if _, _, err := service.CurrentSessionUser(c); err != nil {
+			if !errors.Is(err, model.ErrAuthStateInvalid) {
+				common.ApiErrorI18n(c, i18n.MsgDatabaseError)
+				return
+			}
+		} else {
+			secret, _ = session.Get(service.AuthSessionKey).(string)
+		}
+	}
+	if err := model.RevokeUserSession(secret, id); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
+		return
+	}
 	session.Clear()
 	err := session.Save()
 	if err != nil {
@@ -363,36 +386,7 @@ func GetUser(c *gin.Context) {
 }
 
 func GenerateAccessToken(c *gin.Context) {
-	id := c.GetInt("id")
-	// get rand int 28-32
-	randI := common.GetRandomInt(4)
-	key, err := common.GenerateRandomKey(29 + randI)
-	if err != nil {
-		common.ApiErrorI18n(c, i18n.MsgGenerateFailed)
-		common.SysLog("failed to generate key: " + err.Error())
-		return
-	}
-	result := model.DB.Where("access_token = ?", key).First(&model.User{})
-	if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		common.ApiError(c, result.Error)
-		return
-	}
-	if result.RowsAffected != 0 {
-		common.ApiErrorI18n(c, i18n.MsgUuidDuplicate)
-		return
-	}
-
-	if err := model.UpdateUserAccessToken(id, key); err != nil {
-		common.ApiError(c, err)
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    key,
-	})
-	return
+	generateCompatibleAccessToken(c)
 }
 
 type TransferAffQuotaRequest struct {
@@ -828,7 +822,7 @@ func checkUpdatePassword(originalPassword string, newPassword string, userId int
 
 	// 密码不为空,需要验证原密码
 	// 支持第一次账号绑定时原密码为空的情况
-	if !common.ValidatePasswordAndHash(originalPassword, currentUser.Password) && currentUser.Password != "" {
+	if !common.VerifyAccountPassword(originalPassword, currentUser.Password) && currentUser.Password != "" {
 		err = fmt.Errorf("原密码错误")
 		return
 	}
@@ -1223,6 +1217,7 @@ func TopUp(c *gin.Context) {
 }
 
 type UpdateUserSettingRequest struct {
+	QuotaWarningEnabled              *bool   `json:"quota_warning_enabled,omitempty"`
 	QuotaWarningType                 string  `json:"notify_type"`
 	QuotaWarningThreshold            float64 `json:"quota_warning_threshold"`
 	WebhookUrl                       string  `json:"webhook_url,omitempty"`
@@ -1233,7 +1228,7 @@ type UpdateUserSettingRequest struct {
 	GotifyToken                      string  `json:"gotify_token,omitempty"`
 	GotifyPriority                   int     `json:"gotify_priority,omitempty"`
 	UpstreamModelUpdateNotifyEnabled *bool   `json:"upstream_model_update_notify_enabled,omitempty"`
-	AcceptUnsetModelRatioModel       bool    `json:"accept_unset_model_ratio_model"`
+	AcceptUnsetModelRatioModel       *bool   `json:"accept_unset_model_ratio_model,omitempty"`
 	RecordIpLog                      bool    `json:"record_ip_log"`
 	RecordIpLogUpdatedAt             int64   `json:"record_ip_log_updated_at,omitempty"`
 }
@@ -1252,8 +1247,8 @@ func UpdateUserSetting(c *gin.Context) {
 	}
 
 	// 验证预警阈值
-	if req.QuotaWarningThreshold <= 0 {
-		common.ApiErrorI18n(c, i18n.MsgQuotaThresholdGtZero)
+	if req.QuotaWarningThreshold < 0 || math.IsNaN(req.QuotaWarningThreshold) || math.IsInf(req.QuotaWarningThreshold, 0) {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
 
@@ -1351,12 +1346,12 @@ func UpdateUserSetting(c *gin.Context) {
 		recordIpLogUpdatedAt = existingSettings.RecordIpLogUpdatedAt
 	}
 
-	// 构建设置
+	// Patch notification keys only; preserve unknown, permission and billing settings.
 	settings := dto.UserSetting{
 		NotifyType:                       req.QuotaWarningType,
 		QuotaWarningThreshold:            req.QuotaWarningThreshold,
 		UpstreamModelUpdateNotifyEnabled: upstreamModelUpdateNotifyEnabled,
-		AcceptUnsetRatioModel:            req.AcceptUnsetModelRatioModel,
+		AcceptUnsetRatioModel:            existingSettings.AcceptUnsetRatioModel,
 		RecordIpLog:                      recordIpLog,
 		RecordIpLogUpdatedAt:             recordIpLogUpdatedAt,
 	}
@@ -1391,9 +1386,37 @@ func UpdateUserSetting(c *gin.Context) {
 		}
 	}
 
-	// 更新用户设置
-	user.SetSetting(settings)
-	if err := model.UpdateUserSetting(userId, user.Setting); err != nil {
+	patch := map[string]any{
+		"notify_type":             settings.NotifyType,
+		"quota_warning_threshold": settings.QuotaWarningThreshold,
+	}
+	if req.QuotaWarningEnabled != nil {
+		patch["quota_warning_enabled"] = *req.QuotaWarningEnabled
+	}
+	if req.AcceptUnsetModelRatioModel != nil {
+		patch["accept_unset_model_ratio_model"] = *req.AcceptUnsetModelRatioModel
+	}
+	if user.Role >= common.RoleAdminUser && req.UpstreamModelUpdateNotifyEnabled != nil {
+		patch["upstream_model_update_notify_enabled"] = settings.UpstreamModelUpdateNotifyEnabled
+	}
+	if !common.DefaultRecordIpLogForced {
+		patch["record_ip_log"] = settings.RecordIpLog
+		patch["record_ip_log_updated_at"] = settings.RecordIpLogUpdatedAt
+	}
+	switch req.QuotaWarningType {
+	case dto.NotifyTypeWebhook:
+		patch["webhook_url"] = settings.WebhookUrl
+		if req.WebhookSecret != "" {
+			patch["webhook_secret"] = settings.WebhookSecret
+		}
+	case dto.NotifyTypeEmail:
+		patch["notification_email"] = settings.NotificationEmail
+	case dto.NotifyTypeBark:
+		patch["bark_url"] = settings.BarkUrl
+	case dto.NotifyTypeGotify:
+		patch["gotify_url"], patch["gotify_token"], patch["gotify_priority"] = settings.GotifyUrl, settings.GotifyToken, settings.GotifyPriority
+	}
+	if err := model.PatchUserSetting(userId, patch); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUpdateFailed)
 		return
 	}

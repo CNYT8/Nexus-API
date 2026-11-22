@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -56,6 +56,7 @@ const monitoringSchema = z
   .object({
     ChannelDisableThreshold: numericString,
     QuotaRemindThreshold: numericString,
+    QuotaRemindEnabled: z.boolean(),
     AutomaticDisableChannelEnabled: z.boolean(),
     AutomaticEnableChannelEnabled: z.boolean(),
     AutomaticDisableKeywords: z.string(),
@@ -104,6 +105,7 @@ type MonitoringSettingsSectionProps = {
   defaultValues: {
     ChannelDisableThreshold: string
     QuotaRemindThreshold: string
+    QuotaRemindEnabled: boolean
     AutomaticDisableChannelEnabled: boolean
     AutomaticEnableChannelEnabled: boolean
     AutomaticDisableKeywords: string
@@ -121,6 +123,7 @@ function normalizeLineEndings(value: string) {
 type NormalizedMonitoringValues = {
   ChannelDisableThreshold: string
   QuotaRemindThreshold: string
+  QuotaRemindEnabled: boolean
   AutomaticDisableChannelEnabled: boolean
   AutomaticEnableChannelEnabled: boolean
   AutomaticDisableKeywords: string
@@ -135,6 +138,7 @@ const buildFormDefaults = (
 ): MonitoringFormInput => ({
   ChannelDisableThreshold: defaults.ChannelDisableThreshold ?? '',
   QuotaRemindThreshold: defaults.QuotaRemindThreshold ?? '',
+  QuotaRemindEnabled: defaults.QuotaRemindEnabled ?? true,
   AutomaticDisableChannelEnabled: defaults.AutomaticDisableChannelEnabled,
   AutomaticEnableChannelEnabled: defaults.AutomaticEnableChannelEnabled,
   AutomaticDisableKeywords: normalizeLineEndings(
@@ -155,6 +159,7 @@ const normalizeDefaults = (
 ): NormalizedMonitoringValues => ({
   ChannelDisableThreshold: (defaults.ChannelDisableThreshold ?? '').trim(),
   QuotaRemindThreshold: (defaults.QuotaRemindThreshold ?? '').trim(),
+  QuotaRemindEnabled: defaults.QuotaRemindEnabled ?? true,
   AutomaticDisableChannelEnabled: defaults.AutomaticDisableChannelEnabled,
   AutomaticEnableChannelEnabled: defaults.AutomaticEnableChannelEnabled,
   AutomaticDisableKeywords: normalizeLineEndings(
@@ -177,6 +182,7 @@ const normalizeFormValues = (
 ): NormalizedMonitoringValues => ({
   ChannelDisableThreshold: values.ChannelDisableThreshold.trim(),
   QuotaRemindThreshold: values.QuotaRemindThreshold.trim(),
+  QuotaRemindEnabled: values.QuotaRemindEnabled,
   AutomaticDisableChannelEnabled: values.AutomaticDisableChannelEnabled,
   AutomaticEnableChannelEnabled: values.AutomaticEnableChannelEnabled,
   AutomaticDisableKeywords: normalizeLineEndings(
@@ -199,9 +205,7 @@ export function MonitoringSettingsSection({
 }: MonitoringSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
-  const baselineRef = useRef<NormalizedMonitoringValues>(
-    normalizeDefaults(defaultValues)
-  )
+  const baseline = normalizeDefaults(defaultValues)
 
   const formDefaults = useMemo(
     () => buildFormDefaults(defaultValues),
@@ -213,7 +217,17 @@ export function MonitoringSettingsSection({
     defaultValues: formDefaults,
   })
 
-  useResetForm(form, formDefaults)
+  const submitForm = useResetForm(form, formDefaults, (value, path) => {
+    if (typeof value !== 'string') return value
+    if (path === 'AutomaticDisableStatusCodes' || path === 'AutomaticRetryStatusCodes') {
+      return parseHttpStatusCodeRules(value).normalized
+    }
+    if (path === 'AutomaticDisableKeywords') return normalizeLineEndings(value)
+    if (path === 'ChannelDisableThreshold' || path === 'QuotaRemindThreshold') {
+      return value.trim()
+    }
+    return value
+  })
 
   const autoDisableStatusCodes = form.watch('AutomaticDisableStatusCodes')
   const autoRetryStatusCodes = form.watch('AutomaticRetryStatusCodes')
@@ -230,30 +244,24 @@ export function MonitoringSettingsSection({
     const normalized = normalizeFormValues(values)
     const updates = (
       Object.keys(normalized) as Array<keyof NormalizedMonitoringValues>
-    ).filter((key) => normalized[key] !== baselineRef.current[key])
+    ).filter((key) => normalized[key] !== baseline[key])
 
     if (updates.length === 0) {
       toast.info(t('No changes to save'))
       return
     }
 
-    for (const key of updates) {
-      const value = normalized[key]
-      await updateOption.mutateAsync({
-        key,
-        value,
-      })
-    }
-
-    baselineRef.current = normalized
+    await updateOption.saveOptions(
+      updates.map((key) => ({ key, value: normalized[key] }))
+    )
   }
 
   return (
     <SettingsSection title={t('Monitoring & Alerts')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
             saveLabel='Save monitoring rules'
           />
@@ -301,6 +309,24 @@ export function MonitoringSettingsSection({
               )}
             />
           </div>
+
+          <FormField
+            control={form.control}
+            name='QuotaRemindEnabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Quota reminders')}</FormLabel>
+                  <FormDescription>
+                    {t('Enable low balance notifications for users')}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch checked={field.value} onCheckedChange={field.onChange} />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
 
           <div className='grid gap-6 md:grid-cols-2'>
             <FormField

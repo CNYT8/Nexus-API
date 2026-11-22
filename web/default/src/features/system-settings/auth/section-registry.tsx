@@ -105,6 +105,7 @@ const AUTH_SECTIONS = [
     titleKey: 'Bot Protection',
     build: (settings: AuthSettings) => (
       <BotProtectionSection
+        secretKeyConfigured={settings.TurnstileSecretKeyConfigured}
         defaultValues={{
           TurnstileCheckEnabled: settings.TurnstileCheckEnabled,
           TurnstileSiteKey: settings.TurnstileSiteKey,

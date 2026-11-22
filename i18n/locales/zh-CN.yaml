@@ -300,6 +300,10 @@ ticket.message_limit: "该工单消息数量已达上限，请创建新工单"
 ticket.invalid_settings: "无效的工单设置"
 ticket.content_length_invalid: "工单内容长度必须在 100 到 20000 个字符之间"
 
+# API validation messages
+"访问令牌没有联动删除所需的权限": "访问令牌没有联动删除所需的权限"
+"工具价格必须为 JSON 对象": "工具价格必须为 JSON 对象"
+
 # Web risk control messages
 web_risk.verification_required: "请验证您的真实性"
 web_risk.verification_failed: "验证失败，请重试"

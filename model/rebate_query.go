@@ -4,7 +4,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"gorm.io/gorm"
 )
 
@@ -41,7 +40,10 @@ func GetWalletRebateSummary(db *gorm.DB, userID int) (*WalletRebateSummary, erro
 	if db == nil || userID <= 0 {
 		return nil, errors.New("invalid rebate summary query")
 	}
-	setting := operation_setting.GetRebateSetting()
+	setting, err := GetRebateSettingTx(db)
+	if err != nil {
+		return nil, err
+	}
 	summary := &WalletRebateSummary{
 		Enabled:                         setting.Enabled,
 		RateBasisPoints:                 setting.RateBasisPoints,
@@ -65,7 +67,7 @@ func GetWalletRebateSummary(db *gorm.DB, userID int) (*WalletRebateSummary, erro
 		DiscardedMoneyMicros int64
 		RewardCount          int64
 	}
-	err := db.Model(&RebateRecord{}).
+	err = db.Model(&RebateRecord{}).
 		Select(`COALESCE(SUM(CASE WHEN status IN (?, ?) THEN reward_quota ELSE 0 END), 0) AS pending_quota,
 			COALESCE(SUM(CASE WHEN status IN (?, ?) THEN reward_money_micros ELSE 0 END), 0) AS pending_money_micros,
 			COALESCE(SUM(CASE WHEN status = ? THEN reward_quota ELSE 0 END), 0) AS paid_quota,

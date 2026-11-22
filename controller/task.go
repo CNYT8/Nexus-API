@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
@@ -64,6 +66,46 @@ func GetUserTask(c *gin.Context) {
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(tasksToDto(items, false))
 	common.ApiSuccess(c, pageInfo)
+}
+
+// GetTaskArtifacts is owner-scoped, including when called by an administrator.
+// It exposes validated output references and explicit text only.
+func GetTaskArtifacts(c *gin.Context) {
+	c.Header("Cache-Control", "private, no-store")
+	userID := c.GetInt("id")
+	if userID <= 0 {
+		c.AbortWithStatus(http.StatusUnauthorized)
+		return
+	}
+	task, exists, err := model.GetByTaskId(userID, c.Param("task_id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !exists || task == nil || task.UserId != userID || !task.ResultRetrievable() {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	if task.Status != model.TaskStatusSuccess {
+		common.ApiSuccess(c, &model.TaskResultMetadata{Artifacts: []model.TaskArtifact{}})
+		return
+	}
+	stored := task.PrivateData.ResultMetadata
+	if stored == nil {
+		// Legacy video URLs remain visible through url. They are not persisted
+		// artifacts and do not acquire a generic content proxy endpoint.
+		stored = service.CollectTaskResultMetadata(nil, task.GetResultURL())
+	}
+	result := service.ValidatedTaskResultMetadata(stored)
+	if task.PrivateData.ResultMetadata != nil {
+		for i := range result.Artifacts {
+			artifact := &result.Artifacts[i]
+			if taskArtifactRemoteURL(artifact.URL, c.Request.Host) {
+				artifact.ContentURL = "/api/task/self/" + url.PathEscape(task.TaskID) + "/artifacts/" + url.PathEscape(artifact.ID) + "/content"
+			}
+		}
+	}
+	common.ApiSuccess(c, result)
 }
 
 func tasksToDto(tasks []*model.Task, fillUser bool) []*dto.TaskDto {

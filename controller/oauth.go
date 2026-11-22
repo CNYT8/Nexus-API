@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -24,14 +26,29 @@ func providerParams(name string) map[string]any {
 
 // GenerateOAuthCode generates a state code for OAuth CSRF protection
 func GenerateOAuthCode(c *gin.Context) {
+	providerName := c.Query("provider")
+	provider := oauth.GetProvider(providerName)
+	if provider == nil || !provider.IsEnabled() {
+		common.ApiErrorI18n(c, i18n.MsgOAuthUnknownProvider)
+		return
+	}
+	match, err := oauthFlowMatch(c, providerName)
+	if err != nil {
+		common.ApiErrorMsg(c, "请先完成安全验证")
+		return
+	}
+	state, err := model.CreateAuthFlow(match, "", 5*time.Minute)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	session := sessions.Default(c)
-	state := common.GetRandomString(12)
 	affCode := c.Query("aff")
 	if affCode != "" {
 		session.Set("aff", affCode)
 	}
 	session.Set("oauth_state", state)
-	err := session.Save()
+	err = session.Save()
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -59,7 +76,9 @@ func HandleOAuth(c *gin.Context) {
 
 	// 1. Validate state (CSRF protection)
 	state := c.Query("state")
-	if state == "" || session.Get("oauth_state") == nil || state != session.Get("oauth_state").(string) {
+	match, matchErr := oauthFlowMatch(c, providerName)
+	storedState, _ := session.Get("oauth_state").(string)
+	if matchErr != nil || state == "" || storedState != state {
 		c.JSON(http.StatusForbidden, gin.H{
 			"success": false,
 			"message": i18n.T(c, i18n.MsgOAuthStateInvalid),
@@ -67,9 +86,17 @@ func HandleOAuth(c *gin.Context) {
 		return
 	}
 
-	// 2. Check if user is already logged in (bind flow)
-	username := session.Get("username")
-	if username != nil {
+	if _, err := model.ConsumeAuthFlow(state, match); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgOAuthStateInvalid)
+		return
+	}
+	session.Delete("oauth_state")
+	if err := session.Save(); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	// 2. The purpose/account binding was checked before atomic consumption.
+	if match.Purpose == "oauth_bind" {
 		handleOAuthBind(c, provider)
 		return
 	}
@@ -128,8 +155,8 @@ func HandleOAuth(c *gin.Context) {
 		return
 	}
 
-	// 9. Setup login
-	setupLogin(user, c)
+	// 9. Enforce this site's MFA policy after external identity verification.
+	completePrimaryLogin(user, c, "oauth:"+providerName)
 }
 
 // handleOAuthBind handles binding OAuth account to existing user
@@ -160,12 +187,16 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 		return
 	}
 
-	// Get current user from session
-	session := sessions.Default(c)
-	id := session.Get("id")
-	user := model.User{Id: id.(int)}
-	err = user.FillUserById()
-	if err != nil {
+	// Binding requires a current server-side session and recent local proof.
+	user, _, err := service.CurrentSessionUser(c)
+	if err != nil || !service.HasFreshSessionVerification(c, "", 5*time.Minute) {
+		common.ApiErrorMsg(c, "请先完成安全验证")
+		return
+	}
+	if !allowAccountSecurityAction(c, user.Id, "oauth_bind") {
+		return
+	}
+	if user.Id <= 0 {
 		common.ApiError(c, err)
 		return
 	}
@@ -180,7 +211,7 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 		}
 	} else {
 		// Built-in provider: update user record directly
-		provider.SetProviderUserID(&user, oauthUser.ProviderUserID)
+		provider.SetProviderUserID(user, oauthUser.ProviderUserID)
 		err = user.Update(false)
 		if err != nil {
 			common.ApiError(c, err)

@@ -13,6 +13,8 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -44,7 +46,8 @@ func runOaiResponsesStreamUsageTest(t *testing.T, events ...string) (*dto.Usage,
 			dto.BuildInToolWebSearchPreview: {},
 			dto.BuildInToolFileSearch:       {},
 		}},
-		StartTime: time.Now(),
+		OriginModelName: "gpt-4o",
+		StartTime:       time.Now(),
 		ChannelMeta: &relaycommon.ChannelMeta{
 			UpstreamModelName: "gpt-4o",
 		},
@@ -226,6 +229,65 @@ func TestResponsesTerminalToolsDoNotDoubleBill(t *testing.T) {
 		require.Equal(t, 1, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview].CallCount)
 		require.Equal(t, 1, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolFileSearch].CallCount)
 	}
+}
+
+func TestResponsesToolUsageHTTPAndStream(t *testing.T) {
+	setting := config.GlobalConfig.Get("tool_price_setting").(*operation_setting.ToolPriceSetting)
+	previous := setting.Prices
+	setting.Prices = map[string]float64{"lookup:gpt-4o": 6}
+	operation_setting.RebuildToolPriceIndex()
+	t.Cleanup(func() { setting.Prices = previous; operation_setting.RebuildToolPriceIndex() })
+
+	const output = `[{"type":"image_generation_call","id":"image","status":"completed","result":"image-data","quality":"low","size":"1024x1024"},{"type":"image_generation_call","id":"failed","status":"failed","result":"failed-data"},{"type":"image_generation_call","id":"empty","status":"completed"},{"type":"function_call","id":"fn","call_id":"call","name":"lookup","status":"completed","arguments":"{}"},{"type":"function_call","id":"unpriced","name":"unpriced","status":"completed"},{"type":"function_call","id":"reserved","name":"web_search","status":"completed"}]`
+	body := `{"status":"completed","usage":{"input_tokens":10,"output_tokens":1},"output":` + output + `}`
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{OriginModelName: "gpt-4o", ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-4o"}}
+	resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
+	usage, apiErr := OaiResponsesHandler(ctx, info, resp)
+	require.Nil(t, apiErr)
+	want := map[string]int{"image_generation": 1, "lookup": 1}
+	require.Equal(t, want, usage.ToolUsage)
+	require.Equal(t, "low", ctx.GetString("image_generation_call_quality"))
+	require.Equal(t, 1, ctx.GetInt("image_generation_call_count"))
+
+	terminal := `{"type":"response.completed","response":` + body + `}`
+	streamUsage, apiErr, streamInfo := runOaiResponsesStreamUsageTest(t,
+		`{"type":"response.output_item.added","output_index":6,"item":{"type":"image_generation_call","id":"only-added","result":"not-done"}}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"image_generation_call","id":"image","status":"completed","result":"image-data","quality":"low","size":"1024x1024"}}`,
+		`{"type":"response.output_item.done","output_index":3,"item":{"type":"function_call","call_id":"call","name":"lookup","status":"completed","arguments":"{}"}}`,
+		terminal, terminal,
+	)
+	require.Nil(t, apiErr)
+	require.Equal(t, want, streamUsage.ToolUsage)
+	require.Equal(t, 1, streamInfo.BuiltInTools["image_generation"].CallCount)
+	require.Equal(t, 1, streamInfo.BuiltInTools["lookup"].CallCount)
+}
+
+func TestResponsesToolUsageHTTPRejectsUnfinishedImages(t *testing.T) {
+	for _, status := range []string{"completed", "failed", "cancelled", "incomplete"} {
+		t.Run(status, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			ctx.Set("image_generation_call", true)
+			ctx.Set("image_generation_call_count", 9)
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-4o"}}
+			body := fmt.Sprintf(`{"status":%q,"output":[{"type":"image_generation_call","id":"no-result","status":"completed"},{"type":"image_generation_call","id":"partial","status":"partial","result":"partial-data"}]}`, status)
+			usage, _ := OaiResponsesHandler(ctx, info, &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))})
+			require.NotNil(t, usage)
+			require.NotNil(t, usage.ToolUsage)
+			require.Empty(t, usage.ToolUsage)
+			require.False(t, ctx.GetBool("image_generation_call"))
+			require.Zero(t, ctx.GetInt("image_generation_call_count"))
+		})
+	}
+	usage, apiErr, _ := runOaiResponsesStreamUsageTest(t,
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"image_generation_call","id":"added","status":"completed","result":"not-done"}}`,
+		`{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":1,"output_tokens":0}}}`,
+	)
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage.ToolUsage)
+	require.Empty(t, usage.ToolUsage)
 }
 
 func TestOaiResponsesStreamHandlerNonZeroUsageWins(t *testing.T) {

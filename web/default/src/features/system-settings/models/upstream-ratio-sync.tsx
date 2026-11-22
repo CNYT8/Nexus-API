@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckSquare, RefreshCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button'
 import {
   fetchUpstreamRatios,
   getUpstreamChannels,
+  getSystemOptions,
   updateSystemOption,
 } from '../api'
 import type {
@@ -54,7 +55,6 @@ import {
   applyResolutionSelection,
   applyResolutionSelections,
   deleteResolutionField,
-  getBillingCategory,
   type ResolutionRemovalPlan,
   type ResolutionSelection,
   type ResolutionsMap,
@@ -108,7 +108,10 @@ function optionKeyBySyncField(ratioType: string): string {
 
 function parseJsonRecord<T>(raw: string | undefined | null): Record<string, T> {
   try {
-    return JSON.parse(raw || '{}') as Record<string, T>
+    const parsed: unknown = JSON.parse(raw || '{}')
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, T>)
+      : {}
   } catch {
     return {}
   }
@@ -125,7 +128,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
   const [channelDialogOpen, setChannelDialogOpen] = useState(false)
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false)
   const [selectedChannelIds, setSelectedChannelIds] = useState<number[]>([])
-  const [channelEndpoints, setChannelEndpoints] = useState<
+  const [endpointOverrides, setChannelEndpoints] = useState<
     Record<number, string>
   >({})
   const [differences, setDifferences] = useState<DifferencesMap>({})
@@ -139,25 +142,16 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
     enabled: channelDialogOpen,
   })
 
-  // Memoize the channels list so the effect below only re-runs when the query
-  // data actually changes, instead of on every render (the `|| []` fallback
-  // would otherwise produce a new array reference each render).
   const channels = useMemo(() => channelsData?.data ?? [], [channelsData?.data])
-
-  useEffect(() => {
-    if (channels.length === 0) return
-    setChannelEndpoints((prev) => {
-      let mutated = false
-      const next = { ...prev }
-      for (const channel of channels) {
-        if (!next[channel.id]) {
-          next[channel.id] = getDefaultEndpointForChannel(channel)
-          mutated = true
-        }
+  const channelEndpoints = useMemo(() => {
+    const endpoints = { ...endpointOverrides }
+    for (const channel of channels) {
+      if (!endpoints[channel.id]) {
+        endpoints[channel.id] = getDefaultEndpointForChannel(channel)
       }
-      return mutated ? next : prev
-    })
-  }, [channels])
+    }
+    return endpoints
+  }, [channels, endpointOverrides])
 
   const fetchMutation = useMutation({
     mutationFn: fetchUpstreamRatios,
@@ -192,34 +186,67 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
   })
 
   const { mutate: syncMutate, isPending: isSyncPending } = useMutation({
-    mutationFn: async (updates: Array<{ key: string; value: string }>) => {
+    mutationFn: async ({ updates, selected }: {
+      updates: Array<{ key: string; value: string }>
+      selected: ResolutionsMap
+    }) => {
+      let saved = 0
+      const failures: string[] = []
       for (const update of updates) {
-        await updateSystemOption(update)
+        try {
+          const response = await updateSystemOption(update)
+          if (!response.success) throw new Error(response.message || update.key)
+          saved++
+        } catch (error) {
+          failures.push(`${update.key}: ${error instanceof Error ? error.message : String(error)}`)
+        }
       }
-    },
-    onSuccess: () => {
-      toast.success(t('Prices synced successfully'))
-      queryClient.invalidateQueries({ queryKey: ['system-options'] })
-
-      setDifferences((prevDiffs) => {
-        const newDiffs = { ...prevDiffs }
-        Object.entries(resolutions).forEach(([model, ratios]) => {
-          Object.keys(ratios).forEach((ratioType) => {
-            if (newDiffs[model]?.[ratioType as RatioType]) {
-              delete newDiffs[model][ratioType as RatioType]
-              if (Object.keys(newDiffs[model]).length === 0) {
-                delete newDiffs[model]
-              }
-            }
-          })
+      if (failures.length) {
+        toast.error(t('Saved {{saved}} setting(s); {{failed}} failed', { saved, failed: failures.length }), {
+          description: failures.join('; '),
         })
-        return newDiffs
+      }
+      // Read back every map: switching billing types also removes incompatible fields.
+      const snapshot = await getSystemOptions()
+      if (!snapshot.success) throw new Error(snapshot.message || t('Failed to sync prices'))
+      queryClient.setQueryData(['system-options'], snapshot)
+      const actual = Object.fromEntries(snapshot.data.map(({ key, value }) => [key, parseJsonRecord<number | string>(value)]))
+      const expected = updates.map(({ key, value }) => [key, parseJsonRecord<number | string>(value)] as const)
+      const confirmed = Object.keys(selected).filter((model) =>
+        expected.every(([key, values]) => actual[key] && actual[key][model] === values[model])
+      )
+      return { confirmed, actual, complete: failures.length === 0 && confirmed.length === Object.keys(selected).length }
+    },
+    onSuccess: ({ confirmed, actual, complete }, { selected }) => {
+      if (complete) toast.success(t('Prices synced successfully'))
+      else toast.warning(t('Some prices remain unsaved. Review and retry.'))
+      setDifferences((prev) => {
+        const next: DifferencesMap = {}
+        Object.entries(prev).forEach(([model, fields]) => {
+          const remaining = { ...fields }
+          Object.keys(remaining).forEach((field) => {
+            const type = field as RatioType
+            if (confirmed.includes(model) && type in selected[model]) delete remaining[type]
+            else if (remaining[type]) remaining[type] = { ...remaining[type], current: actual[optionKeyBySyncField(type)]?.[model] ?? null }
+          })
+          if (Object.keys(remaining).length) next[model] = remaining
+        })
+        return next
       })
-
-      setResolutions({})
+      setResolutions((prev) => {
+        const next = { ...prev }
+        confirmed.forEach((model) => {
+          if (JSON.stringify(next[model]) === JSON.stringify(selected[model])) delete next[model]
+        })
+        return next
+      })
     },
     onError: (error: Error) => {
       toast.error(error.message || t('Failed to sync prices'))
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      await queryClient.invalidateQueries({ queryKey: ['pricing'] })
     },
   })
 
@@ -382,8 +409,8 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
       }))
 
       return new Promise<boolean>((resolve) => {
-        syncMutate(updates, {
-          onSuccess: () => resolve(true),
+        syncMutate({ updates, selected: resolutions }, {
+          onSuccess: (result) => resolve(result.complete),
           onError: () => resolve(false),
         })
       })

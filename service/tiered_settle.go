@@ -28,6 +28,7 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 	cr := float64(usage.PromptTokensDetails.CachedTokens)
 	cc5m := float64(usage.PromptTokensDetails.CacheCreationTokensTotal())
 	cc1h := float64(0)
+	cc12h := float64(0)
 
 	if usage.UsageSemantic == "anthropic" {
 		// Upstreams may report the cache-write total without a full 5m/1h
@@ -54,12 +55,39 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 		inputLen = p + cr + cc5m + cc1h
 	}
 
-	if !isClaudeUsageSemantic {
+	if isClaudeUsageSemantic {
+		// 未单独定价的缓存并入输入；一小时写入按短缓存价格折算。
+		if !usedVars["cr"] {
+			p += cr
+		}
+		if !usedVars["cc1h"] {
+			cc5m += cc1h * types.ClaudeCacheCreation1hMultiplier
+			cc1h = 0
+		}
+		if !usedVars["cc"] {
+			p += cc5m
+			cc5m = 0
+		}
+	} else {
 		if usedVars["cr"] {
 			p -= cr
 		}
+		// 输入总量中的写入只扣一次，旧公式中的长缓存则按短缓存的两倍折算。
+		cc12h = float64(usage.PromptTokensDetails.CacheWrite12hTokens())
+		cc5m -= cc12h
+		ccTokens := cc5m
+		if usedVars["cc12h"] {
+			p -= cc12h
+		} else {
+			ccTokens += cc12h
+			cc5m += cc12h * types.OpenAICacheCreation12hMultiplier
+			cc12h = 0
+		}
 		if usedVars["cc"] {
-			p -= cc5m
+			p -= ccTokens
+		} else {
+			p += cc5m - ccTokens
+			cc5m = 0
 		}
 		if usedVars["cc1h"] {
 			p -= cc1h
@@ -86,16 +114,17 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 	}
 
 	return billingexpr.TokenParams{
-		P:    p,
-		C:    c,
-		Len:  inputLen,
-		CR:   cr,
-		CC:   cc5m,
-		CC1h: cc1h,
-		Img:  img,
-		ImgO: imgO,
-		AI:   ai,
-		AO:   ao,
+		P:     p,
+		C:     c,
+		Len:   inputLen,
+		CR:    cr,
+		CC:    cc5m,
+		CC1h:  cc1h,
+		CC12h: cc12h,
+		Img:   img,
+		ImgO:  imgO,
+		AI:    ai,
+		AO:    ao,
 	}
 }
 

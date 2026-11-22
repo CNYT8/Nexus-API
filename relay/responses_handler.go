@@ -39,11 +39,21 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		responsesReq = req
 	case *dto.OpenAIResponsesCompactionRequest:
 		responsesReq = &dto.OpenAIResponsesRequest{
-			Model:              req.Model,
-			Input:              req.Input,
-			Instructions:       req.Instructions,
-			PreviousResponseID: req.PreviousResponseID,
-			PromptCacheKey:     req.PromptCacheKey,
+			Model:                req.Model,
+			Input:                req.Input,
+			Instructions:         req.Instructions,
+			MaxOutputTokens:      req.MaxOutputTokens,
+			Tools:                req.Tools,
+			Reasoning:            req.Reasoning,
+			Text:                 req.Text,
+			PreviousResponseID:   req.PreviousResponseID,
+			PromptCacheKey:       req.PromptCacheKey,
+			PromptCacheOptions:   req.PromptCacheOptions,
+			PromptCacheRetention: req.PromptCacheRetention,
+			ServiceTier:          req.ServiceTier,
+		}
+		if req.ParallelToolCalls != nil {
+			responsesReq.ParallelToolCalls, _ = common.Marshal(*req.ParallelToolCalls)
 		}
 	default:
 		return types.NewErrorWithStatusCode(
@@ -138,13 +148,15 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 
 	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)
+	usageDto, _ := usage.(*dto.Usage)
 	if newAPIError != nil {
-		// reset status code 重置状态码
+		settlePartialResponseUsage(c, info, usageDto, newAPIError)
 		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
 		return newAPIError
 	}
-
-	usageDto := usage.(*dto.Usage)
+	if usageDto == nil {
+		return types.NewError(fmt.Errorf("Responses adaptor returned no usage"), types.ErrorCodeBadResponse)
+	}
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		originModelName := info.OriginModelName
 		originPriceData := info.PriceData

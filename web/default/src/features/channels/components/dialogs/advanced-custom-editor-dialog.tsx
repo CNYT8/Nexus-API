@@ -41,6 +41,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Tooltip,
@@ -255,6 +256,7 @@ export function AdvancedCustomEditorDialog({
       const base = normalizeAdvancedCustomConfig(baseConfig)
       const template = normalizeAdvancedCustomConfig(templateConfig)
       nextConfig = {
+        ...base,
         advanced_routes: [
           ...(base.advanced_routes || []),
           ...(template.advanced_routes || []),
@@ -516,7 +518,13 @@ function RouteEditor({
 
   const setConverter = (nextConverter: AdvancedCustomConverter) => {
 	if (isModelListRoute && nextConverter !== 'none') return
-    const patch: Partial<AdvancedCustomRoute> = { converter: nextConverter }
+    const patch: Partial<AdvancedCustomRoute> = {
+      converter: nextConverter,
+      pass_through_body_enabled:
+        nextConverter === 'none' && !isModelListRoute
+          ? route.pass_through_body_enabled
+          : false,
+    }
     if (!isAdvancedCustomIncomingPathAllowed(incomingPath, nextConverter)) {
       patch.incoming_path = getDefaultAdvancedCustomIncomingPath(nextConverter)
     }
@@ -531,6 +539,8 @@ function RouteEditor({
     }
     if (resolvedIncomingPath === ADVANCED_CUSTOM_MODEL_LIST_PATH) {
       patch.converter = 'none'
+      patch.models = []
+      patch.pass_through_body_enabled = false
     } else if (
       !isAdvancedCustomIncomingPathAllowed(resolvedIncomingPath, converter)
     ) {
@@ -747,6 +757,34 @@ function RouteEditor({
           <span className='sr-only'>{t('Delete')}</span>
         </Button>
       </div>
+
+      {!isModelListRoute && (
+        <div className='grid gap-4 border-t pt-3 md:grid-cols-2'>
+          <FieldBlock label={t('Client model rules')}>
+            <Textarea
+              aria-label={t('Client model rules')}
+              value={(route.models || []).join('\n')}
+              onChange={(event) => onChange({ models: event.target.value.split('\n') })}
+              onBlur={() => onChange({ models: (route.models || []).map((model) => model.trim()).filter(Boolean) })}
+              rows={2}
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t('One rule per line: exact model name or re:expression. Leave empty for the final fallback.')}
+            </p>
+          </FieldBlock>
+          <FieldBlock label={t('Route body passthrough')}>
+            <Switch
+              aria-label={t('Route body passthrough')}
+              checked={converter === 'none' && route.pass_through_body_enabled === true}
+              disabled={converter !== 'none'}
+              onCheckedChange={(checked) => onChange({ pass_through_body_enabled: checked })}
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t('Only native forwarding supports route body passthrough.')}
+            </p>
+          </FieldBlock>
+        </div>
+      )}
 
       {authMode === 'header' || authMode === 'query' ? (
         <>

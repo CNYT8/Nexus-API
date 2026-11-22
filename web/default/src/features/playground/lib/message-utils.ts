@@ -59,7 +59,7 @@ export function updateCurrentVersionContent(
   const currentVersion = getCurrentVersion(message)
   return {
     ...message,
-    versions: [{ ...currentVersion, content }],
+    versions: [{ ...currentVersion, content }, ...message.versions.slice(1)],
   }
 }
 
@@ -247,9 +247,15 @@ export function updateAssistantMessageWithError(
   errorCode?: string
 ): Message[] {
   return updateLastAssistantMessage(messages, (message) => {
+    const finalized = finalizeMessage(message)
     const updatedMessage = updateCurrentVersionContent(
-      message,
-      `${ERROR_MESSAGES.API_REQUEST_ERROR}: ${errorMessage}`
+      finalized,
+      [
+        getCurrentVersion(finalized).content,
+        `${ERROR_MESSAGES.API_REQUEST_ERROR}: ${errorMessage}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n')
     )
     return {
       ...updatedMessage,
@@ -339,22 +345,12 @@ export function finalizeMessage(
  * Converts stuck loading/streaming messages to stable state
  */
 export function sanitizeMessagesOnLoad(messages: Message[]): Message[] {
-  let targetIndex = -1
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i]
-    if (
-      m?.from === MESSAGE_ROLES.ASSISTANT &&
-      (m?.status === MESSAGE_STATUS.LOADING ||
-        m?.status === MESSAGE_STATUS.STREAMING)
-    ) {
-      targetIndex = i
-      break
-    }
-  }
-
-  if (targetIndex === -1) return messages
-
-  const finalized = finalizeMessage(messages[targetIndex])
+  let changed = false
+  const result = messages.map((message): Message => {
+    if (message.from !== MESSAGE_ROLES.ASSISTANT ||
+      (message.status !== MESSAGE_STATUS.LOADING && message.status !== MESSAGE_STATUS.STREAMING)) return message
+    changed = true
+    const finalized = finalizeMessage(message)
   const hasContent = finalized.versions?.[0]?.content?.trim()
   const hasReasoning = finalized.reasoning?.content?.trim()
 
@@ -374,7 +370,7 @@ export function sanitizeMessagesOnLoad(messages: Message[]): Message[] {
           isReasoningStreaming: false,
         }
 
-  const result = [...messages]
-  result[targetIndex] = sanitized
-  return result
+    return sanitized
+  })
+  return changed ? result : messages
 }

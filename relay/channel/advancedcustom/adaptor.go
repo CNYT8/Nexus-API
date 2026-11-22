@@ -104,10 +104,22 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if err != nil {
 		return nil, err
 	}
-	if converter != dto.AdvancedCustomConverterNone {
+	switch converter {
+	case dto.AdvancedCustomConverterNone:
+		return a.convertOpenAICompatibleResponsesRequest(c, info, request)
+	case responsesToChat:
+		chat, err := channel.ResponsesBridgeRequest(c, &request)
+		if err != nil {
+			return nil, err
+		}
+		return a.convertOpenAICompatibleRequest(c, info, chat)
+	case responsesToClaude:
+		return a.claudeAdaptor.ConvertOpenAIResponsesRequest(c, info, request)
+	case responsesToGemini:
+		return a.geminiAdaptor.ConvertOpenAIResponsesRequest(c, info, request)
+	default:
 		return nil, fmt.Errorf("converter %q does not support OpenAI Responses requests", converter)
 	}
-	return a.convertOpenAICompatibleResponsesRequest(c, info, request)
 }
 
 func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.EmbeddingRequest) (any, error) {
@@ -253,6 +265,12 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	}
 
 	switch a.converter {
+	case responsesToChat:
+		return channel.ResponsesViaChatHandler(c, resp, info)
+	case responsesToClaude:
+		return a.claudeAdaptor.DoResponse(c, resp, info)
+	case responsesToGemini:
+		return a.geminiAdaptor.DoResponse(c, resp, info)
 	case dto.AdvancedCustomConverterNone:
 		return a.doNativeResponse(c, resp, info)
 	case dto.AdvancedCustomConverterAnthropicMessagesToOpenAIChatCompletions,
@@ -319,7 +337,7 @@ func (a *Adaptor) resolve(c *gin.Context, info *relaycommon.RelayInfo) error {
 	}
 
 	incomingPath := incomingRequestPath(c, info)
-	route, ok := config.MatchPath(incomingPath)
+	route, ok := config.MatchPathForModel(incomingPath, info.OriginModelName)
 	if ok {
 		route.Converter = strings.TrimSpace(route.Converter)
 		if route.Converter == "" {
@@ -330,7 +348,7 @@ func (a *Adaptor) resolve(c *gin.Context, info *relaycommon.RelayInfo) error {
 		a.resolved = true
 		return nil
 	}
-	return fmt.Errorf("advanced custom channel does not support request path: %s", incomingPath)
+	return fmt.Errorf("advanced custom channel does not support request path %s for model %s", incomingPath, info.OriginModelName)
 }
 
 func incomingRequestPath(c *gin.Context, info *relaycommon.RelayInfo) string {
@@ -428,7 +446,7 @@ func applyUpstreamPathTemplate(upstreamPath string, info *relaycommon.RelayInfo)
 func shouldUseGeminiStreamURL(converter string, info *relaycommon.RelayInfo) bool {
 	return info != nil &&
 		info.IsStream &&
-		converter == dto.AdvancedCustomConverterOpenAIChatCompletionsToGeminiGenerateContent
+		(converter == dto.AdvancedCustomConverterOpenAIChatCompletionsToGeminiGenerateContent || converter == responsesToGemini)
 }
 
 func useGeminiStreamGenerateContentURL(parsedURL *url.URL) {
@@ -444,6 +462,7 @@ func useGeminiStreamGenerateContentURL(parsedURL *url.URL) {
 
 func shouldApplyClaudeHeaders(converter string, info *relaycommon.RelayInfo) bool {
 	return converter == dto.AdvancedCustomConverterOpenAIChatCompletionsToAnthropicMessages ||
+		converter == responsesToClaude ||
 		(converter == dto.AdvancedCustomConverterNone && info != nil && info.RelayFormat == types.RelayFormatClaude)
 }
 

@@ -16,7 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type SetStateAction } from 'react'
+import { useForm } from 'react-hook-form'
 import { Edit, FileText, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -45,6 +46,7 @@ import { StatusBadge, StatusBadgeList } from '@/components/status-badge'
 import { SettingsSwitchField } from '../../components/settings-form-layout'
 import { SettingsPageActionsPortal } from '../../components/settings-page-context'
 import { SettingsSection } from '../../components/settings-section'
+import { useResetForm } from '../../hooks/use-reset-form'
 import { useUpdateOption } from '../../hooks/use-update-option'
 import { getCacheStats, clearAllCache, clearRuleCache } from './api'
 import { RULE_TEMPLATES, cloneTemplate, makeUniqueName } from './constants'
@@ -94,38 +96,39 @@ export function ChannelAffinitySection(props: Props) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
 
-  const [enabled, setEnabled] = useState(
-    props.defaultValues['channel_affinity_setting.enabled']
-  )
-  const [switchOnSuccess, setSwitchOnSuccess] = useState(
-    props.defaultValues['channel_affinity_setting.switch_on_success']
-  )
-  const [keepOnChannelDisabled, setKeepOnChannelDisabled] = useState(
-    props.defaultValues['channel_affinity_setting.keep_on_channel_disabled']
-  )
-  const [maxEntries, setMaxEntries] = useState(
-    props.defaultValues['channel_affinity_setting.max_entries']
-  )
-  const [defaultTtl, setDefaultTtl] = useState(
-    props.defaultValues['channel_affinity_setting.default_ttl_seconds']
-  )
-  const [rules, setRules] = useState<AffinityRule[]>(() =>
-    parseRules(props.defaultValues['channel_affinity_setting.rules'])
-  )
+  const formDefaults = {
+    enabled: props.defaultValues['channel_affinity_setting.enabled'],
+    switchOnSuccess: props.defaultValues['channel_affinity_setting.switch_on_success'],
+    keepOnChannelDisabled: props.defaultValues['channel_affinity_setting.keep_on_channel_disabled'],
+    maxEntries: props.defaultValues['channel_affinity_setting.max_entries'],
+    defaultTtl: props.defaultValues['channel_affinity_setting.default_ttl_seconds'],
+    jsonText: JSON.stringify(
+      JSON.parse(serializeRules(parseRules(props.defaultValues['channel_affinity_setting.rules']))),
+      null, 2
+    ),
+  }
+  const form = useForm({ defaultValues: formDefaults })
+  const submitForm = useResetForm(form, formDefaults)
+  const { enabled, switchOnSuccess, keepOnChannelDisabled, maxEntries, defaultTtl, jsonText } = form.watch()
+  const setField = <K extends keyof typeof formDefaults>(key: K, value: (typeof formDefaults)[K]) => {
+    form.setValue(key, value, { shouldDirty: true })
+  }
+  const setEnabled = (value: boolean) => setField('enabled', value)
+  const setSwitchOnSuccess = (value: boolean) => setField('switchOnSuccess', value)
+  const setKeepOnChannelDisabled = (value: boolean) => setField('keepOnChannelDisabled', value)
+  const setMaxEntries = (value: number) => setField('maxEntries', value)
+  const setDefaultTtl = (value: number) => setField('defaultTtl', value)
+  const setJsonText = (value: string) => setField('jsonText', value)
+  const rules = parseRules(jsonText)
+  const setRules = (next: SetStateAction<AffinityRule[]>) => {
+    const updated = typeof next === 'function' ? next(parseRules(form.getValues('jsonText'))) : next
+    setJsonText(JSON.stringify(JSON.parse(serializeRules(updated)), null, 2))
+  }
 
   const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
-  const [jsonText, setJsonText] = useState(() =>
-    JSON.stringify(
-      parseRules(props.defaultValues['channel_affinity_setting.rules']).map(
-        ({ id: _, ...r }) => r
-      ),
-      null,
-      2
-    )
-  )
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null)
   const [cacheLoading, setCacheLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const saving = form.formState.isSubmitting || updateOption.isPending
 
   const [ruleEditorOpen, setRuleEditorOpen] = useState(false)
   const [editingRule, setEditingRule] = useState<AffinityRule | null>(null)
@@ -133,31 +136,6 @@ export function ChannelAffinitySection(props: Props) {
   const [clearAllDialogOpen, setClearAllDialogOpen] = useState(false)
   const [clearRuleName, setClearRuleName] = useState<string | null>(null)
   const [fillTemplateDialogOpen, setFillTemplateDialogOpen] = useState(false)
-
-  useEffect(() => {
-    setEnabled(props.defaultValues['channel_affinity_setting.enabled'])
-    setSwitchOnSuccess(
-      props.defaultValues['channel_affinity_setting.switch_on_success']
-    )
-    setKeepOnChannelDisabled(
-      props.defaultValues['channel_affinity_setting.keep_on_channel_disabled']
-    )
-    setMaxEntries(props.defaultValues['channel_affinity_setting.max_entries'])
-    setDefaultTtl(
-      props.defaultValues['channel_affinity_setting.default_ttl_seconds']
-    )
-    const parsed = parseRules(
-      props.defaultValues['channel_affinity_setting.rules']
-    )
-    setRules(parsed)
-    setJsonText(
-      JSON.stringify(
-        parsed.map(({ id: _, ...r }) => r),
-        null,
-        2
-      )
-    )
-  }, [props.defaultValues])
 
   const refreshCache = useCallback(async () => {
     setCacheLoading(true)
@@ -202,9 +180,9 @@ export function ChannelAffinitySection(props: Props) {
     }
   }
 
-  const handleSave = async () => {
+  const handleSave = submitForm(async ({ enabled, switchOnSuccess, keepOnChannelDisabled, maxEntries, defaultTtl, jsonText }) => {
     let rulesJson: string
-    if (editMode === 'json') {
+    {
       try {
         const parsed = JSON.parse(jsonText)
         if (!Array.isArray(parsed)) {
@@ -216,12 +194,9 @@ export function ChannelAffinitySection(props: Props) {
         toast.error(t('Invalid rules JSON format'))
         return
       }
-    } else {
-      rulesJson = serializeRules(rules)
     }
 
-    setSaving(true)
-    try {
+    {
       const updates: { key: string; value: string }[] = []
 
       if (enabled !== props.defaultValues['channel_affinity_setting.enabled'])
@@ -284,16 +259,9 @@ export function ChannelAffinitySection(props: Props) {
         return
       }
 
-      for (const u of updates) {
-        await updateOption.mutateAsync(u)
-      }
-      toast.success(t('Saved successfully'))
-    } catch {
-      toast.error(t('Failed to save'))
-    } finally {
-      setSaving(false)
+      await updateOption.saveOptions(updates)
     }
-  }
+  })
 
   const handleRuleSave = (rule: AffinityRule) => {
     setRules((prev) => {

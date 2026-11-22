@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AxiosRequestConfig } from 'axios'
 import {
   createFileRoute,
@@ -27,9 +27,12 @@ import {
 import i18next from 'i18next'
 import { toast } from 'sonner'
 import { useAuthStore, type AuthUser } from '@/stores/auth-store'
-import { api, getSelf } from '@/lib/api'
+import { api } from '@/lib/api'
+import { AuthLayout } from '@/features/auth/auth-layout'
+import { OtpForm } from '@/features/auth/otp/components/otp-form'
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
 import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
+import { consumeOAuthReturn } from '@/features/auth/lib/oauth-return-target'
 import {
   getOAuthSessionStorage,
   resolveOAuthCallbackMode,
@@ -37,6 +40,7 @@ import {
 
 type OAuthRequestConfig = AxiosRequestConfig & {
   skipBusinessError?: boolean
+  skipErrorHandler?: boolean
 }
 
 function OAuthCallback() {
@@ -48,17 +52,34 @@ function OAuthCallback() {
     code?: string
     state?: string
     redirect?: string
+    error?: string
   }
+  const executed = useRef(false)
+  const bindingStateMatches = useRef(true)
+  const [verificationTarget, setVerificationTarget] = useState<string | null>(null)
   const callbackState = search.state ?? ''
-  const mode =
-    typeof window === 'undefined'
-      ? 'login'
-      : resolveOAuthCallbackMode(provider, callbackState, {
-          opener: window.opener,
-          storage: getOAuthSessionStorage(window),
-        })
+  const [mode] = useState<'login' | 'bind'>(() => {
+    if (typeof window === 'undefined') return 'login'
+    const storage = getOAuthSessionStorage(window)
+    // The tab-local marker remains authoritative if the opener was closed.
+    // A missing state is handled as failure below, never as a successful bind.
+    try {
+      const markedState = storage?.getItem(`oauth_bind_flow:${provider}`)
+      if (markedState) {
+        bindingStateMatches.current = markedState === callbackState
+        return 'bind'
+      }
+    } catch { /* Keep authorization usable when storage is denied. */ }
+    return resolveOAuthCallbackMode(provider, callbackState, { opener: window.opener, storage })
+  })
 
   useEffect(() => {
+    if (executed.current) return
+    executed.current = true
+    const returnTarget = consumeOAuthReturn(callbackState)
+    try {
+      window.sessionStorage.removeItem(`oauth_bind_flow:${provider}`)
+    } catch { /* Storage denial must not block the callback. */ }
     ;(async () => {
       const safeNavigate = (target: string) => {
         navigate({ to: target as never, replace: true })
@@ -79,11 +100,6 @@ function OAuthCallback() {
         }
       }
 
-      if (!search?.code) {
-        toast.error(i18next.t('Missing code'))
-        safeNavigate('/sign-in')
-        return
-      }
       const isBindingFlow = mode === 'bind'
       const notifyBindingResult = (status: 'success' | 'error') => {
         if (typeof window === 'undefined') return
@@ -107,39 +123,13 @@ function OAuthCallback() {
         window.close()
         setTimeout(() => {
           if (!window.closed) {
-            window.location.replace('/_authenticated/profile/')
+            window.location.replace('/profile')
           }
         }, 200)
       }
 
-      const finalizeLogin = async (): Promise<boolean> => {
-        try {
-          const selfResponse = (await getSelf()) as {
-            success?: boolean
-            data?: AuthUser | null
-          }
-          if (selfResponse?.success && selfResponse.data) {
-            useAuthStore.getState().auth.setUser(selfResponse.data)
-            try {
-              if (
-                typeof window !== 'undefined' &&
-                selfResponse.data?.id != null
-              ) {
-                window.localStorage.setItem('uid', String(selfResponse.data.id))
-              }
-            } catch (_error) {
-              void _error
-            }
-            return true
-          }
-        } catch (_error) {
-          void _error
-        }
-        return false
-      }
-
-      const redirectAfterLogin = (target?: string) => {
-        const to = target || search?.redirect || '/dashboard'
+      const redirectAfterLogin = () => {
+        const to = returnTarget || '/dashboard'
         safeNavigate(to)
         toast.success(i18next.t('Signed in successfully!'))
       }
@@ -147,40 +137,52 @@ function OAuthCallback() {
       const handleBindingFailure = (message: string) => {
         notifyBindingResult('error')
         toast.error(message)
+        closeBindingWindow()
       }
 
-      const handleLoginFailure = async (message: string) => {
-        if (await finalizeLogin()) {
-          redirectAfterLogin()
-          return
-        }
+      const handleLoginFailure = (message: string) => {
         toast.error(message)
-        safeNavigate('/sign-in')
+        safeNavigate(returnTarget ? `/sign-in?${new URLSearchParams({ redirect: returnTarget })}` : '/sign-in')
+      }
+
+      if (!search.code || !callbackState || search.error || (isBindingFlow && !bindingStateMatches.current)) {
+        if (isBindingFlow) handleBindingFailure(i18next.t('授权失败'))
+        else handleLoginFailure(i18next.t('授权失败'))
+        return
       }
 
       try {
         const config: OAuthRequestConfig = {
           params: { code: search.code, state: search.state },
           skipBusinessError: true,
+          skipErrorHandler: true,
         }
-        const res = await api.get(`/api/oauth/${provider}`, config)
+        const res = await api.get(`/api/oauth/${encodeURIComponent(provider)}`, config)
         if (res?.data?.success) {
           const { message } = res.data
           const loginUser = (res.data?.data ?? null) as AuthUser | null
           // Check if this is a bind operation
-          if (message === 'bind') {
+          if (message === 'bind' || res.data?.data?.action === 'bind') {
             toast.success(i18next.t('Binding successful!'))
             notifyBindingResult('success')
             if (isBindingFlow) {
               // Close the callback window if we opened a new tab for binding
               closeBindingWindow()
             } else {
-              safeNavigate('/_authenticated/profile/')
+              safeNavigate('/profile')
             }
             return
           }
-          // Otherwise it's a login, use payload user if available
-          if (loginUser) {
+          if (isBindingFlow) {
+            handleBindingFailure(i18next.t('授权失败'))
+            return
+          }
+          if (res.data.data?.require_2fa === true) {
+            setVerificationTarget(returnTarget || '/dashboard')
+            return
+          }
+          // Never treat an existing session as proof of this OAuth attempt.
+          if (loginUser?.id != null) {
             useAuthStore.getState().auth.setUser(loginUser)
             try {
               if (typeof window !== 'undefined' && loginUser.id != null) {
@@ -192,24 +194,10 @@ function OAuthCallback() {
             redirectAfterLogin()
             return
           }
-          if (await finalizeLogin()) {
-            redirectAfterLogin()
-            return
-          }
-          toast.error(res?.data?.message || i18next.t('OAuth failed'))
-          safeNavigate('/sign-in')
+          handleLoginFailure(res?.data?.message || i18next.t('授权失败'))
           return
         }
-        const message = res?.data?.message || 'OAuth failed'
-        if (!res?.data?.success && !isBindingFlow) {
-          // When logging in with an already bound GitHub account, backend may return this message
-          if (message === '该 GitHub 账户已被绑定') {
-            if (await finalizeLogin()) {
-              redirectAfterLogin()
-              return
-            }
-          }
-        }
+        const message = res?.data?.message || i18next.t('授权失败')
         if (isBindingFlow) {
           handleBindingFailure(message)
         } else {
@@ -223,7 +211,7 @@ function OAuthCallback() {
           (error as { response?: { data?: { message?: string } } }).response
             ?.data?.message) ??
           (error instanceof Error ? error.message : undefined) ??
-          'OAuth failed') as string
+          i18next.t('授权失败')) as string
 
         if (isBindingFlow) {
           handleBindingFailure(message)
@@ -235,6 +223,19 @@ function OAuthCallback() {
     })()
   }, [mode, navigate, provider, search])
 
+  if (verificationTarget) {
+    return (
+      <AuthLayout>
+        <div className='w-full space-y-6'>
+          <h2 className='text-center text-2xl font-semibold'>{i18next.t('请完成双重验证以继续登录')}</h2>
+          <OtpForm
+            onVerified={() => window.location.replace(verificationTarget)}
+            onVerificationBack={() => window.location.replace(`/sign-in?${new URLSearchParams({ redirect: verificationTarget })}`)}
+          />
+        </div>
+      </AuthLayout>
+    )
+  }
   return <OAuthCallbackScreen provider={provider} mode={mode} />
 }
 

@@ -8,7 +8,10 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -39,6 +42,27 @@ func ShouldCopyUpstreamHeader(c *gin.Context, k string, v []string) bool {
 		return false
 	}
 	return true
+}
+
+// WriteRelayJSON 在计量和协议转换完成后执行输出策略，避免隐藏内容改变 usage。
+// 未开启思考剥离时保持原有出口行为，敏感词检查仍由原调用路径负责。
+func WriteRelayJSON(c *gin.Context, src *http.Response, data []byte, info *relaycommon.RelayInfo) *types.NewAPIError {
+	if info != nil && info.ThinkingProcessStrip {
+		matcher := relaycommon.NewOutputSensitiveMatcherForConfig(info.OutputSensitiveConfig)
+		cleaned, matched, _, err := relaycommon.SanitizeOutputSensitiveJSONWithThinkingPolicy(data, matcher, true)
+		if err != nil {
+			return types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		}
+		if matched {
+			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "output_sensitive")
+			if info.OutputSensitiveConfig.Action == "error" {
+				return types.NewError(relaycommon.OutputSensitiveError(), types.ErrorCodeSensitiveWordsDetected, types.ErrOptionWithSkipRetry())
+			}
+		}
+		data = cleaned
+	}
+	IOCopyBytesGracefully(c, src, data)
+	return nil
 }
 
 func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {

@@ -466,13 +466,20 @@ func TestGenericQuotaMutationMigratesToSourceLedger(t *testing.T) {
 	require.NoError(t, DB.Where("user_id = ? AND accounting_kind = ?", user.Id, "adjustment").First(&adjustment).Error)
 	assert.EqualValues(t, 4, adjustment.WalletQuota)
 
-	// A queued batch delta from a pre-migration writer must still not bypass
-	// the ledger, while usage statistics remain writable.
-	updateUserQuotaUsedQuotaAndRequestCount(user.Id, 25, 3, 1)
+	// 旧队列差额必须经来源账本原子入账，不能丢弃，也不能生成返利资格。
+	retryable, err := updateUserQuotaUsedQuotaAndRequestCount(user.Id, 25, 3, 1)
+	require.NoError(t, err)
+	assert.False(t, retryable)
 	require.NoError(t, DB.Select("quota", "used_quota", "request_count").First(&refreshed, user.Id).Error)
-	assert.Equal(t, 6, refreshed.Quota)
+	assert.Equal(t, 31, refreshed.Quota)
 	assert.Equal(t, 3, refreshed.UsedQuota)
 	assert.Equal(t, 1, refreshed.RequestCount)
+	var batchLot WalletCreditLot
+	require.NoError(t, DB.Where("user_id = ? AND id <> ?", user.Id, giftLot.ID).First(&batchLot).Error)
+	assert.Equal(t, WalletCreditSourcePromotion, batchLot.Source)
+	assert.Equal(t, "compensation", batchLot.Component)
+	assert.False(t, batchLot.Eligible)
+	assert.EqualValues(t, 25, batchLot.QuotaRemaining)
 }
 
 func TestGenericQuotaMutationLegacyStillWorks(t *testing.T) {
@@ -490,7 +497,7 @@ func TestGenericQuotaMutationLegacyStillWorks(t *testing.T) {
 func TestAdminGrantConsumptionProducesRebate(t *testing.T) {
 	truncateTables(t)
 	enableCreditSourceBaseline(t)
-	useRebateRewardSetting(t, rebateRewardSetting())
+	useRebateRewardSetting(t, rebateRewardSetting(), DB)
 	originalQuotaPerUnit := common.QuotaPerUnit
 	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
 	common.QuotaPerUnit = 100

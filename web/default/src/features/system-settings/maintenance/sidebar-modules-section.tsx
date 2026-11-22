@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import {
@@ -37,6 +37,7 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { useResetForm } from '../hooks/use-reset-form'
 import { useStatus } from '@/hooks/use-status'
 import {
   SIDEBAR_MODULES_DEFAULT,
@@ -144,9 +145,7 @@ export function SidebarModulesSection({
     defaultValues: formDefaults,
   })
 
-  useEffect(() => {
-    form.reset(formDefaults)
-  }, [formDefaults, form])
+  const submitForm = useResetForm(form, formDefaults)
 
   const onSubmit = async (values: SidebarFormValues) => {
     const serialized = serializeSidebarModulesAdmin(values)
@@ -154,10 +153,7 @@ export function SidebarModulesSection({
       return
     }
 
-    await updateOption.mutateAsync({
-      key: 'SidebarModulesAdmin',
-      value: serialized,
-    })
+    await updateOption.saveOptions([{ key: 'SidebarModulesAdmin', value: serialized }])
   }
 
   const resetToDefault = () => {
@@ -169,9 +165,9 @@ export function SidebarModulesSection({
   return (
     <SettingsSection title={t('Sidebar modules')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             onReset={resetToDefault}
             isSaving={updateOption.isPending}
             resetLabel='Reset to default'

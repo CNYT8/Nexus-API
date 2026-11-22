@@ -42,6 +42,7 @@ import {
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 import ParamOverrideEntry from '../../components/table/usage-logs/components/ParamOverrideEntry';
+import { getCacheWriteBreakdown } from '../../components/table/usage-logs/cacheTokens';
 
 const LOG_STAT_DEFER_MS = 350;
 const LOG_STAT_CACHE_MS = 30 * 1000;
@@ -171,7 +172,9 @@ export const useLogsData = () => {
   };
 
   // Column visibility state
-  const [visibleColumns, setVisibleColumns] = useState(getInitialVisibleColumns);
+  const [visibleColumns, setVisibleColumns] = useState(
+    getInitialVisibleColumns,
+  );
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [billingDisplayMode, setBillingDisplayMode] = useState(
     getInitialBillingDisplayMode,
@@ -447,7 +450,10 @@ export const useLogsData = () => {
         }
       }
 
-      if (isAdminUser && (logs[i].type === 0 || logs[i].type === 2 || logs[i].type === 6)) {
+      if (
+        isAdminUser &&
+        (logs[i].type === 0 || logs[i].type === 2 || logs[i].type === 6)
+      ) {
         expandDataLocal.push({
           key: t('渠道信息'),
           value: `${logs[i].channel} - ${logs[i].channel_name || '[未知]'}`,
@@ -489,18 +495,30 @@ export const useLogsData = () => {
           value: other.cache_tokens,
         });
       }
-      if (other?.cache_creation_tokens > 0) {
-        expandDataLocal.push({
-          key: `${t('缓存写入')} Tokens`,
-          value: other.cache_creation_tokens,
-        });
+      const cacheWrite = getCacheWriteBreakdown(other);
+      const cacheWriteRows = [
+        ['', cacheWrite.ordinary],
+        ['5m', cacheWrite.fiveMinutes],
+        ['1h', cacheWrite.oneHour],
+        ['12h', cacheWrite.twelveHours],
+      ];
+      for (const [ttl, tokens] of cacheWriteRows) {
+        if (tokens > 0) {
+          expandDataLocal.push({
+            key: `${t('缓存写入')}${ttl ? ` (${ttl})` : ''} Tokens`,
+            value: tokens,
+          });
+        }
       }
       if (logs[i].type === 2) {
         if (other?.billing_mode !== 'tiered_expr') {
           expandDataLocal.push({
             key: t('日志详情'),
             value: other?.claude
-              ? renderClaudeLogContent({ ...other, displayMode: billingDisplayMode })
+              ? renderClaudeLogContent({
+                  ...other,
+                  displayMode: billingDisplayMode,
+                })
               : renderLogContent({ ...other, displayMode: billingDisplayMode }),
           });
         }
@@ -510,7 +528,8 @@ export const useLogsData = () => {
             value: logs[i].content,
           });
         }
-        const rejectReason = other?.admin_info?.reject_reason ?? other?.reject_reason;
+        const rejectReason =
+          other?.admin_info?.reject_reason ?? other?.reject_reason;
         if (isAdminUser && rejectReason) {
           expandDataLocal.push({
             key: t('拦截原因'),
@@ -599,7 +618,14 @@ export const useLogsData = () => {
           expandDataLocal.push({
             key: t('失败原因'),
             value: (
-              <div style={{ maxWidth: 600, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.6 }}>
+              <div
+                style={{
+                  maxWidth: 600,
+                  whiteSpace: 'normal',
+                  wordBreak: 'break-word',
+                  lineHeight: 1.6,
+                }}
+              >
                 {other.reason}
               </div>
             ),
@@ -616,7 +642,8 @@ export const useLogsData = () => {
         const ss = other.stream_status;
         const isOk = ss.status === 'ok';
         const statusLabel = isOk ? '✓ ' + t('正常') : '✗ ' + t('异常');
-        let streamValue = statusLabel + ' (' + (ss.end_reason || 'unknown') + ')';
+        let streamValue =
+          statusLabel + ' (' + (ss.end_reason || 'unknown') + ')';
         if (ss.error_count > 0) {
           streamValue += ` [${t('软错误')}: ${ss.error_count}]`;
         }
@@ -631,7 +658,14 @@ export const useLogsData = () => {
           expandDataLocal.push({
             key: t('流错误详情'),
             value: (
-              <div style={{ maxWidth: 600, whiteSpace: 'pre-line', wordBreak: 'break-word', lineHeight: 1.6 }}>
+              <div
+                style={{
+                  maxWidth: 600,
+                  whiteSpace: 'pre-line',
+                  wordBreak: 'break-word',
+                  lineHeight: 1.6,
+                }}
+              >
                 {ss.errors.join('\n')}
               </div>
             ),
@@ -836,19 +870,22 @@ export const useLogsData = () => {
       url = `/api/log/self/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}&request_id=${request_id}`;
     }
     url = encodeURI(url);
-    const res = await API.get(url);
-    const { success, message, data } = res.data;
-    if (success) {
-      const newPageData = data.items;
-      setActivePage(data.page);
-      setPageSize(data.page_size);
-      setLogCount(data.total);
-
-      setLogsFormat(newPageData);
-    } else {
-      showError(message);
+    try {
+      const res = await API.get(url);
+      const { success, message, data } = res.data;
+      if (success) {
+        setActivePage(data.page);
+        setPageSize(data.page_size);
+        setLogCount(data.total);
+        setLogsFormat(data.items || []);
+      } else {
+        showError(message);
+      }
+    } catch (error) {
+      showError(error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   // Page handlers
@@ -861,7 +898,7 @@ export const useLogsData = () => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
-    loadLogs(activePage, size)
+    loadLogs(1, size)
       .then()
       .catch((reason) => {
         showError(reason);

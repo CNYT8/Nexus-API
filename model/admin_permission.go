@@ -88,6 +88,14 @@ func NormalizeAdminPermissionConfig(config AdminPermissionConfig) AdminPermissio
 		if value, ok := config[module.Key]; ok {
 			normalized[module.Key] = value
 		}
+		// Missing actions inherit the historical module switch. Explicit actions
+		// never override a disabled module, and write does not imply read.
+		for _, action := range []string{"read", "write"} {
+			key := module.Key + ":" + action
+			if value, ok := config[key]; ok {
+				normalized[key] = value
+			}
+		}
 	}
 	return normalized
 }
@@ -96,11 +104,43 @@ func CountEnabledAdminPermissions(config AdminPermissionConfig) int {
 	enabled := 0
 	normalized := NormalizeAdminPermissionConfig(config)
 	for _, module := range adminPermissionModules {
-		if normalized[module.Key] {
+		if normalized.Allows(module.Key, "read") || normalized.Allows(module.Key, "write") {
 			enabled++
 		}
 	}
 	return enabled
+}
+
+// Allows preserves legacy module booleans while enforcing explicit action grants.
+func (config AdminPermissionConfig) Allows(module, action string) bool {
+	if action != "read" && action != "write" {
+		return false
+	}
+	for _, known := range adminPermissionModules {
+		if known.Key != module {
+			continue
+		}
+		enabled, exists := config[module]
+		if !exists {
+			enabled = known.Enabled
+		}
+		if !enabled {
+			return false
+		}
+		if allowed, exists := config[module+":"+action]; exists {
+			return allowed
+		}
+		return enabled
+	}
+	return false
+}
+
+func IsAdminPermissionActionAllowed(userId int, module, action string) (bool, error) {
+	config, err := GetAdminPermissionConfigByUserId(userId)
+	if err != nil {
+		return false, err
+	}
+	return config.Allows(module, action), nil
 }
 
 func ValidateAdminPermissionConfig(config AdminPermissionConfig) error {
@@ -137,10 +177,25 @@ func SetAdminPermissionConfig(user *User, config AdminPermissionConfig) error {
 		return err
 	}
 
-	setting := user.GetSetting()
-	setting.AdminPermissions = serializeAdminPermissionConfig(config)
-	user.SetSetting(setting)
-	return UpdateUserSetting(user.Id, user.Setting)
+	if err := PatchUserSetting(user.Id, map[string]any{
+		"admin_permissions": serializeAdminPermissionConfig(config),
+	}); err != nil {
+		return err
+	}
+	return DB.First(user, user.Id).Error
+}
+
+func adminPermissionsChanged(before, after string) bool {
+	oldUser, newUser := User{Setting: before}, User{Setting: after}
+	oldConfig, newConfig := GetAdminPermissionConfig(&oldUser), GetAdminPermissionConfig(&newUser)
+	for _, module := range adminPermissionModules {
+		if oldConfig[module.Key] != newConfig[module.Key] ||
+			oldConfig.Allows(module.Key, "read") != newConfig.Allows(module.Key, "read") ||
+			oldConfig.Allows(module.Key, "write") != newConfig.Allows(module.Key, "write") {
+			return true
+		}
+	}
+	return false
 }
 
 func IsAdminPermissionAllowed(userId int, module string) (bool, error) {
@@ -167,12 +222,7 @@ func parseAdminPermissionConfig(value string) AdminPermissionConfig {
 		return config
 	}
 
-	for _, module := range adminPermissionModules {
-		if value, ok := parsed[module.Key]; ok {
-			config[module.Key] = value
-		}
-	}
-	return config
+	return NormalizeAdminPermissionConfig(parsed)
 }
 
 func serializeAdminPermissionConfig(config AdminPermissionConfig) string {
@@ -208,10 +258,10 @@ func AdminPermissionSidebarConfig(config AdminPermissionConfig) map[string]bool 
 		"setting": false,
 	}
 	for _, module := range adminPermissionModules {
-		adminConfig[module.Key] = normalized[module.Key]
+		adminConfig[module.Key] = normalized.Allows(module.Key, "read") || normalized.Allows(module.Key, "write")
 	}
-	adminConfig["deployment"] = normalized[AdminPermissionModels]
-	adminConfig["ticket_admin"] = normalized[AdminPermissionTicket]
+	adminConfig["deployment"] = adminConfig[AdminPermissionModels]
+	adminConfig["ticket_admin"] = adminConfig[AdminPermissionTicket]
 	return adminConfig
 }
 

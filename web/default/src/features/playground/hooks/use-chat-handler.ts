@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { sendChatCompletion } from '../api'
 import { MESSAGE_STATUS, ERROR_MESSAGES } from '../constants'
@@ -28,12 +28,20 @@ import {
   finalizeMessage,
 } from '../lib'
 import type { Message, PlaygroundConfig, ParameterEnabled } from '../types'
+import type { AccountSession } from './use-account-session'
 import { useStreamRequest } from './use-stream-request'
 
 interface UseChatHandlerOptions {
   config: PlaygroundConfig
   parameterEnabled: ParameterEnabled
-  onMessageUpdate: (updater: (prev: Message[]) => Message[]) => void
+  onMessageUpdate: (
+    updater: Message[] | ((prev: Message[]) => Message[])
+  ) => void
+  session: AccountSession
+}
+
+interface ChatRequest {
+  controller: AbortController
 }
 
 /**
@@ -43,8 +51,47 @@ export function useChatHandler({
   config,
   parameterEnabled,
   onMessageUpdate,
+  session,
 }: UseChatHandlerOptions) {
-  const { sendStreamRequest, stopStream, isStreaming } = useStreamRequest()
+  const { sendStreamRequest, stopStream, flushStream } = useStreamRequest(session.userId)
+  const activeRequestRef = useRef<ChatRequest | null>(null)
+  const mountedRef = useRef(true)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const isActive = useCallback(
+    (request: ChatRequest) =>
+      mountedRef.current &&
+      activeRequestRef.current === request &&
+      session.isCurrent(),
+    [session]
+  )
+  const canSend = useCallback(
+    () =>
+      mountedRef.current && session.isCurrent() && !activeRequestRef.current,
+    [session]
+  )
+  const release = useCallback(
+    (request: ChatRequest) => {
+      if (activeRequestRef.current !== request) return
+      activeRequestRef.current = null
+      request.controller.abort()
+      stopStream()
+      if (mountedRef.current) setIsGenerating(false)
+    },
+    [stopStream]
+  )
+  useEffect(() => {
+    mountedRef.current = true
+    const cancel = () => {
+      const request = activeRequestRef.current
+      if (request) release(request)
+    }
+    const unsubscribe = session.onInvalidate(cancel)
+    return () => {
+      mountedRef.current = false
+      unsubscribe()
+      cancel()
+    }
+  }, [session, release])
 
   // Handle stream update
   const handleStreamUpdate = useCallback(
@@ -102,18 +149,29 @@ export function useChatHandler({
 
   // Send streaming chat request
   const sendStreamingChat = useCallback(
-    (messages: Message[]) => {
+    (messages: Message[], request: ChatRequest) => {
       const payload = buildChatCompletionPayload(
         messages,
         config,
         parameterEnabled
       )
-      sendStreamRequest(
+      const started = sendStreamRequest(
         payload,
-        handleStreamUpdate,
-        handleStreamComplete,
-        handleStreamError
+        (type, chunk) => {
+          if (isActive(request)) handleStreamUpdate(type, chunk)
+        },
+        () => {
+          if (!isActive(request)) return
+          handleStreamComplete()
+          release(request)
+        },
+        (error, code) => {
+          if (!isActive(request)) return
+          handleStreamError(error, code)
+          release(request)
+        }
       )
+      if (!started) throw new Error(ERROR_MESSAGES.STREAM_START_ERROR)
     },
     [
       config,
@@ -122,22 +180,28 @@ export function useChatHandler({
       handleStreamUpdate,
       handleStreamComplete,
       handleStreamError,
+      isActive,
+      release,
     ]
   )
 
   // Send non-streaming chat request
   const sendNonStreamingChat = useCallback(
-    async (messages: Message[]) => {
-      const payload = buildChatCompletionPayload(
-        messages,
-        config,
-        parameterEnabled
-      )
-
+    async (messages: Message[], request: ChatRequest) => {
       try {
-        const response = await sendChatCompletion(payload)
+        const payload = buildChatCompletionPayload(
+          messages,
+          config,
+          parameterEnabled
+        )
+        const response = await sendChatCompletion(
+          payload,
+          session.userId,
+          request.controller.signal
+        )
+        if (!isActive(request)) return
         const choice = response.choices?.[0]
-        if (!choice) return
+        if (!choice) throw new Error(ERROR_MESSAGES.API_REQUEST_ERROR)
 
         onMessageUpdate((prev) =>
           updateLastAssistantMessage(prev, (message) => ({
@@ -149,14 +213,16 @@ export function useChatHandler({
                     ...message.versions[0],
                     content: choice.message?.content || '',
                   },
+                  ...message.versions.slice(1),
                 ],
               },
-              choice.message?.reasoning_content
+              choice.message?.reasoning_content || choice.message?.reasoning
             ),
             status: MESSAGE_STATUS.COMPLETE,
           }))
         )
       } catch (error: unknown) {
+        if (!isActive(request)) return
         const err = error as {
           response?: {
             data?: { message?: string; error?: { code?: string } }
@@ -169,26 +235,60 @@ export function useChatHandler({
             ERROR_MESSAGES.API_REQUEST_ERROR,
           err?.response?.data?.error?.code || undefined
         )
+      } finally {
+        release(request)
       }
     },
-    [config, parameterEnabled, onMessageUpdate, handleStreamError]
+    [
+      config,
+      parameterEnabled,
+      onMessageUpdate,
+      handleStreamError,
+      session,
+      isActive,
+      release,
+    ]
   )
 
   // Send chat request (stream or non-stream based on config)
   const sendChat = useCallback(
     (messages: Message[]) => {
-      if (config.stream) {
-        sendStreamingChat(messages)
-      } else {
-        sendNonStreamingChat(messages)
+      if (!canSend()) return false
+      const request = { controller: new AbortController() }
+      activeRequestRef.current = request
+      setIsGenerating(true)
+      try {
+        onMessageUpdate(messages)
+        if (config.stream) {
+          sendStreamingChat(messages, request)
+        } else {
+          void sendNonStreamingChat(messages, request)
+        }
+      } catch {
+        if (isActive(request))
+          handleStreamError(ERROR_MESSAGES.STREAM_START_ERROR)
+        release(request)
       }
+      return true
     },
-    [config.stream, sendStreamingChat, sendNonStreamingChat]
+    [
+      canSend,
+      config.stream,
+      onMessageUpdate,
+      sendStreamingChat,
+      sendNonStreamingChat,
+      isActive,
+      handleStreamError,
+      release,
+    ]
   )
 
   // Stop generation
   const stopGeneration = useCallback(() => {
-    stopStream()
+    const request = activeRequestRef.current
+    if (!request || !isActive(request)) return
+    flushStream()
+    release(request)
     onMessageUpdate((prev) =>
       updateLastAssistantMessage(prev, (message) =>
         message.status === MESSAGE_STATUS.LOADING ||
@@ -197,11 +297,12 @@ export function useChatHandler({
           : message
       )
     )
-  }, [stopStream, onMessageUpdate])
+  }, [release, isActive, onMessageUpdate, flushStream])
 
   return {
     sendChat,
     stopGeneration,
-    isGenerating: isStreaming,
+    isGenerating,
+    canSend,
   }
 }

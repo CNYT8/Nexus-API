@@ -5,15 +5,136 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestToolUsageAuthoritativeCountsDoNotDuplicateLegacy(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("claude_web_search_requests", 9)
+	ctx.Set("google_search_requests", 9)
+	ctx.Set("image_generation_call", true)
+	ctx.Set("image_generation_call_quality", "low")
+	ctx.Set("image_generation_call_size", "1024x1024")
+	previousUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500000
+	t.Cleanup(func() { common.QuotaPerUnit = previousUnit })
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "billing-test-model",
+		PriceData:       types.PriceData{GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
+		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+			"web_search": {CallCount: 20},
+		}},
+	}
+	usage := &dto.Usage{ToolUsage: map[string]int{"web_search": 2, "google_search": 3, "image_generation": 2}}
+	quota, items := CalculateToolUsageSurcharge(ctx, info, usage)
+	// $0.02 web + $0.042 grounding + $0.022 historical image quality price.
+	require.Equal(t, int64(42000), quota.Round(0).IntPart())
+	require.Len(t, items, 3)
+	usage.ToolUsage = map[string]int{}
+	quota, items = CalculateToolUsageSurcharge(ctx, info, usage)
+	require.True(t, quota.IsZero())
+	require.Empty(t, items)
+}
+
+func TestResponsesToolSurchargePreservesMemberRatioAndCallPrice(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	setting := config.GlobalConfig.Get("tool_price_setting").(*operation_setting.ToolPriceSetting)
+	previousPrices, previousUnit := setting.Prices, common.QuotaPerUnit
+	setting.Prices = map[string]float64{"lookup:billing-model": 6, "image_generation:billing-model": 20}
+	operation_setting.RebuildToolPriceIndex()
+	common.QuotaPerUnit = 500000
+	t.Cleanup(func() {
+		setting.Prices = previousPrices
+		operation_setting.RebuildToolPriceIndex()
+		common.QuotaPerUnit = previousUnit
+	})
+	ctx.Set("image_generation_call", true)
+	ctx.Set("image_generation_call_count", 99)
+	ctx.Set("image_generation_call_quality", "high")
+	ctx.Set("image_generation_call_size", "1024x1536")
+	ctx.Set("claude_web_search_requests", 99)
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "billing-model",
+		PriceData: types.PriceData{
+			ModelRatio: 1, CompletionRatio: 1,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0.5},
+		},
+		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+			"lookup": {CallCount: 99}, "image_generation": {CallCount: 99},
+		}},
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode: "tiered_expr", ExprString: "call(2)",
+			ExprHash:   billingexpr.ExprHashString("call(2)"),
+			GroupRatio: 0.5, QuotaPerUnit: 500000,
+		},
+		StartTime: time.Now(),
+	}
+	usage := &dto.Usage{PromptTokens: 10, CompletionTokens: 1, ToolUsage: map[string]int{"lookup": 2, "image_generation": 1}}
+	summary := calculateTextQuotaSummary(ctx, info, usage)
+	// ($6/1K * 2 + $20/1K) * member ratio 0.5 * 500000 = 8000.
+	require.Equal(t, int64(8000), summary.ToolCallSurchargeQuota.IntPart())
+	require.Equal(t, []ToolSurchargeItem{
+		{Name: "image_generation", Count: 1, Price: 20},
+		{Name: "lookup", Count: 2, Price: 6},
+	}, summary.ToolSurchargeItems)
+	result, err := billingexpr.ComputeTieredQuota(info.TieredBillingSnapshot, billingexpr.TokenParams{P: 10, C: 1})
+	require.NoError(t, err)
+	require.Equal(t, 500000, result.ActualQuotaAfterGroup)
+	quota := composeTieredTextQuota(info, summary, result.ActualQuotaAfterGroup, &result)
+	require.Equal(t, 508000, quota)
+	require.Equal(t, quota, composeTieredTextQuota(info, summary, result.ActualQuotaAfterGroup, &result))
+	usage.ToolUsage = map[string]int{}
+	empty := calculateTextQuotaSummary(ctx, info, usage)
+	require.True(t, empty.ToolCallSurchargeQuota.IsZero())
+	require.Equal(t, 500000, composeTieredTextQuota(info, empty, result.ActualQuotaAfterGroup, &result))
+}
+
+func TestResponsesToolSurchargeCapsAndExplicitImageZero(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	setting := config.GlobalConfig.Get("tool_price_setting").(*operation_setting.ToolPriceSetting)
+	previousPrices, previousUnit := setting.Prices, common.QuotaPerUnit
+	setting.Prices = map[string]float64{"lookup": 6, "image_generation:free-model": 0}
+	operation_setting.RebuildToolPriceIndex()
+	common.QuotaPerUnit = 500000
+	t.Cleanup(func() {
+		setting.Prices = previousPrices
+		operation_setting.RebuildToolPriceIndex()
+		common.QuotaPerUnit = previousUnit
+	})
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "billing-model",
+		PriceData:       types.PriceData{GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
+	}
+	usage := &dto.Usage{ToolUsage: map[string]int{
+		"lookup":           relaycommon.MaxBillableToolCallCount + 1,
+		"image_generation": dto.MaxImageN + 1, "negative": -1,
+	}}
+	quota, items := CalculateToolUsageSurcharge(ctx, info, usage)
+	// No quality/size: use the generic image price, bounded to MaxImageN.
+	require.Equal(t, int64(39600000), quota.IntPart())
+	require.Equal(t, []ToolSurchargeItem{
+		{Name: "image_generation", Count: dto.MaxImageN, Price: 150},
+		{Name: "lookup", Count: relaycommon.MaxBillableToolCallCount, Price: 6},
+	}, items)
+	info.OriginModelName = "free-model"
+	ctx.Set("image_generation_call", true)
+	ctx.Set("image_generation_call_quality", "high")
+	ctx.Set("image_generation_call_size", "1024x1536")
+	usage.ToolUsage = map[string]int{"image_generation": 1}
+	quota, items = CalculateToolUsageSurcharge(ctx, info, usage)
+	require.True(t, quota.IsZero())
+	require.Equal(t, []ToolSurchargeItem{{Name: "image_generation", Count: 1, Price: 0}}, items)
+}
 
 func TestCalculateTextQuotaSummaryUnifiedForClaudeSemantic(t *testing.T) {
 	gin.SetMode(gin.TestMode)

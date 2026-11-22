@@ -28,7 +28,8 @@ import SettingsMonitoring from '../../pages/Setting/Operation/SettingsMonitoring
 import SettingsCreditLimit from '../../pages/Setting/Operation/SettingsCreditLimit';
 import SettingsCheckin from '../../pages/Setting/Operation/SettingsCheckin';
 import SettingsRebate from '../../pages/Setting/Operation/SettingsRebate';
-import { API, showError, toBoolean } from '../../helpers';
+import { API, isRoot, showError, toBoolean } from '../../helpers';
+import SettingsTaskUsagePlugins from '../../pages/Setting/Operation/SettingsTaskUsagePlugins';
 
 const OperationSetting = () => {
   let [inputs, setInputs] = useState({
@@ -70,6 +71,7 @@ const OperationSetting = () => {
     /* 监控设置 */
     ChannelDisableThreshold: 0,
     QuotaRemindThreshold: 0,
+    QuotaRemindEnabled: true,
     AutomaticDisableChannelEnabled: false,
     AutomaticEnableChannelEnabled: false,
     AutomaticDisableKeywords: '',
@@ -114,7 +116,7 @@ const OperationSetting = () => {
     const res = await API.get('/api/option/');
     const { success, message, data } = res.data;
     if (success) {
-      let newInputs = {};
+      let newInputs = { QuotaRemindEnabled: true };
       data.forEach((item) => {
         if (typeof inputs[item.key] === 'boolean') {
           newInputs[item.key] = toBoolean(item.value);
@@ -182,6 +184,11 @@ const OperationSetting = () => {
         <Card style={{ marginTop: '10px' }}>
           <SettingsCheckin options={inputs} refresh={onRefresh} />
         </Card>
+        {isRoot() && (
+          <Card style={{ marginTop: '10px' }}>
+            <SettingsTaskUsagePlugins />
+          </Card>
+        )}
       </Spin>
     </>
   );

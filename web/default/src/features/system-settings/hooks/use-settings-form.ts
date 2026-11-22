@@ -25,6 +25,7 @@ import {
 } from 'react-hook-form'
 import i18next from 'i18next'
 import { toast } from 'sonner'
+import { useResetForm } from './use-reset-form'
 
 type SettingsFormOptions<T extends FieldValues> = UseFormProps<T> & {
   onSubmit: (data: T, changedFields: Record<string, unknown>) => Promise<void>
@@ -175,9 +176,9 @@ function expandDotPaths<T extends FieldValues>(
  *   resolver: zodResolver(schema),
  *   defaultValues,
  *   onSubmit: async (data, changed) => {
- *     for (const [key, value] of Object.entries(changed)) {
- *       await updateOption.mutateAsync({ key, value })
- *     }
+ *     await updateOption.mutateAsync(
+ *       Object.entries(changed).map(([key, value]) => ({ key, value }))
+ *     )
  *   }
  * })
  * ```
@@ -194,6 +195,11 @@ export function useSettingsForm<T extends FieldValues>({
   )
 
   const form = useForm<T>({ ...formOptions, defaultValues: expandedDefaults })
+  const { dirtyFields, isSubmitting } = form.formState
+  const submitForm = useResetForm(
+    form,
+    typeof expandedDefaults === 'function' ? undefined : expandedDefaults
+  )
 
   const defaultValuesRef = useRef<T>((expandedDefaults ?? ({} as T)) as T)
   const baselineRef = useRef<Record<string, unknown>>(
@@ -207,7 +213,7 @@ export function useSettingsForm<T extends FieldValues>({
   /* eslint-enable react-hooks/refs */
 
   useEffect(() => {
-    if (!expandedDefaults) return
+    if (!expandedDefaults || typeof expandedDefaults === 'function' || isSubmitting) return
 
     const flattened = flattenValues(expandedDefaults as T)
     const serialized = JSON.stringify(flattened)
@@ -219,8 +225,7 @@ export function useSettingsForm<T extends FieldValues>({
     baselineRef.current = flattened
     defaultValuesRef.current = expandedDefaults as T
     serializedDefaultsRef.current = serialized
-    form.reset(expandedDefaults as T)
-  }, [expandedDefaults, form])
+  }, [expandedDefaults, isSubmitting])
 
   const defaultCompare = (a: unknown, b: unknown): boolean => {
     if (a === b) return true
@@ -243,7 +248,7 @@ export function useSettingsForm<T extends FieldValues>({
   const compare = compareValues || defaultCompare
 
   const handleSubmit = async (data: T) => {
-    const dirtyValues = collectDirtyValues(form.formState.dirtyFields, data)
+    const dirtyValues = collectDirtyValues(dirtyFields, data)
     const changedEntries = Object.entries(dirtyValues).filter(
       ([key, value]) => !compare(value, baselineRef.current[key])
     )
@@ -261,13 +266,15 @@ export function useSettingsForm<T extends FieldValues>({
       {}
     )
 
-    await onSubmit(data, changedFields)
+    try {
+      await onSubmit(data, changedFields)
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : i18next.t('Failed to update setting')
+      )
+    }
 
-    const flattenedValues = flattenValues(data)
-    baselineRef.current = flattenedValues
-    defaultValuesRef.current = data
-    serializedDefaultsRef.current = JSON.stringify(flattenedValues)
-    form.reset(data)
+    // Only the refreshed server defaults can establish the saved baseline.
   }
 
   const handleReset = () => {
@@ -278,7 +285,7 @@ export function useSettingsForm<T extends FieldValues>({
   return {
     form,
     // eslint-disable-next-line react-hooks/refs
-    handleSubmit: form.handleSubmit(handleSubmit),
+    handleSubmit: submitForm(handleSubmit),
     handleReset,
     isDirty: form.formState.isDirty,
     isSubmitting: form.formState.isSubmitting,

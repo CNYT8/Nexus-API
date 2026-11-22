@@ -75,6 +75,7 @@ type GeneralOpenAIRequest struct {
 	// Used by OpenAI to cache responses for similar requests to optimize your cache hit rates. Replaces the user field
 	PromptCacheKey       string          `json:"prompt_cache_key,omitempty"`
 	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`
+	PromptCacheOptions   json.RawMessage `json:"prompt_cache_options,omitempty"`
 	LogitBias            json.RawMessage `json:"logit_bias,omitempty"`
 	Metadata             json.RawMessage `json:"metadata,omitempty"`
 	Prediction           json.RawMessage `json:"prediction,omitempty"`
@@ -94,6 +95,7 @@ type GeneralOpenAIRequest struct {
 	ThinkingBudget         json.RawMessage `json:"thinking_budget,omitempty"`
 	ChatTemplateKwargs     json.RawMessage `json:"chat_template_kwargs,omitempty"`
 	EnableSearch           json.RawMessage `json:"enable_search,omitempty"`
+	SearchOptions          json.RawMessage `json:"search_options,omitempty"`
 	// ollama Params
 	Think json.RawMessage `json:"think,omitempty"`
 	// baidu v2
@@ -108,6 +110,25 @@ type GeneralOpenAIRequest struct {
 	SearchMode             json.RawMessage `json:"search_mode,omitempty"`
 	// Minimax
 	ReasoningSplit json.RawMessage `json:"reasoning_split,omitempty"`
+	// Provider extensions remain raw so explicit false, zero, and objects survive.
+	ThinkingTokenBudget  json.RawMessage `json:"thinking_token_budget,omitempty"`
+	IncludeReasoning     json.RawMessage `json:"include_reasoning,omitempty"`
+	MinP                 json.RawMessage `json:"min_p,omitempty"`
+	RepetitionPenalty    json.RawMessage `json:"repetition_penalty,omitempty"`
+	StructuredOutputs    json.RawMessage `json:"structured_outputs,omitempty"`
+	ReturnTokenIds       json.RawMessage `json:"return_token_ids,omitempty"`
+	MinTokens            *uint           `json:"min_tokens,omitempty"`
+	SeparateReasoning    json.RawMessage `json:"separate_reasoning,omitempty"`
+	StreamReasoning      json.RawMessage `json:"stream_reasoning,omitempty"`
+	Regex                json.RawMessage `json:"regex,omitempty"`
+	EBNF                 json.RawMessage `json:"ebnf,omitempty"`
+	StopTokenIDs         json.RawMessage `json:"stop_token_ids,omitempty"`
+	StopRegex            json.RawMessage `json:"stop_regex,omitempty"`
+	NoStopTrim           json.RawMessage `json:"no_stop_trim,omitempty"`
+	IgnoreEOS            json.RawMessage `json:"ignore_eos,omitempty"`
+	SkipSpecialTokens    json.RawMessage `json:"skip_special_tokens,omitempty"`
+	ContinueFinalMessage json.RawMessage `json:"continue_final_message,omitempty"`
+	CacheSalt            json.RawMessage `json:"cache_salt,omitempty"`
 }
 
 func (r GeneralOpenAIRequest) MarshalJSON() ([]byte, error) {
@@ -115,7 +136,37 @@ func (r GeneralOpenAIRequest) MarshalJSON() ([]byte, error) {
 	if !IsQwenThinkingBudgetModel(r.Model) {
 		r.ThinkingBudget = nil
 	}
-	return common.Marshal((*Alias)(&r))
+	omitToolLoadingContent := false
+	for _, message := range r.Messages {
+		if len(message.Tools) > 0 && message.Content == nil {
+			omitToolLoadingContent = true
+			break
+		}
+	}
+	if !omitToolLoadingContent {
+		return common.Marshal((*Alias)(&r))
+	}
+
+	messages := make([]json.RawMessage, 0, len(r.Messages))
+	for _, message := range r.Messages {
+		var value any = message
+		if len(message.Tools) > 0 && message.Content == nil {
+			// Tool-loading messages omit content; ordinary tool calls keep content:null.
+			value = struct {
+				Message
+				Content any `json:"content,omitempty"`
+			}{Message: message}
+		}
+		data, err := common.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, data)
+	}
+	return common.Marshal(struct {
+		*Alias
+		Messages []json.RawMessage `json:"messages,omitempty"`
+	}{Alias: (*Alias)(&r), Messages: messages})
 }
 
 func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
@@ -143,13 +194,7 @@ func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
 		texts = append(texts, inputs...)
 	}
 
-	maxTokens := lo.FromPtrOr(r.MaxTokens, uint(0))
-	maxCompletionTokens := lo.FromPtrOr(r.MaxCompletionTokens, uint(0))
-	if maxCompletionTokens > maxTokens {
-		tokenCountMeta.MaxTokens = int(maxCompletionTokens)
-	} else {
-		tokenCountMeta.MaxTokens = int(maxTokens)
-	}
+	tokenCountMeta.MaxTokens = int(r.GetMaxTokens())
 
 	for _, message := range r.Messages {
 		tokenCountMeta.MessagesCount++
@@ -230,7 +275,7 @@ func IsOpenAIReasoningOModel(modelName string) bool {
 }
 
 func IsOpenAIGPT5Model(modelName string) bool {
-	return strings.HasPrefix(modelName, "gpt-5")
+	return modelName == "gpt-5" || strings.HasPrefix(modelName, "gpt-5-") || strings.HasPrefix(modelName, "gpt-5.")
 }
 
 func IsQwenThinkingBudgetModel(modelName string) bool {
@@ -242,11 +287,7 @@ func IsQwenThinkingBudgetModel(modelName string) bool {
 }
 
 func (r *GeneralOpenAIRequest) GetSystemRoleName() string {
-	if IsOpenAIReasoningOModel(r.Model) {
-		if !strings.HasPrefix(r.Model, "o1-mini") && !strings.HasPrefix(r.Model, "o1-preview") {
-			return "developer"
-		}
-	} else if IsOpenAIGPT5Model(r.Model) {
+	if GetOpenAIChatCapabilities(r.Model, r.ReasoningEffort).UseDeveloperRole {
 		return "developer"
 	}
 	return "system"
@@ -259,6 +300,8 @@ type ToolCallRequest struct {
 	Type     string          `json:"type"`
 	Function FunctionRequest `json:"function,omitempty"`
 	Custom   json.RawMessage `json:"custom,omitempty"`
+	// Extra preserves provider-hosted tool definitions not described by Function.
+	Extra map[string]json.RawMessage `json:"-"`
 }
 
 type FunctionRequest struct {
@@ -266,6 +309,7 @@ type FunctionRequest struct {
 	Name        string `json:"name"`
 	Parameters  any    `json:"parameters,omitempty"`
 	Arguments   string `json:"arguments,omitempty"`
+	Strict      *bool  `json:"strict,omitempty"`
 }
 
 type StreamOptions struct {
@@ -276,9 +320,8 @@ type StreamOptions struct {
 }
 
 func (r *GeneralOpenAIRequest) GetMaxTokens() uint {
-	maxCompletionTokens := lo.FromPtrOr(r.MaxCompletionTokens, uint(0))
-	if maxCompletionTokens != 0 {
-		return maxCompletionTokens
+	if r.MaxCompletionTokens != nil {
+		return *r.MaxCompletionTokens
 	}
 	return lo.FromPtrOr(r.MaxTokens, uint(0))
 }
@@ -310,7 +353,10 @@ type Message struct {
 	ReasoningContent *string         `json:"reasoning_content,omitempty"`
 	Reasoning        *string         `json:"reasoning,omitempty"`
 	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
+	Tools            json.RawMessage `json:"tools,omitempty"`
 	ToolCallId       string          `json:"tool_call_id,omitempty"`
+	Annotations      json.RawMessage `json:"annotations,omitempty"`
+	Refusal          *string         `json:"refusal,omitempty"`
 	parsedContent    []MediaContent
 	//parsedStringContent *string
 }
@@ -366,9 +412,13 @@ func (m *MediaContent) GetFile() *MessageFile {
 		}
 		if itemMap, ok := m.File.(map[string]any); ok {
 			out := &MessageFile{
-				FileName: common.Interface2String(itemMap["file_name"]),
+				FileName: common.Interface2String(itemMap["filename"]),
 				FileData: common.Interface2String(itemMap["file_data"]),
 				FileId:   common.Interface2String(itemMap["file_id"]),
+				FileUrl:  common.Interface2String(itemMap["file_url"]),
+			}
+			if out.FileName == "" {
+				out.FileName = common.Interface2String(itemMap["file_name"])
 			}
 			return out
 		}
@@ -411,10 +461,16 @@ func (m *MediaContent) ToFileSource() types.FileSource {
 		return types.NewFileSourceFromData(audio.Data, mimeType)
 	case ContentTypeFile:
 		file := m.GetFile()
-		if file == nil || file.FileData == "" {
+		if file == nil {
 			return nil
 		}
-		return types.NewFileSourceFromData(file.FileData, "")
+		if file.FileUrl != "" {
+			return types.NewFileSourceFromData(file.FileUrl, "")
+		}
+		if file.FileData != "" {
+			return types.NewFileSourceFromData(file.FileData, "")
+		}
+		return nil
 	case ContentTypeVideoUrl:
 		video := m.GetVideoUrl()
 		if video == nil || video.Url == "" {
@@ -444,6 +500,7 @@ type MessageFile struct {
 	FileName string `json:"filename,omitempty"`
 	FileData string `json:"file_data,omitempty"`
 	FileId   string `json:"file_id,omitempty"`
+	FileUrl  string `json:"file_url,omitempty"`
 }
 
 type MessageVideoUrl struct {
@@ -546,6 +603,11 @@ func (m *Message) ParseContent() []MediaContent {
 	if m.Content == nil {
 		return nil
 	}
+	// 转换器重建消息时可能只复制 Content，不能依赖原消息的解析缓存。
+	if content, ok := m.Content.([]MediaContent); ok {
+		m.parsedContent = content
+		return content
+	}
 	if len(m.parsedContent) > 0 {
 		return m.parsedContent
 	}
@@ -635,26 +697,11 @@ func (m *Message) ParseContent() []MediaContent {
 			}
 		case ContentTypeFile:
 			if fileData, ok := contentItem["file"].(map[string]interface{}); ok {
-				fileId, ok3 := fileData["file_id"].(string)
-				if ok3 {
-					contentList = append(contentList, MediaContent{
-						Type: ContentTypeFile,
-						File: &MessageFile{
-							FileId: fileId,
-						},
-					})
-				} else {
-					fileName, ok1 := fileData["filename"].(string)
-					fileDataStr, ok2 := fileData["file_data"].(string)
-					if ok1 && ok2 {
-						contentList = append(contentList, MediaContent{
-							Type: ContentTypeFile,
-							File: &MessageFile{
-								FileName: fileName,
-								FileData: fileDataStr,
-							},
-						})
-					}
+				media := MediaContent{Type: ContentTypeFile, File: fileData}
+				file := media.GetFile()
+				if file != nil && (file.FileId != "" || file.FileData != "" || file.FileUrl != "") {
+					media.File = file
+					contentList = append(contentList, media)
 				}
 			}
 		case ContentTypeVideoUrl:
@@ -878,6 +925,7 @@ type OpenAIResponsesRequest struct {
 	Store                json.RawMessage `json:"store,omitempty"`
 	PromptCacheKey       json.RawMessage `json:"prompt_cache_key,omitempty"`
 	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`
+	PromptCacheOptions   json.RawMessage `json:"prompt_cache_options,omitempty"`
 	// SafetyIdentifier carries client identity for policy abuse detection.
 	// This field is filtered by default and can be enabled via channel setting allow_safety_identifier.
 	SafetyIdentifier json.RawMessage `json:"safety_identifier,omitempty"`
@@ -897,6 +945,17 @@ type OpenAIResponsesRequest struct {
 	ThinkingBudget json.RawMessage `json:"thinking_budget,omitempty"`
 	// perplexity
 	Preset json.RawMessage `json:"preset,omitempty"`
+	// Provider extensions preserve explicit zero, false, and structured values.
+	Moderation         json.RawMessage `json:"moderation,omitempty"`
+	FrequencyPenalty   json.RawMessage `json:"frequency_penalty,omitempty"`
+	PresencePenalty    json.RawMessage `json:"presence_penalty,omitempty"`
+	ClientMetadata     json.RawMessage `json:"client_metadata,omitempty"`
+	ChatTemplateKwargs json.RawMessage `json:"chat_template_kwargs,omitempty"`
+	TopK               json.RawMessage `json:"top_k,omitempty"`
+	MinP               json.RawMessage `json:"min_p,omitempty"`
+	RepetitionPenalty  json.RawMessage `json:"repetition_penalty,omitempty"`
+	Stop               json.RawMessage `json:"stop,omitempty"`
+	CacheSalt          json.RawMessage `json:"cache_salt,omitempty"`
 }
 
 func (r OpenAIResponsesRequest) MarshalJSON() ([]byte, error) {
@@ -985,8 +1044,10 @@ func (r *OpenAIResponsesRequest) GetToolsMap() []map[string]any {
 }
 
 type Reasoning struct {
-	Effort  string `json:"effort,omitempty"`
-	Summary string `json:"summary,omitempty"`
+	Effort  string          `json:"effort,omitempty"`
+	Summary string          `json:"summary,omitempty"`
+	Mode    json.RawMessage `json:"mode,omitempty"`
+	Context json.RawMessage `json:"context,omitempty"`
 }
 
 type Input struct {

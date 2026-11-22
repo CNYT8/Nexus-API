@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useContext, useEffect, useState, useRef } from 'react';
 import {
   Button,
   Form,
@@ -39,13 +39,22 @@ import {
   showError,
   showSuccess,
   toBoolean,
+  setStatusData,
 } from '../../helpers';
 import axios from 'axios';
 import { useTranslation } from 'react-i18next';
 import CustomOAuthSetting from './CustomOAuthSetting';
+import { StatusContext } from '../../context/Status';
 
 const SystemSetting = () => {
   const { t } = useTranslation();
+  const [statusState, statusDispatch] = useContext(StatusContext);
+  const statusRef = useRef(statusState.status);
+  const turnstileSavingRef = useRef(false);
+  const turnstileSavedSecretRef = useRef('');
+  useEffect(() => {
+    statusRef.current = statusState.status;
+  }, [statusState.status]);
   let [inputs, setInputs] = useState({
     PasswordLoginEnabled: '',
     PasswordRegisterEnabled: '',
@@ -80,6 +89,7 @@ const SystemSetting = () => {
     TurnstileCheckEnabled: '',
     TurnstileSiteKey: '',
     TurnstileSecretKey: '',
+    TurnstileSecretKeyConfigured: false,
     RegisterEnabled: '',
     'passkey.enabled': '',
     'passkey.rp_display_name': '',
@@ -133,7 +143,10 @@ const SystemSetting = () => {
     const res = await API.get('/api/option/');
     const { success, message, data } = res.data;
     if (success) {
-      let newInputs = {};
+      let newInputs = {
+        TurnstileSecretKey: '',
+        TurnstileSecretKeyConfigured: false,
+      };
       data.forEach((item) => {
         switch (item.key) {
           case 'TopupGroupRatio':
@@ -181,6 +194,7 @@ const SystemSetting = () => {
           case 'TelegramOAuthEnabled':
           case 'RegisterEnabled':
           case 'TurnstileCheckEnabled':
+          case 'TurnstileSecretKeyConfigured':
           case 'EmailDomainRestrictionEnabled':
           case 'EmailAliasRestrictionEnabled':
           case 'SMTPSSLEnabled':
@@ -606,24 +620,125 @@ const SystemSetting = () => {
     await updateOptions(options);
   };
 
-  const submitTurnstile = async () => {
-    const options = [];
-
-    if (originInputs['TurnstileSiteKey'] !== inputs.TurnstileSiteKey) {
-      options.push({ key: 'TurnstileSiteKey', value: inputs.TurnstileSiteKey });
-    }
+  const submitTurnstile = async (enabled) => {
+    if (turnstileSavingRef.current) return;
+    const values = formApiRef.current?.getValues() || inputs;
+    const siteKey = (values.TurnstileSiteKey || '').trim();
+    const secretKey = (values.TurnstileSecretKey || '').trim();
+    const shouldEnable =
+      typeof enabled === 'boolean' ? enabled : !!values.TurnstileCheckEnabled;
+    formApiRef.current?.setValue('TurnstileCheckEnabled', shouldEnable);
+    setInputs((previous) => ({
+      ...previous,
+      TurnstileCheckEnabled: shouldEnable,
+    }));
     if (
-      originInputs['TurnstileSecretKey'] !== inputs.TurnstileSecretKey &&
-      inputs.TurnstileSecretKey !== ''
+      shouldEnable &&
+      (!siteKey || (!secretKey && !originInputs.TurnstileSecretKeyConfigured))
     ) {
-      options.push({
-        key: 'TurnstileSecretKey',
-        value: inputs.TurnstileSecretKey,
-      });
+      showError(t('请先填写 Turnstile Site Key 和 Secret Key'));
+      return;
     }
 
-    if (options.length > 0) {
-      await updateOptions(options);
+    const options = [];
+    if (!shouldEnable && originInputs.TurnstileCheckEnabled) {
+      options.push({ key: 'TurnstileCheckEnabled', value: false });
+    }
+    if (siteKey !== (originInputs.TurnstileSiteKey || '')) {
+      options.push({ key: 'TurnstileSiteKey', value: siteKey });
+    }
+    if (secretKey && secretKey !== turnstileSavedSecretRef.current) {
+      options.push({ key: 'TurnstileSecretKey', value: secretKey });
+    }
+    if (shouldEnable && !originInputs.TurnstileCheckEnabled) {
+      options.push({ key: 'TurnstileCheckEnabled', value: true });
+    }
+
+    turnstileSavingRef.current = true;
+    setLoading(true);
+    try {
+      for (const option of options) {
+        const { data } = await API.put('/api/option/', {
+          key: option.key,
+          value: String(option.value),
+        });
+        if (!data.success) {
+          showError(data.message || t('保存失败'));
+          return;
+        }
+        const confirmed =
+          option.key === 'TurnstileSecretKey'
+            ? { TurnstileSecretKeyConfigured: true }
+            : { [option.key]: option.value };
+        setOriginInputs((previous) => ({ ...previous, ...confirmed }));
+        setInputs((previous) => ({ ...previous, ...confirmed }));
+        if (option.key === 'TurnstileSecretKey') {
+          turnstileSavedSecretRef.current = secretKey;
+        } else {
+          formApiRef.current?.setValue(option.key, option.value);
+          const statusKey =
+            option.key === 'TurnstileCheckEnabled'
+              ? 'turnstile_check'
+              : 'turnstile_site_key';
+          let cachedStatus = {};
+          try {
+            const cached = JSON.parse(localStorage.getItem('status'));
+            if (
+              cached &&
+              typeof cached === 'object' &&
+              !Array.isArray(cached)
+            ) {
+              cachedStatus = cached;
+            }
+          } catch {
+            // The current context remains usable if storage is unavailable.
+          }
+          // Merge the latest status, not the snapshot captured before the PUT.
+          const nextStatus = {
+            ...cachedStatus,
+            ...statusRef.current,
+            [statusKey]: option.value,
+          };
+          statusRef.current = nextStatus;
+          statusDispatch({ type: 'set', payload: nextStatus });
+          try {
+            localStorage.setItem(
+              'status',
+              JSON.stringify({
+                ...nextStatus,
+                ...cachedStatus,
+                [statusKey]: option.value,
+              }),
+            );
+          } catch {
+            // A cache write failure must not interrupt confirmed saves.
+          }
+        }
+      }
+      formApiRef.current?.setValue('TurnstileSecretKey', '');
+      setInputs((previous) => ({ ...previous, TurnstileSecretKey: '' }));
+      turnstileSavedSecretRef.current = '';
+      showSuccess(t('更新成功'));
+    } catch {
+      showError(t('保存失败'));
+    } finally {
+      try {
+        const { data } = await API.get('/api/status', {
+          disableDuplicate: true,
+        });
+        if (data.success) {
+          statusRef.current = data.data;
+          statusDispatch({ type: 'set', payload: data.data });
+          setStatusData(data.data);
+        } else {
+          showError(data.message || t('加载失败'));
+        }
+      } catch {
+        showError(t('加载失败'));
+      } finally {
+        turnstileSavingRef.current = false;
+        setLoading(false);
+      }
     }
   };
 
@@ -698,6 +813,11 @@ const SystemSetting = () => {
 
   const handleCheckboxChange = async (optionKey, event) => {
     const value = event.target.checked;
+
+    if (optionKey === 'TurnstileCheckEnabled') {
+      await submitTurnstile(value);
+      return;
+    }
 
     if (optionKey === 'PasswordLoginEnabled' && !value) {
       setShowPasswordLoginConfirmModal(true);
@@ -1063,6 +1183,7 @@ const SystemSetting = () => {
                       </Form.Checkbox>
                       <Form.Checkbox
                         field='TurnstileCheckEnabled'
+                        disabled={loading}
                         noLabel
                         onChange={(e) =>
                           handleCheckboxChange('TurnstileCheckEnabled', e)
@@ -1667,19 +1788,21 @@ const SystemSetting = () => {
                     <Col xs={24} sm={24} md={12} lg={12} xl={12}>
                       <Form.Input
                         field='TurnstileSiteKey'
+                        disabled={loading}
                         label={t('Turnstile Site Key')}
                       />
                     </Col>
                     <Col xs={24} sm={24} md={12} lg={12} xl={12}>
                       <Form.Input
                         field='TurnstileSecretKey'
+                        disabled={loading}
                         label={t('Turnstile Secret Key')}
                         type='password'
                         placeholder={t('敏感信息不会发送到前端显示')}
                       />
                     </Col>
                   </Row>
-                  <Button onClick={submitTurnstile}>
+                  <Button onClick={() => submitTurnstile()} loading={loading}>
                     {t('保存 Turnstile 设置')}
                   </Button>
                 </Form.Section>

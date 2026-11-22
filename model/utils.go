@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -107,7 +108,23 @@ func batchUpdate() {
 		userIDs[key] = struct{}{}
 	}
 	for key := range userIDs {
-		updateUserQuotaUsedQuotaAndRequestCount(key, userQuotaStore[key], usedQuotaStore[key], requestCountStore[key])
+		quota, usedQuota, requestCount := userQuotaStore[key], usedQuotaStore[key], requestCountStore[key]
+		retryable, err := updateUserQuotaUsedQuotaAndRequestCount(key, quota, usedQuota, requestCount)
+		if err == nil {
+			continue
+		}
+		if retryable {
+			if quota != 0 {
+				addNewRecord(BatchUpdateTypeUserQuota, key, quota)
+			}
+			if usedQuota != 0 {
+				addNewRecord(BatchUpdateTypeUsedQuota, key, usedQuota)
+			}
+			if requestCount != 0 {
+				addNewRecord(BatchUpdateTypeRequestCount, key, requestCount)
+			}
+		}
+		common.SysError(fmt.Sprintf("user quota batch failed: user=%d quota=%d used_quota=%d request_count=%d retryable=%t: %v", key, quota, usedQuota, requestCount, retryable, err))
 	}
 	common.SysLog("batch update finished")
 }

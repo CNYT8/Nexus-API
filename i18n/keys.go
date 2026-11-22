@@ -28,6 +28,12 @@ const (
 	MsgBatchTooMany      = "common.batch_too_many"
 )
 
+// API validation messages keep the legacy response text as their shared web key.
+const (
+	MsgModelLinkedDeletePermission = "访问令牌没有联动删除所需的权限"
+	MsgToolPricesInvalidObject     = "工具价格必须为 JSON 对象"
+)
+
 // Web risk control messages
 const (
 	MsgWebRiskVerificationRequired = "web_risk.verification_required"

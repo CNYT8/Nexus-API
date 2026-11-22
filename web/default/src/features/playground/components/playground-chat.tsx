@@ -16,7 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -66,6 +67,7 @@ interface PlaygroundChatProps {
   onSaveEdit?: (newContent: string) => void
   onCancelEdit?: (open: boolean) => void
   onSaveEditAndSubmit?: (newContent: string) => void
+  onEditDirtyChange?: (dirty: boolean) => void
 }
 
 export function PlaygroundChat({
@@ -79,19 +81,27 @@ export function PlaygroundChat({
   onSaveEdit,
   onCancelEdit,
   onSaveEditAndSubmit,
+  onEditDirtyChange,
 }: PlaygroundChatProps) {
+  const { t } = useTranslation()
+  const [visibleCount, setVisibleCount] = useState(60)
+  const initializedKey = useRef<string | null>(null)
   const [editText, setEditText] = useState('')
   const [originalText, setOriginalText] = useState('')
 
   useEffect(() => {
-    if (!editingKey) return
+    if (!editingKey) {
+      initializedKey.current = null
+      return
+    }
+    if (initializedKey.current === editingKey) return
+    initializedKey.current = editingKey
     const message = messages.find((m) => m.key === editingKey)
     const content = message?.versions?.[0]?.content || ''
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setEditText(content)
-
     setOriginalText(content)
-  }, [editingKey, messages])
+    onEditDirtyChange?.(false)
+  }, [editingKey, messages, onEditDirtyChange])
 
   const isEditing = (key: string) => editingKey === key
   const isEmpty = useMemo(() => !editText.trim(), [editText])
@@ -99,12 +109,19 @@ export function PlaygroundChat({
     () => editText !== originalText,
     [editText, originalText]
   )
+  const startIndex = Math.max(0, messages.length - visibleCount)
   return (
     <Conversation>
       {/* Remove outer padding; apply padding to inner centered container to align with input */}
       <ConversationContent className='p-0'>
         <div className='mx-auto w-full max-w-4xl px-4 py-4'>
-          {messages.map((message, messageIndex) => {
+          {startIndex > 0 && (
+            <Button variant='ghost' onClick={() => setVisibleCount((count) => count + 60)}>
+              {t('加载更早的消息')}
+            </Button>
+          )}
+          {messages.slice(startIndex).map((message, visibleIndex) => {
+            const messageIndex = startIndex + visibleIndex
             const { versions = [] } = message
             const isLastAssistantMessage =
               messageIndex === messages.length - 1 &&
@@ -123,10 +140,24 @@ export function PlaygroundChat({
                           <div className='space-y-2'>
                             <Textarea
                               value={editText}
-                              onChange={(e) => setEditText(e.target.value)}
+                              onChange={(event) => {
+                                setEditText(event.target.value)
+                                onEditDirtyChange?.(event.target.value !== originalText)
+                              }}
                               className='font-mono text-sm'
                               rows={8}
+                              onKeyDown={(event) => {
+                                if (event.nativeEvent.isComposing) return
+                                if (event.key === 'Escape') {
+                                  event.preventDefault()
+                                  onCancelEdit?.(false)
+                                } else if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                                  event.preventDefault()
+                                  if (!isEmpty && isChanged) onSaveEdit?.(editText)
+                                }
+                              }}
                             />
+                            <p className='text-xs text-muted-foreground'>{t('Ctrl/⌘ + Enter 保存，Esc 取消')}</p>
                             <div className='flex gap-2'>
                               {/* Save & Submit only makes sense for user messages */}
                               {message.from === MESSAGE_ROLES.USER && (
@@ -137,7 +168,7 @@ export function PlaygroundChat({
                                   }
                                   disabled={isEmpty || !isChanged}
                                 >
-                                  Save & Submit
+                                  {t('保存并提交')}
                                 </Button>
                               )}
                               <Button
@@ -145,14 +176,14 @@ export function PlaygroundChat({
                                 onClick={() => onSaveEdit?.(editText)}
                                 disabled={isEmpty || !isChanged}
                               >
-                                Save
+                                {t('保存')}
                               </Button>
                               <Button
                                 size='sm'
                                 variant='outline'
                                 onClick={() => onCancelEdit?.(false)}
                               >
-                                Cancel
+                                {t('取消')}
                               </Button>
                             </div>
                           </div>

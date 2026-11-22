@@ -71,11 +71,22 @@ export default function GeneralSettings(props) {
   }
 
   function onSubmit() {
+    const rawMaxUserTokens = inputs['token_setting.max_user_tokens'];
+    const maxUserTokens = Number(rawMaxUserTokens);
+    if (
+      !['string', 'number'].includes(typeof rawMaxUserTokens) ||
+      String(rawMaxUserTokens).trim() === '' ||
+      !Number.isSafeInteger(maxUserTokens) || maxUserTokens <= 0
+    ) {
+      return showError(t('用户最大令牌数量必须为正整数'));
+    }
     const updateArray = compareObjects(inputs, inputsRow);
     if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
     const requestQueue = updateArray.map((item) => {
       let value = '';
-      if (typeof inputs[item.key] === 'boolean') {
+      if (item.key === 'token_setting.max_user_tokens') {
+        value = maxUserTokens;
+      } else if (typeof inputs[item.key] === 'boolean') {
         value = String(inputs[item.key]);
       } else {
         value = inputs[item.key];
@@ -88,11 +99,8 @@ export default function GeneralSettings(props) {
     setLoading(true);
     Promise.all(requestQueue)
       .then((res) => {
-        if (requestQueue.length === 1) {
-          if (res.includes(undefined)) return;
-        } else if (requestQueue.length > 1) {
-          if (res.includes(undefined))
-            return showError(t('部分保存失败，请重试'));
+        if (res.some((response) => !response?.data?.success)) {
+          return showError(t('部分保存失败，请重试'));
         }
         showSuccess(t('保存成功'));
         props.refresh();
@@ -201,12 +209,17 @@ export default function GeneralSettings(props) {
   }, [quotaDisplayType, combinedRate, inputs, t]);
 
   useEffect(() => {
-    const currentInputs = {};
+    const currentInputs = { 'token_setting.max_user_tokens': 1000 };
     for (let key in props.options) {
       if (Object.keys(inputs).includes(key)) {
         currentInputs[key] = props.options[key];
       }
     }
+    const maxUserTokens = currentInputs['token_setting.max_user_tokens'];
+    currentInputs['token_setting.max_user_tokens'] =
+      maxUserTokens == null || String(maxUserTokens).trim() === ''
+        ? 1000
+        : maxUserTokens;
     // 若旧字段存在且新字段缺失，则做一次兜底映射
     if (
       currentInputs['general_setting.quota_display_type'] === undefined &&
@@ -422,6 +435,7 @@ export default function GeneralSettings(props) {
                   field={'token_setting.max_user_tokens'}
                   step={1}
                   min={1}
+                  max={Number.MAX_SAFE_INTEGER}
                   extraText={t('每个用户最多可创建的令牌数量，默认 1000，设置过大可能会影响性能')}
                   placeholder={'1000'}
                   onChange={handleFieldChange('token_setting.max_user_tokens')}

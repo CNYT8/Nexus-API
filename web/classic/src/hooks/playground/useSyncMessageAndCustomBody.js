@@ -28,6 +28,7 @@ export const useSyncMessageAndCustomBody = (
   setCustomRequestBody,
   setMessage,
   debouncedSaveConfig,
+  canSend,
 ) => {
   const isUpdatingFromMessage = useRef(false);
   const isUpdatingFromCustomBody = useRef(false);
@@ -54,7 +55,8 @@ export const useSyncMessageAndCustomBody = (
   }, []);
 
   const syncMessageToCustomBody = useCallback(() => {
-    if (!customRequestMode || isUpdatingFromCustomBody.current) return;
+    if (!customRequestMode || isUpdatingFromCustomBody.current || !canSend())
+      return;
 
     const currentMessageHash = getMessageHash(message);
     if (currentMessageHash === lastMessageHash.current) return;
@@ -101,10 +103,12 @@ export const useSyncMessageAndCustomBody = (
     getCustomBodyHash,
     setCustomRequestBody,
     debouncedSaveConfig,
+    canSend,
   ]);
 
   const syncCustomBodyToMessage = useCallback(() => {
-    if (!customRequestMode || isUpdatingFromMessage.current) return;
+    if (!customRequestMode || isUpdatingFromMessage.current || !canSend())
+      return;
 
     const currentCustomBodyHash = getCustomBodyHash(customRequestBody);
     if (currentCustomBodyHash === lastCustomBodyHash.current) return;
@@ -140,6 +144,7 @@ export const useSyncMessageAndCustomBody = (
     getCustomBodyHash,
     getMessageHash,
     setMessage,
+    canSend,
   ]);
 
   return {

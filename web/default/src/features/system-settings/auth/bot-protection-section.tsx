@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -40,6 +39,7 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { useResetForm } from '../hooks/use-reset-form'
 
 const botProtectionSchema = z.object({
   TurnstileCheckEnabled: z.boolean(),
@@ -51,29 +51,54 @@ type BotProtectionFormValues = z.infer<typeof botProtectionSchema>
 
 type BotProtectionSectionProps = {
   defaultValues: BotProtectionFormValues
+  secretKeyConfigured: boolean
 }
 
 export function BotProtectionSection({
   defaultValues,
+  secretKeyConfigured,
 }: BotProtectionSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
-
   const form = useForm<BotProtectionFormValues>({
     resolver: zodResolver(botProtectionSchema),
     defaultValues,
   })
 
-  useEffect(() => {
-    form.reset(defaultValues)
-  }, [defaultValues, form])
+  const { isSubmitting } = form.formState
+  const submitForm = useResetForm(form, defaultValues, (value) =>
+    typeof value === 'string' ? value.trim() : value
+  )
 
   const onSubmit = async (data: BotProtectionFormValues) => {
-    const updates = Object.entries(data).filter(
-      ([key, value]) =>
-        value !== defaultValues[key as keyof BotProtectionFormValues]
-    )
+    const values = {
+      ...data,
+      TurnstileSiteKey: data.TurnstileSiteKey?.trim() ?? '',
+      TurnstileSecretKey: data.TurnstileSecretKey?.trim() ?? '',
+    }
+    if (values.TurnstileCheckEnabled) {
+      let invalid = false
+      if (!values.TurnstileSiteKey) {
+        form.setError('TurnstileSiteKey', { message: t('Required') })
+        invalid = true
+      }
+      if (
+        !secretKeyConfigured &&
+        !values.TurnstileSecretKey
+      ) {
+        form.setError('TurnstileSecretKey', { message: t('Required') })
+        invalid = true
+      }
+      if (invalid) return
+    }
 
+    const updates = Object.entries(values).filter(
+      ([key, value]) =>
+        !(
+          key === 'TurnstileSecretKey' &&
+          value === ''
+        ) && value !== defaultValues[key as keyof BotProtectionFormValues]
+    )
     const turnstileEnableUpdate = updates.find(
       ([key, value]) => key === 'TurnstileCheckEnabled' && value === true
     )
@@ -84,18 +109,32 @@ export function BotProtectionSection({
         ]
       : updates
 
-    for (const [key, value] of orderedUpdates) {
-      await updateOption.mutateAsync({ key, value: value ?? '' })
+    const refreshed = await updateOption.saveOptionsInOrder(
+      orderedUpdates.map(([key, value]) => ({ key, value }))
+    )
+    // A write-only secret can be cleared only after the whole save and a fresh
+    // configured flag confirm it. Never clear text entered during submission.
+    if (
+      refreshed?.data.some(
+        ({ key, value }) => key === 'TurnstileSecretKeyConfigured' && value === 'true'
+      ) &&
+      orderedUpdates.some(([key]) => key === 'TurnstileSecretKey') &&
+      form.getValues('TurnstileSecretKey') === data.TurnstileSecretKey
+    ) {
+      form.resetField('TurnstileSecretKey', { defaultValue: '' })
     }
   }
 
   return (
     <SettingsSection title={t('Bot Protection')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)} autoComplete='off'>
+        <SettingsForm
+          onSubmit={submitForm(onSubmit)}
+          autoComplete='off'
+        >
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
-            isSaving={updateOption.isPending}
+            onSave={submitForm(onSubmit)}
+            isSaving={isSubmitting}
           />
           <FormField
             control={form.control}
@@ -112,6 +151,7 @@ export function BotProtectionSection({
                 </SettingsSwitchContent>
                 <FormControl>
                   <Switch
+                    disabled={isSubmitting}
                     checked={field.value}
                     onCheckedChange={field.onChange}
                   />
@@ -128,6 +168,7 @@ export function BotProtectionSection({
                 <FormLabel>{t('Site Key')}</FormLabel>
                 <FormControl>
                   <Input
+                    disabled={isSubmitting}
                     placeholder={t('Your Turnstile site key')}
                     autoComplete='off'
                     {...field}
@@ -146,6 +187,7 @@ export function BotProtectionSection({
                 <FormLabel>{t('Secret Key')}</FormLabel>
                 <FormControl>
                   <Input
+                    disabled={isSubmitting}
                     type='password'
                     placeholder={t('Your Turnstile secret key')}
                     autoComplete='new-password'

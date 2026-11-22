@@ -16,7 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
+import { createLanguageChangeQueue } from '../../../shared/language-change-queue'
 import {
   INTERFACE_LANGUAGE_OPTIONS,
   normalizeInterfaceLanguage,
@@ -25,6 +26,7 @@ import { Languages, Check } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/auth-store'
 import { api } from '@/lib/api'
+import { notifyServerError, requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -39,18 +41,58 @@ export function LanguageSwitcher() {
   const user = useAuthStore((s) => s.auth.user)
   const currentLanguage = normalizeInterfaceLanguage(i18n.language)
 
+  const mounted = useRef(true)
+  const languageQueue = useRef<{
+    userId: number | undefined
+    change: ((language: string) => Promise<void>) | null
+  } | null>(null)
+  if (!languageQueue.current || languageQueue.current.userId !== user?.id) {
+    languageQueue.current = { userId: user?.id, change: null }
+  }
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+
   const handleChangeLanguage = useCallback(
-    async (code: string) => {
-      await i18n.changeLanguage(code)
-      if (user) {
-        try {
-          await api.put('/api/user/self', { language: code })
-        } catch {
-          // Best-effort persistence; don't block the UI on failure
-        }
-      }
+    (code: string) => {
+      const state = languageQueue.current
+      if (!state) return
+      state.change ??= createLanguageChangeQueue({
+        getLanguage: () => normalizeInterfaceLanguage(i18n.language),
+        changeLanguage: (language) => i18n.changeLanguage(language),
+        isCurrent: () => mounted.current && languageQueue.current === state &&
+          useAuthStore.getState().auth.user?.id === state.userId,
+        saveLanguage: async (language) => {
+          if (state.userId === undefined) return
+          const response = await api.put('/api/user/self', { language }, {
+            skipBusinessError: true,
+            skipErrorHandler: true,
+          })
+          requireServerSuccess(response.data)
+        },
+        onConfirmed: (language) => {
+          const { user: currentUser, setUser } = useAuthStore.getState().auth
+          if (!currentUser) return
+          let settings: Record<string, unknown> = {}
+          try {
+            const parsed: unknown = typeof currentUser.setting === 'string'
+              ? JSON.parse(currentUser.setting)
+              : currentUser.setting
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              settings = parsed as Record<string, unknown>
+            }
+          } catch { /* Keep a malformed settings string from blocking language changes. */ }
+          setUser({
+            ...currentUser,
+            setting: JSON.stringify({ ...settings, language }),
+          })
+        },
+        onError: (error) => notifyServerError(error, t('语言切换失败，请重试')),
+      })
+      void state.change(code)
     },
-    [i18n, user]
+    [i18n, t]
   )
 
   return (

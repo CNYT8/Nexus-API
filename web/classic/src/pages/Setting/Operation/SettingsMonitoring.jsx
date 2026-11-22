@@ -36,6 +36,7 @@ export default function SettingsMonitoring(props) {
   const [inputs, setInputs] = useState({
     ChannelDisableThreshold: '',
     QuotaRemindThreshold: '',
+    QuotaRemindEnabled: true,
     AutomaticDisableChannelEnabled: false,
     AutomaticEnableChannelEnabled: false,
     AutomaticDisableKeywords: '',
@@ -55,7 +56,7 @@ export default function SettingsMonitoring(props) {
     inputs.AutomaticRetryStatusCodes || '',
   );
 
-  function onSubmit() {
+  async function onSubmit() {
     const updateArray = compareObjects(inputs, inputsRow);
     if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
     if (!parsedAutoDisableStatusCodes.ok) {
@@ -74,52 +75,47 @@ export default function SettingsMonitoring(props) {
           : '';
       return showError(`${t('自动重试状态码格式不正确')}${details}`);
     }
-    const requestQueue = updateArray.map((item) => {
-      let value = '';
-      if (typeof inputs[item.key] === 'boolean') {
-        value = String(inputs[item.key]);
-      } else {
-        const normalizedMap = {
-          AutomaticDisableStatusCodes: parsedAutoDisableStatusCodes.normalized,
-          AutomaticRetryStatusCodes: parsedAutoRetryStatusCodes.normalized,
-        };
-        value = normalizedMap[item.key] ?? inputs[item.key];
-      }
-      return API.put('/api/option/', {
-        key: item.key,
-        value,
-      });
-    });
+    const normalizedMap = {
+      AutomaticDisableStatusCodes: parsedAutoDisableStatusCodes.normalized,
+      AutomaticRetryStatusCodes: parsedAutoRetryStatusCodes.normalized,
+    };
     setLoading(true);
-    Promise.all(requestQueue)
-      .then((res) => {
-        if (requestQueue.length === 1) {
-          if (res.includes(undefined)) return;
-        } else if (requestQueue.length > 1) {
-          if (res.includes(undefined))
-            return showError(t('部分保存失败，请重试'));
+    let failed = 0;
+    try {
+      for (const { key } of updateArray) {
+        const value = normalizedMap[key] ?? inputs[key];
+        try {
+          const { data } = await API.put('/api/option/', {
+            key,
+            value: typeof value === 'boolean' ? String(value) : value,
+          });
+          if (!data.success) throw new Error(data.message);
+        } catch {
+          failed++;
         }
-        showSuccess(t('保存成功'));
-        props.refresh();
-      })
-      .catch(() => {
-        showError(t('保存失败，请重试'));
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+      }
+      if (failed) showError(t('部分保存失败，请重试'));
+      else showSuccess(t('保存成功'));
+      await props.refresh();
+    } catch {
+      showError(t('保存失败，请重试'));
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    const currentInputs = {};
-    for (let key in props.options) {
-      if (Object.keys(inputs).includes(key)) {
-        currentInputs[key] = props.options[key];
-      }
+    const currentInputs = { ...inputsRow, QuotaRemindEnabled: true };
+    for (const key of Object.keys(inputsRow)) {
+      if (key in props.options) currentInputs[key] = props.options[key];
     }
-    setInputs(currentInputs);
+    const drafts = Object.fromEntries(
+      Object.entries(inputs).filter(([key, value]) => value !== inputsRow[key]),
+    );
+    const nextInputs = { ...currentInputs, ...drafts };
+    setInputs(nextInputs);
     setInputsRow(structuredClone(currentInputs));
-    refForm.current.setValues(currentInputs);
+    refForm.current?.setValues(nextInputs);
   }, [props.options]);
 
   return (
@@ -131,6 +127,14 @@ export default function SettingsMonitoring(props) {
           style={{ marginBottom: 15 }}
         >
           <Form.Section text={t('监控设置')}>
+            <Form.Switch
+              field='QuotaRemindEnabled'
+              label={t('启用额度提醒')}
+              extraText={t('允许向用户发送余额不足提醒')}
+              onChange={(value) =>
+                setInputs({ ...inputs, QuotaRemindEnabled: value })
+              }
+            />
             <Row gutter={16}>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.Switch

@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	passkeysvc "github.com/QuantumNous/new-api/service/passkey"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
@@ -227,7 +228,7 @@ func PasskeyLoginBegin(c *gin.Context) {
 		return
 	}
 
-	assertion, sessionData, err := wa.BeginDiscoverableLogin()
+	assertion, sessionData, err := wa.BeginDiscoverableLogin(webauthnlib.WithUserVerification(protocol.VerificationRequired))
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -287,10 +288,7 @@ func PasskeyLoginFinish(c *gin.Context) {
 
 		if len(userHandle) > 0 {
 			userID, parseErr := strconv.Atoi(string(userHandle))
-			if parseErr != nil {
-				// 记录异常但继续验证，因为某些客户端可能使用非数字格式
-				common.SysLog(fmt.Sprintf("PasskeyLogin: userHandle parse error for credential, length: %d", len(userHandle)))
-			} else if userID != user.Id {
+			if parseErr != nil || userID != user.Id {
 				return nil, errors.New("用户句柄与凭证不匹配")
 			}
 		}
@@ -334,8 +332,10 @@ func PasskeyLoginFinish(c *gin.Context) {
 		return
 	}
 
-	setupLogin(modelUser, c)
-	return
+	if !allowAccountSecurityAction(c, modelUser.Id, "passkey_login") {
+		return
+	}
+	completePrimaryLogin(modelUser, c, "passkey")
 }
 
 func AdminResetPasskey(c *gin.Context) {
@@ -413,7 +413,7 @@ func PasskeyVerifyBegin(c *gin.Context) {
 	}
 
 	waUser := passkeysvc.NewWebAuthnUser(user, credential)
-	assertion, sessionData, err := wa.BeginLogin(waUser)
+	assertion, sessionData, err := wa.BeginLogin(waUser, webauthnlib.WithUserVerification(protocol.VerificationRequired))
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -473,23 +473,32 @@ func PasskeyVerifyFinish(c *gin.Context) {
 	}
 
 	waUser := passkeysvc.NewWebAuthnUser(user, credential)
-	_, err = wa.FinishLogin(waUser, *sessionData, c.Request)
+	verifiedCredential, err := wa.FinishLogin(waUser, *sessionData, c.Request)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	// 更新凭证的最后使用时间
+	// Persist the verified counter/flags as well as the last-used timestamp.
+	updated := model.NewPasskeyCredentialFromWebAuthn(user.Id, verifiedCredential)
+	if updated == nil || !allowAccountSecurityAction(c, user.Id, "passkey_verify") {
+		return
+	}
 	now := time.Now()
-	credential.LastUsedAt = &now
-	if err := model.UpsertPasskeyCredential(credential); err != nil {
+	updated.LastUsedAt = &now
+	if err := model.UpsertPasskeyCredential(updated); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
 	session := sessions.Default(c)
-	// Mark passkey as ready; /api/verify will convert this into the final secure verification session.
-	session.Set(PasskeyReadySessionKey, time.Now().Unix())
+	// Only a one-use server-side proof can finalize /api/verify.
+	proof, err := model.CreateAuthFlow(model.AuthFlowMatch{Purpose: "passkey_ready", Provider: "passkey", UserId: user.Id, Binding: service.SessionBinding(c)}, "", time.Minute)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	session.Set(PasskeyReadySessionKey, proof)
 	session.Delete(SecureVerificationSessionKey)
 	session.Delete(secureVerificationMethodSessionKey)
 	if err := session.Save(); err != nil {
@@ -504,38 +513,29 @@ func PasskeyVerifyFinish(c *gin.Context) {
 }
 
 func getSessionUser(c *gin.Context) (*model.User, error) {
-	session := sessions.Default(c)
-	idRaw := session.Get("id")
-	if idRaw == nil {
-		return nil, errors.New("未登录")
-	}
-	id, ok := idRaw.(int)
-	if !ok {
-		return nil, errors.New("无效的会话信息")
-	}
-	user := &model.User{Id: id}
-	if err := user.FillUserById(); err != nil {
-		return nil, err
-	}
-	if user.Status != common.UserStatusEnabled {
-		return nil, errors.New("该用户已被禁用")
-	}
-	return user, nil
+	user, _, err := service.CurrentSessionUser(c)
+	return user, err
 }
 
 func requirePasskeyRegistrationVerification(c *gin.Context, userID int) bool {
+	if !allowAccountSecurityAction(c, userID, "passkey_register") {
+		return false
+	}
 	twoFA, err := model.GetTwoFAByUserId(userID)
 	if err != nil {
 		common.ApiError(c, err)
 		return false
 	}
 	if twoFA == nil || !twoFA.IsEnabled {
-		return true
+		return requireSecureVerificationMethod(c, "")
 	}
 	return requireSecureVerificationMethod(c, secureVerificationMethod2FA)
 }
 
 func requirePasskeyDeleteVerification(c *gin.Context, userID int) bool {
+	if !allowAccountSecurityAction(c, userID, "passkey_delete") {
+		return false
+	}
 	twoFA, err := model.GetTwoFAByUserId(userID)
 	if err != nil {
 		common.ApiError(c, err)
@@ -562,20 +562,9 @@ func requirePasskeyDeleteVerification(c *gin.Context, userID int) bool {
 }
 
 func requireSecureVerificationMethod(c *gin.Context, method string) bool {
-	session := sessions.Default(c)
-	verifiedAt, ok := session.Get(SecureVerificationSessionKey).(int64)
-	if !ok || time.Now().Unix()-verifiedAt >= SecureVerificationTimeout {
-		session.Delete(SecureVerificationSessionKey)
-		session.Delete(secureVerificationMethodSessionKey)
-		_ = session.Save()
-		common.ApiErrorMsg(c, "请先完成安全验证")
-		return false
-	}
-
-	if verifiedMethod, ok := session.Get(secureVerificationMethodSessionKey).(string); !ok || verifiedMethod != method {
+	if !service.HasFreshSessionVerification(c, method, SecureVerificationTimeout*time.Second) {
 		common.ApiErrorMsg(c, "请先完成对应的安全验证")
 		return false
 	}
-
 	return true
 }

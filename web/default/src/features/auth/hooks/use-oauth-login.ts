@@ -185,10 +185,6 @@ export function useOAuthLogin(status: SystemStatus | null) {
     }
   }
 
-  const handleTelegramLogin = () => {
-    toast.info(t('Telegram login requires widget integration; coming soon'))
-  }
-
   const handleCustomOAuthLogin = async (provider: CustomOAuthProviderInfo) => {
     if (!provider.authorization_endpoint || !provider.client_id) return
 
@@ -229,7 +225,6 @@ export function useOAuthLogin(status: SystemStatus | null) {
     handleDiscordLogin,
     handleOIDCLogin,
     handleLinuxDOLogin,
-    handleTelegramLogin,
     handleCustomOAuthLogin,
   }
 }

@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"io"
 	"net/http"
+	"sync"
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/andybalholm/brotli"
@@ -13,14 +14,18 @@ import (
 
 type readCloser struct {
 	io.Reader
-	closeFn func() error
+	closeFn   func() error
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func (rc *readCloser) Close() error {
-	if rc.closeFn != nil {
-		return rc.closeFn()
-	}
-	return nil
+	rc.closeOnce.Do(func() {
+		if rc.closeFn != nil {
+			rc.closeErr = rc.closeFn()
+		}
+	})
+	return rc.closeErr
 }
 
 func DecompressRequestMiddleware() gin.HandlerFunc {
@@ -68,7 +73,15 @@ func DecompressRequestMiddleware() gin.HandlerFunc {
 			})
 			decompressed = true
 		case "zstd":
-			reader, err := zstd.NewReader(origBody)
+			// Bound both ordinary and single-segment frame windows. The output
+			// limit remains independent, so larger bodies can stream in small windows.
+			reader, err := zstd.NewReader(origBody,
+				zstd.WithDecoderMaxWindow(8<<20),
+				zstd.WithDecoderMaxMemory(uint64(min(maxBytes, 8<<20))),
+				zstd.WithDecoderConcurrency(1),
+				// Never take the eager DecodeAll shortcut before auth consumes a body.
+				zstd.WithDecodeBuffersBelow(0),
+			)
 			if err != nil {
 				_ = origBody.Close()
 				c.AbortWithStatus(http.StatusBadRequest)
@@ -84,13 +97,17 @@ func DecompressRequestMiddleware() gin.HandlerFunc {
 			decompressed = true
 		default:
 			// Even for uncompressed bodies, enforce a max size to avoid huge request allocations.
-			c.Request.Body = wrapMaxBytes(origBody)
+			c.Request.Body = wrapMaxBytes(&readCloser{Reader: origBody, closeFn: origBody.Close})
 		}
 		if decompressed {
 			c.Request.Header.Del("Content-Encoding")
+			c.Request.Header.Del("Content-Length")
+			c.Request.ContentLength = -1
 		}
 
-		// Continue processing the request
+		// Capture this body: handlers may replace Request.Body with a replay reader.
+		// Decoder resources must also be freed when auth aborts or a handler panics.
+		defer c.Request.Body.Close()
 		c.Next()
 	}
 }

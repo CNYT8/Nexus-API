@@ -25,8 +25,14 @@ import { PerformanceSection } from '../maintenance/performance-section'
 import { UpdateCheckerSection } from '../maintenance/update-checker-section'
 import type { OperationsSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { TaskUsagePluginsSection } from './task-usage-plugins-section'
 
 const OPERATIONS_SECTIONS = [
+  {
+    id: 'task-plugins',
+    titleKey: 'Task usage plugins',
+    build: () => <TaskUsagePluginsSection />,
+  },
   {
     id: 'behavior',
     titleKey: 'System Behavior',
@@ -51,6 +57,7 @@ const OPERATIONS_SECTIONS = [
         defaultValues={{
           ChannelDisableThreshold: settings.ChannelDisableThreshold,
           QuotaRemindThreshold: settings.QuotaRemindThreshold,
+          QuotaRemindEnabled: settings.QuotaRemindEnabled,
           AutomaticDisableChannelEnabled:
             settings.AutomaticDisableChannelEnabled,
           AutomaticEnableChannelEnabled: settings.AutomaticEnableChannelEnabled,

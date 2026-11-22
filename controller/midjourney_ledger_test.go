@@ -78,8 +78,8 @@ func midjourneyLedgerCount(t *testing.T, db *gorm.DB, value interface{}) int64 {
 }
 
 func TestSettleMidjourneyTaskBillingLedgerFailureRefunds(t *testing.T) {
-	db, user, _ := setupMidjourneyLedgerTest(t)
-	key, err := service.ReservePendingTaskWalletQuota(user.Id, 3000)
+	db, user, token := setupMidjourneyLedgerTest(t)
+	key, err := service.ReservePendingMidjourneyQuota(user.Id, token.Id, 3000)
 	require.NoError(t, err)
 	require.Equal(t, 7000, midjourneyUserQuota(t, db, user.Id))
 
@@ -90,7 +90,10 @@ func TestSettleMidjourneyTaskBillingLedgerFailureRefunds(t *testing.T) {
 		Action:     constant.MjActionImagine,
 		MjId:       "mj-ledger-failure",
 		ChannelId:  1,
+		TokenId:    token.Id,
+		Status:     "FAILURE",
 	}
+	require.NoError(t, task.Insert())
 	settleMidjourneyTaskBilling(context.Background(), task, false)
 
 	require.Equal(t, 10000, midjourneyUserQuota(t, db, user.Id))
@@ -105,14 +108,18 @@ func TestSettleMidjourneyTaskBillingLedgerFailureRefunds(t *testing.T) {
 		Select("COALESCE(SUM(quota_held),0)").Scan(&held).Error)
 	require.Zero(t, held)
 
-	// A duplicate terminal callback must not refund twice.
+	// A duplicate terminal callback must not refund either side twice.
 	settleMidjourneyTaskBilling(context.Background(), task, false)
 	require.Equal(t, 10000, midjourneyUserQuota(t, db, user.Id))
+	require.NoError(t, db.First(token, token.Id).Error)
+	require.Equal(t, 10000, token.RemainQuota)
+	require.Zero(t, token.UsedQuota)
+	require.Zero(t, task.Quota)
 }
 
 func TestSettleMidjourneyTaskBillingLedgerSuccessFinalizes(t *testing.T) {
-	db, user, _ := setupMidjourneyLedgerTest(t)
-	key, err := service.ReservePendingTaskWalletQuota(user.Id, 3000)
+	db, user, token := setupMidjourneyLedgerTest(t)
+	key, err := service.ReservePendingMidjourneyQuota(user.Id, token.Id, 3000)
 	require.NoError(t, err)
 
 	task := &model.Midjourney{
@@ -122,7 +129,10 @@ func TestSettleMidjourneyTaskBillingLedgerSuccessFinalizes(t *testing.T) {
 		Action:     constant.MjActionImagine,
 		MjId:       "mj-ledger-success",
 		ChannelId:  1,
+		TokenId:    token.Id,
+		Status:     "SUCCESS",
 	}
+	require.NoError(t, task.Insert())
 	settleMidjourneyTaskBilling(context.Background(), task, true)
 
 	require.Equal(t, 7000, midjourneyUserQuota(t, db, user.Id))
@@ -138,6 +148,9 @@ func TestSettleMidjourneyTaskBillingLedgerSuccessFinalizes(t *testing.T) {
 	// A duplicate success callback must not consume or reward twice.
 	settleMidjourneyTaskBilling(context.Background(), task, true)
 	require.Equal(t, 7000, midjourneyUserQuota(t, db, user.Id))
+	require.NoError(t, db.First(token, token.Id).Error)
+	require.Equal(t, 7000, token.RemainQuota)
+	require.Equal(t, 3000, token.UsedQuota)
 	require.EqualValues(t, 1, midjourneyLedgerCount(t, db, &model.WalletConsumptionSettlement{}))
 	require.EqualValues(t, 1, midjourneyLedgerCount(t, db, &model.RebateRecord{}))
 }
@@ -160,7 +173,9 @@ func TestSettleMidjourneyTaskBillingLegacyFailureKeepsRefundPath(t *testing.T) {
 		Action:    constant.MjActionImagine,
 		MjId:      "mj-legacy-failure",
 		ChannelId: 1,
+		Status:    "FAILURE",
 	}
+	require.NoError(t, task.Insert())
 	settleMidjourneyTaskBilling(context.Background(), task, false)
 	require.Equal(t, 8000, midjourneyUserQuota(t, db, user.Id))
 
@@ -170,7 +185,7 @@ func TestSettleMidjourneyTaskBillingLegacyFailureKeepsRefundPath(t *testing.T) {
 	require.EqualValues(t, 3000, logs[0].Quota)
 	require.Contains(t, logs[0].ModelName, "imagine")
 
-	// Legacy success keeps the historical no-op behavior.
+	// A stale caller cannot change the stored terminal outcome or refund twice.
 	settleMidjourneyTaskBilling(context.Background(), task, true)
 	require.Equal(t, 8000, midjourneyUserQuota(t, db, user.Id))
 }

@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Col, Form, Row, Spin } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
+import i18next from 'i18next';
 import {
   API,
   showError,
@@ -26,8 +27,8 @@ import {
   showWarning,
   toBoolean,
 } from '../../../helpers';
+import { microsToMoney, moneyToMicros } from './rebate-money';
 
-const MICROS = 1000000;
 const defaults = {
   enabled: false,
   countDuringClosure: false,
@@ -38,9 +39,9 @@ const defaults = {
   payoutIntervalHours: 24,
   siteTimezone: 'UTC',
   inviterLimitPeriod: 'monthly',
-  inviteeCap: 0,
-  inviterEligibleCap: 0,
-  inviterMinPaid: 0,
+  inviteeCap: '0',
+  inviterEligibleCap: '0',
+  inviterMinPaid: '0',
   payoutHoldHours: 0,
 };
 const moneyFields = new Set([
@@ -78,54 +79,114 @@ const labels = {
 };
 
 const toDisplayValue = (field, value) => {
+  if (moneyFields.has(field)) return microsToMoney(String(value));
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
   if (field === 'ratePercent') return numeric / 100;
-  if (moneyFields.has(field)) return numeric / MICROS;
   return numeric;
 };
 
 const toStoredValue = (field, value) => {
+  if (moneyFields.has(field)) return moneyToMicros(value);
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric < 0) return null;
   if (field === 'ratePercent') return Math.round(numeric * 100);
-  if (moneyFields.has(field)) {
-    const micros = Math.round(numeric * MICROS);
-    return Number.isSafeInteger(micros) ? micros : null;
-  }
   return numeric;
 };
 
-export default function SettingsRebate(props) {
+const readRebateOptions = (options) => {
+  const next = { ...defaults };
+  Object.keys(optionKey).forEach((field) => {
+    const raw = options?.[optionKey[field]];
+    if (raw === undefined) return;
+    if (field === 'enabled' || field === 'countDuringClosure') {
+      next[field] = toBoolean(raw);
+    } else if (numberFields.has(field)) {
+      next[field] = toDisplayValue(field, raw);
+    } else {
+      next[field] = String(raw);
+    }
+  });
+  return next;
+};
+
+export default function SettingsRebate() {
   const { t } = useTranslation();
   const [inputs, setInputs] = useState(defaults);
   const [original, setOriginal] = useState(defaults);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [reloadRequired, setReloadRequired] = useState(true);
+  const pending = useRef(false);
+  const baselineUnavailable = useRef(true);
+  const baseline = useRef(null);
+  const unsavedChanges = useRef({});
   const refForm = useRef();
-
-  useEffect(() => {
-    const next = { ...defaults };
-    Object.keys(optionKey).forEach((field) => {
-      const raw = props.options?.[`rebate_setting.${optionKey[field]}`];
-      if (raw === undefined) return;
-      if (field === 'enabled' || field === 'countDuringClosure') {
-        next[field] = toBoolean(raw);
-      } else if (numberFields.has(field)) {
-        next[field] = toDisplayValue(field, raw);
-      } else {
-        next[field] = String(raw);
-      }
-    });
-    setInputs(next);
-    setOriginal(structuredClone(next));
-    refForm.current?.setValues(next);
-  }, [props.options]);
+  const reloadController = useRef(null);
 
   const update = (field, value) => {
+    if (pending.current || baselineUnavailable.current) return;
+    if (value === original[field]) {
+      delete unsavedChanges.current[field];
+    } else {
+      unsavedChanges.current[field] = value;
+    }
     setInputs((current) => ({ ...current, [field]: value }));
   };
 
+  const reloadSavedOptions = useCallback(async (signal) => {
+    baselineUnavailable.current = true;
+    setReloadRequired(true);
+    try {
+      const { data } = await API.get('/api/option/rebate', {
+        disableDuplicate: true,
+        skipErrorHandler: true,
+        signal,
+      });
+      if (signal?.aborted) return;
+      if (data?.success !== true || !data.data?.revision || !data.data.fields) {
+        throw new Error('Failed to reload saved rebate settings');
+      }
+      baseline.current = data.data;
+      const next = readRebateOptions(data.data.fields);
+      const draft = { ...next, ...unsavedChanges.current };
+      setInputs(draft);
+      setOriginal(structuredClone(next));
+      refForm.current?.setValues(draft);
+      baselineUnavailable.current = false;
+      setReloadRequired(false);
+    } catch (_error) {
+      if (!signal?.aborted) showError(i18next.t('刷新失败'));
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    reloadController.current = controller;
+    pending.current = true;
+    setLoading(true);
+    void reloadSavedOptions(controller.signal).finally(() => {
+      if (controller.signal.aborted) return;
+      pending.current = false;
+      setLoading(false);
+    });
+    return () => controller.abort();
+  }, [reloadSavedOptions]);
+
+  const retryReload = async () => {
+    if (pending.current) return;
+    pending.current = true;
+    setLoading(true);
+    try {
+      await reloadSavedOptions(reloadController.current?.signal);
+    } finally {
+      pending.current = false;
+      setLoading(false);
+    }
+  };
+
   const onSubmit = async () => {
+    if (pending.current || baselineUnavailable.current || !baseline.current)
+      return;
     const changed = Object.keys(optionKey).filter(
       (field) => inputs[field] !== original[field],
     );
@@ -140,8 +201,9 @@ export default function SettingsRebate(props) {
       inputs.payoutMinute > 59 ||
       inputs.payoutHoldHours < 0 ||
       inputs.payoutHoldHours > 720 ||
-      inputs.payoutIntervalHours < 1 ||
+      inputs.payoutIntervalHours < 0 ||
       inputs.payoutIntervalHours > 720 ||
+      (inputs.payoutMode === 'custom' && inputs.payoutIntervalHours === 0) ||
       !['immediate', 'scheduled', 'half_day', 'custom'].includes(
         inputs.payoutMode,
       ) ||
@@ -150,7 +212,7 @@ export default function SettingsRebate(props) {
       return showError(t('返利设置数值无效'));
     }
 
-    const updates = [];
+    const fields = { ...baseline.current.fields };
     for (const field of changed) {
       const value = numberFields.has(field)
         ? toStoredValue(field, inputs[field])
@@ -161,22 +223,43 @@ export default function SettingsRebate(props) {
       ) {
         return showError(t('返利设置数值无效'));
       }
-      updates.push(
-        API.put('/api/option/', {
-          key: `rebate_setting.${optionKey[field]}`,
-          value: String(value),
-        }),
-      );
+      fields[optionKey[field]] = String(value);
     }
 
+    pending.current = true;
     setLoading(true);
     try {
-      await Promise.all(updates);
+      const { data } = await API.put(
+        '/api/option/rebate',
+        {
+          fields,
+          revision: baseline.current.revision,
+        },
+        { skipErrorHandler: true },
+      );
+      if (data?.success !== true || !data.data?.revision || !data.data.fields) {
+        throw new Error(data?.message || 'Failed to save rebate settings');
+      }
+      baseline.current = data.data;
+      for (const field of changed) {
+        // Only acknowledge this submitted draft; retain any later edits.
+        if (unsavedChanges.current[field] === inputs[field]) {
+          delete unsavedChanges.current[field];
+        }
+      }
+      const next = readRebateOptions(data.data.fields);
+      const draft = { ...next, ...unsavedChanges.current };
+      setInputs(draft);
+      setOriginal(structuredClone(next));
+      refForm.current?.setValues(draft);
       showSuccess(t('保存成功'));
-      props.refresh();
-    } catch (error) {
+    } catch (_error) {
+      // Keep the entire draft, even when the response was lost after commit.
+      baselineUnavailable.current = true;
+      setReloadRequired(true);
       showError(t('保存失败，请重试'));
     } finally {
+      pending.current = false;
       setLoading(false);
     }
   };
@@ -184,6 +267,7 @@ export default function SettingsRebate(props) {
   return (
     <Spin spinning={loading}>
       <Form
+        disabled={loading || reloadRequired}
         values={inputs}
         getFormApi={(formApi) => {
           refForm.current = formApi;
@@ -298,17 +382,25 @@ export default function SettingsRebate(props) {
             </Col>
             {Object.keys(labels).map((field) => (
               <Col xs={24} sm={12} md={8} key={field}>
-                <Form.InputNumber
+                <Form.Input
                   field={field}
                   label={t(labels[field])}
-                  min={0}
-                  step={0.000001}
-                  onChange={(value) => update(field, Number(value))}
+                  type='text'
+                  inputMode='decimal'
+                  onChange={(value) => update(field, value)}
                 />
               </Col>
             ))}
           </Row>
-          <Button onClick={onSubmit}>{t('保存返利设置')}</Button>
+          <Button disabled={loading || reloadRequired} onClick={onSubmit}>
+            {t('保存返利设置')}
+          </Button>
+          {reloadRequired && !loading && (
+            <div className='mt-3 flex items-center gap-3' role='status'>
+              <span>{t('刷新失败')}</span>
+              <Button onClick={retryReload}>{t('重试')}</Button>
+            </div>
+          )}
         </Form.Section>
       </Form>
     </Spin>

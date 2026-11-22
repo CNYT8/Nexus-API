@@ -71,7 +71,7 @@ export function WorkerSettingsSection({
     defaultValues,
   })
 
-  useResetForm(form, defaultValues)
+  const submitForm = useResetForm(form, defaultValues)
 
   const onSubmit = async (values: WorkerFormValues) => {
     const sanitizedUrl = removeTrailingSlash(values.WorkerUrl)
@@ -99,17 +99,15 @@ export function WorkerSettingsSection({
       })
     }
 
-    for (const update of updates) {
-      await updateOption.mutateAsync(update)
-    }
+    await updateOption.saveOptions(updates)
   }
 
   return (
     <SettingsSection title={t('Worker Proxy')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)} autoComplete='off'>
+        <SettingsForm onSubmit={submitForm(onSubmit)} autoComplete='off'>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
             saveLabel='Save Worker settings'
           />

@@ -6,10 +6,20 @@ const fs = require('fs');
 
 let mainWindow;
 let serverProcess;
+let serverShutdownStarted = false;
 let tray = null;
 let serverErrorLogs = [];
 const PORT = 3000;
 const DEV_FRONTEND_PORT = 5173; // Vite dev server port
+
+function serverShutdownWaitMs() {
+  const raw = process.env.SHUTDOWN_TIMEOUT_SECONDS || '120';
+  const seconds = Number(raw);
+  // Match the Go duration range; invalid configuration makes the backend exit.
+  const valid = /^\+?\d+$/.test(raw) && Number.isSafeInteger(seconds) &&
+    seconds > 0 && seconds <= 9223372036;
+  return (valid ? seconds : 120) * 1000 + 5000;
+}
 
 // 保存日志到文件并打开
 function saveAndOpenErrorLog() {
@@ -256,6 +266,9 @@ function startServer() {
 
     // 生产模式：启动二进制服务器
     const env = { ...process.env, PORT: PORT.toString() };
+    if (process.platform === 'win32') {
+      env.NEXUS_SHUTDOWN_STDIN = '1';
+    }
 
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
@@ -569,22 +582,56 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', (event) => {
-  if (serverProcess) {
-    event.preventDefault();
+  if (!serverProcess) {
+    return;
+  }
+  event.preventDefault();
+  if (serverShutdownStarted) {
+    return;
+  }
+  serverShutdownStarted = true;
 
-    console.log('Shutting down server...');
-    serverProcess.kill('SIGTERM');
+  const child = serverProcess;
+  if (child.exitCode !== null || child.signalCode !== null) {
+    serverProcess = null;
+    app.exit();
+    return;
+  }
 
-    setTimeout(() => {
-      if (serverProcess) {
-        serverProcess.kill('SIGKILL');
-      }
-      app.exit();
-    }, 5000);
+  console.log('Shutting down server...');
+  const deadline = Date.now() + serverShutdownWaitMs();
+  let forceTimer;
+  const waitForExit = () => {
+    const remaining = deadline - Date.now();
+    if (remaining > 0) {
+      // Node timers above this limit fire immediately; chunk long overrides.
+      forceTimer = setTimeout(waitForExit, Math.min(remaining, 2147483647));
+      return;
+    }
+    if (serverProcess === child) {
+      console.error('Server shutdown deadline exceeded; terminating child.');
+      child.kill('SIGKILL');
+    }
+    app.exit();
+  };
 
-    serverProcess.on('close', () => {
+  // Register before signaling so a fast exit cannot leave a pending timer.
+  child.once('close', () => {
+    clearTimeout(forceTimer);
+    if (serverProcess === child) {
       serverProcess = null;
-      app.exit();
+    }
+    app.exit();
+  });
+  waitForExit();
+  if (process.platform === 'win32') {
+    // Node's SIGTERM is an immediate TerminateProcess on Windows. The private
+    // pipe asks the Go helper to run the same graceful shutdown sequence.
+    child.stdin.once('error', (err) => {
+      console.error('Failed to request graceful server shutdown:', err);
     });
+    child.stdin.end('shutdown\n');
+  } else {
+    child.kill('SIGTERM');
   }
 });

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2, RefreshCw, DollarSign } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -60,24 +60,43 @@ export function BalanceQueryDialog({
   const [codexUsageResponse, setCodexUsageResponse] =
     useState<CodexUsageDialogData | null>(null)
 
+  const [rawResponse, setRawResponse] = useState<string | null>(null)
+  const requestId = useRef(0)
+  const scope = useRef({ open, id: currentRow?.id })
+  scope.current = { open, id: currentRow?.id }
+  const isCurrent = (request: number, id: number) =>
+    request === requestId.current && scope.current.open && scope.current.id === id
+
+  useEffect(() => {
+    requestId.current++
+    setBalance(null)
+    setBalanceUpdatedTime(null)
+    setRawResponse(null)
+    setCodexUsageResponse(null)
+    setIsQuerying(false)
+    return () => { requestId.current++ }
+  }, [open, currentRow?.id])
+
   const isCodex = currentRow?.type === 57
 
   const handleQueryCodexUsage = async () => {
     const row = currentRow
-    if (!row) return
+    if (!row || !open) return
+    const request = ++requestId.current
     setIsQuerying(true)
     try {
       const res = await getCodexUsage(row.id)
+      if (!isCurrent(request, row.id)) return
       if (!res.success) {
         throw new Error(res.message || t('Failed to fetch usage'))
       }
       setCodexUsageResponse(res)
     } catch (error: unknown) {
-      toast.error(
+      if (isCurrent(request, row.id)) toast.error(
         error instanceof Error ? error.message : t('Failed to fetch usage')
       )
     } finally {
-      setIsQuerying(false)
+      if (isCurrent(request, row.id)) setIsQuerying(false)
     }
   }
 
@@ -86,15 +105,19 @@ export function BalanceQueryDialog({
     if (!open) return
     handleQueryCodexUsage()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, isCodex])
+  }, [open, isCodex, currentRow?.id])
 
   if (!currentRow) return null
 
   const handleQueryBalance = async () => {
+    if (!open || isQuerying) return
+    const request = ++requestId.current
     setIsQuerying(true)
+    setRawResponse(null)
     try {
       const response = await updateChannelBalance(currentRow.id)
-      if (response.success && response.balance !== undefined) {
+      if (!isCurrent(request, currentRow.id)) return
+      if (response.success && typeof response.balance === 'number' && Number.isFinite(response.balance)) {
         const newBalance = response.balance
         const now = Math.floor(Date.now() / 1000)
 
@@ -113,19 +136,22 @@ export function BalanceQueryDialog({
         await queryClient.invalidateQueries({
           queryKey: channelsQueryKeys.lists(),
         })
+      } else if (response.success && Object.prototype.hasOwnProperty.call(response, 'raw_response')) {
+        setRawResponse(JSON.stringify(response.raw_response, null, 2) ?? 'null')
       } else {
-        toast.error(response.message || t('Failed to query balance'))
+        toast.error(response.message || t('余额查询未返回有效余额或原始响应'))
       }
-    } catch (error: unknown) {
-      toast.error(
-        error instanceof Error ? error.message : t('Failed to query balance')
-      )
+    } catch {
+      if (isCurrent(request, currentRow.id)) toast.error(t('余额查询失败，请稍后重试'))
     } finally {
-      setIsQuerying(false)
+      if (isCurrent(request, currentRow.id)) setIsQuerying(false)
     }
   }
 
   const handleClose = () => {
+    requestId.current++
+    setRawResponse(null)
+    setIsQuerying(false)
     setBalance(null)
     setBalanceUpdatedTime(null)
     setCodexUsageResponse(null)
@@ -189,6 +215,14 @@ export function BalanceQueryDialog({
               )}
             </div>
           </div>
+
+          {rawResponse !== null && (
+            <section className='min-w-0 space-y-2' aria-live='polite'>
+              <h3 className='text-sm font-medium'>{t('余额查询原始响应')}</h3>
+              <p className='text-muted-foreground text-xs'>{t('接口未返回可用余额，以下为原始响应；余额和更新时间未修改')}</p>
+              <pre className='bg-muted max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-md p-3 text-xs'>{rawResponse}</pre>
+            </section>
+          )}
 
           {/* Balance Update Button */}
           <Button

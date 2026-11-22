@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -49,6 +49,7 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 
 const ssrfSchema = z.object({
@@ -158,9 +159,7 @@ const isEqual = (a: unknown, b: unknown) => {
 export function SSRFSection({ defaultValues }: SSRFSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
-  const baselineRef = useRef<NormalizedSSRFValues>(
-    normalizeDefaults(defaultValues)
-  )
+  const baseline = normalizeDefaults(defaultValues)
 
   const formDefaults = useMemo(
     () => buildFormDefaults(defaultValues),
@@ -172,31 +171,32 @@ export function SSRFSection({ defaultValues }: SSRFSectionProps) {
     defaultValues: formDefaults,
   })
 
-  useEffect(() => {
-    baselineRef.current = normalizeDefaults(defaultValues)
-    form.reset(buildFormDefaults(defaultValues))
-  }, [defaultValues, form])
+  const submitForm = useResetForm(form, formDefaults, (value, path) => {
+    if (typeof value !== 'string') return value
+    if (path === 'fetch_setting.allowed_ports') return parsePorts(value)
+    if (path === 'fetch_setting.domain_list' || path === 'fetch_setting.ip_list') {
+      return splitLines(value)
+    }
+    return value
+  })
 
   const onSubmit = async (data: SSRFFormValues) => {
     const normalized = normalizeFormValues(data)
     const updates = (
       Object.keys(normalized) as Array<keyof NormalizedSSRFValues>
-    ).filter((key) => !isEqual(normalized[key], baselineRef.current[key]))
+    ).filter((key) => !isEqual(normalized[key], baseline[key]))
 
     if (updates.length === 0) {
       toast.info(t('No changes to save'))
       return
     }
 
-    for (const key of updates) {
-      const value = normalized[key]
-      await updateOption.mutateAsync({
-        key,
-        value: Array.isArray(value) ? JSON.stringify(value) : value,
+    await updateOption.saveOptions(
+      updates.map((key) => {
+        const value = normalized[key]
+        return { key, value: Array.isArray(value) ? JSON.stringify(value) : value }
       })
-    }
-
-    baselineRef.current = normalized
+    )
   }
 
   const domainFilterMode = form.watch('fetch_setting.domain_filter_mode')
@@ -205,9 +205,9 @@ export function SSRFSection({ defaultValues }: SSRFSectionProps) {
   return (
     <SettingsSection title={t('SSRF Protection')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
             saveLabel='Save SSRF settings'
           />

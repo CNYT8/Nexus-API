@@ -38,6 +38,10 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		if dto.IsSearchPath(c.Request.URL.Path) && !searchModelAllowed(c, modelRequest.Model) {
+			abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorTokenModelForbidden, map[string]any{"Model": modelRequest.Model}))
+			return
+		}
 		if ok {
 			id, err := strconv.Atoi(channelId.(string))
 			if err != nil {
@@ -51,6 +55,10 @@ func Distribute() func(c *gin.Context) {
 			}
 			if channel.Status != common.ChannelStatusEnabled {
 				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorChannelDisabled))
+				return
+			}
+			if c.GetBool("responses_websocket") && !service.ChannelSupportsResponsesWebSocket(channel) {
+				abortWithOpenAiMessage(c, http.StatusForbidden, "channel does not permit native Responses WebSocket")
 				return
 			}
 		} else {
@@ -104,18 +112,22 @@ func Distribute() func(c *gin.Context) {
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
 					affinityUsable := false
 					preferred, err := model.CacheGetChannel(preferredChannelID)
+					if c.GetBool("responses_websocket") {
+						preferred, err = model.GetChannelById(preferredChannelID, true)
+					}
 					if err == nil && preferred != nil {
 						if preferred.Status != common.ChannelStatusEnabled {
 							if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 								abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorAffinityChannelDisabled))
 								return
 							}
-						} else if !channelSupportsRequestPath(preferred, c.Request.URL.Path) {
-							// Keep selecting normally when the affinity channel does not
-							// expose the requested Advanced Custom route.
+						} else if !channelSupportsRequestPath(preferred, c.Request.URL.Path) ||
+							c.GetBool("responses_websocket") && !service.ChannelSupportsResponsesWebSocket(preferred) {
+							// Fall back to ordinary selection when affinity cannot serve
+							// the requested path or native Responses WebSocket protocol.
 						} else if usingGroup == "auto" {
 							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-							autoGroups := service.GetUserAutoGroup(userGroup)
+							autoGroups := service.GetRequestAutoGroups(c, userGroup)
 							for _, g := range autoGroups {
 								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
 									selectGroup = g
@@ -168,7 +180,11 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		if setupErr != nil && dto.IsSearchPath(c.Request.URL.Path) {
+			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, "search channel is unavailable")
+			return
+		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
@@ -254,6 +270,16 @@ func getJSONStringValue(result gjson.Result, field string) (string, error) {
 }
 
 func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
+	if dto.IsSearchPath(c.Request.URL.Path) {
+		request, err := getSearchModelRequest(c)
+		return request, true, err
+	}
+	if model := common.GetContextKeyString(c, constant.ContextKeyNativePluginModel); model != "" {
+		// A plugin-declared native endpoint resolves its model while decoding the
+		// vendor body, so the regular chat-body parsing must not run for it.
+		c.Set("relay_mode", relayconstant.RelayModeVideoSubmit)
+		return &ModelRequest{Model: model}, true, nil
+	}
 	var modelRequest ModelRequest
 	shouldSelectChannel := true
 	var err error

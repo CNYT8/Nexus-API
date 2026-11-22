@@ -25,11 +25,12 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ConfirmDialog } from '@/components/confirm-dialog'
-import { resetModelRatios } from '../api'
 import { SettingsSection } from '../components/settings-section'
+import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { GroupRatioForm } from './group-ratio-form'
 import { ModelRatioForm } from './model-ratio-form'
+import { resetModelRatiosAndRefresh } from './reset-model-ratios'
 import { ToolPriceSettings } from './tool-price-settings'
 import { UpstreamRatioSync } from './upstream-ratio-sync'
 import {
@@ -241,15 +242,11 @@ export function RatioSettingsCard({
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const resetMutation = useMutation({
-    mutationFn: resetModelRatios,
-    onSuccess: (data) => {
-      if (data.success) {
-        toast.success(t('Model prices reset successfully'))
-        queryClient.invalidateQueries({ queryKey: ['system-options'] })
-        setConfirmOpen(false)
-      } else {
-        toast.error(data.message || t('Failed to reset model ratios'))
-      }
+    mutationFn: () => resetModelRatiosAndRefresh(queryClient),
+    onMutate: () => queryClient.cancelQueries({ queryKey: ['system-options'] }),
+    onSuccess: () => {
+      toast.success(t('Model prices reset successfully'))
+      setConfirmOpen(false)
     },
     onError: (error: Error) => {
       toast.error(error.message || t('Failed to reset model ratios'))
@@ -342,23 +339,22 @@ export function RatioSettingsCard({
       BillingMode: normalizeJsonString(modelDefaults.BillingMode),
       BillingExpr: normalizeJsonString(modelDefaults.BillingExpr),
     }
-
-    modelForm.reset({
-      ...modelDefaults,
-      ModelPrice: formatJsonForTextarea(modelDefaults.ModelPrice),
-      ModelRatio: formatJsonForTextarea(modelDefaults.ModelRatio),
-      CacheRatio: formatJsonForTextarea(modelDefaults.CacheRatio),
-      CreateCacheRatio: formatJsonForTextarea(modelDefaults.CreateCacheRatio),
-      CompletionRatio: formatJsonForTextarea(modelDefaults.CompletionRatio),
-      ImageRatio: formatJsonForTextarea(modelDefaults.ImageRatio),
-      AudioRatio: formatJsonForTextarea(modelDefaults.AudioRatio),
-      AudioCompletionRatio: formatJsonForTextarea(
-        modelDefaults.AudioCompletionRatio
-      ),
-      BillingMode: formatJsonForTextarea(modelDefaults.BillingMode),
-      BillingExpr: formatJsonForTextarea(modelDefaults.BillingExpr),
-    })
-  }, [modelDefaults, modelForm])
+  }, [modelDefaults])
+  const submitModelForm = useResetForm(modelForm, {
+    ...modelDefaults,
+    ModelPrice: formatJsonForTextarea(modelDefaults.ModelPrice),
+    ModelRatio: formatJsonForTextarea(modelDefaults.ModelRatio),
+    CacheRatio: formatJsonForTextarea(modelDefaults.CacheRatio),
+    CreateCacheRatio: formatJsonForTextarea(modelDefaults.CreateCacheRatio),
+    CompletionRatio: formatJsonForTextarea(modelDefaults.CompletionRatio),
+    ImageRatio: formatJsonForTextarea(modelDefaults.ImageRatio),
+    AudioRatio: formatJsonForTextarea(modelDefaults.AudioRatio),
+    AudioCompletionRatio: formatJsonForTextarea(
+      modelDefaults.AudioCompletionRatio
+    ),
+    BillingMode: formatJsonForTextarea(modelDefaults.BillingMode),
+    BillingExpr: formatJsonForTextarea(modelDefaults.BillingExpr),
+  })
 
   useEffect(() => {
     groupNormalizedDefaults.current = {
@@ -373,20 +369,19 @@ export function RatioSettingsCard({
       ),
       GroupDescriptions: normalizeJsonString(groupDefaults.GroupDescriptions),
     }
-
-    groupForm.reset({
-      ...groupDefaults,
-      GroupRatio: formatJsonForTextarea(groupDefaults.GroupRatio),
-      TopupGroupRatio: formatJsonForTextarea(groupDefaults.TopupGroupRatio),
-      UserUsableGroups: formatJsonForTextarea(groupDefaults.UserUsableGroups),
-      GroupGroupRatio: formatJsonForTextarea(groupDefaults.GroupGroupRatio),
-      AutoGroups: formatJsonForTextarea(groupDefaults.AutoGroups),
-      GroupSpecialUsableGroup: formatJsonForTextarea(
-        groupDefaults.GroupSpecialUsableGroup
-      ),
-      GroupDescriptions: formatJsonForTextarea(groupDefaults.GroupDescriptions),
-    })
-  }, [groupDefaults, groupForm])
+  }, [groupDefaults])
+  const submitGroupForm = useResetForm(groupForm, {
+    ...groupDefaults,
+    GroupRatio: formatJsonForTextarea(groupDefaults.GroupRatio),
+    TopupGroupRatio: formatJsonForTextarea(groupDefaults.TopupGroupRatio),
+    UserUsableGroups: formatJsonForTextarea(groupDefaults.UserUsableGroups),
+    GroupGroupRatio: formatJsonForTextarea(groupDefaults.GroupGroupRatio),
+    AutoGroups: formatJsonForTextarea(groupDefaults.AutoGroups),
+    GroupSpecialUsableGroup: formatJsonForTextarea(
+      groupDefaults.GroupSpecialUsableGroup
+    ),
+    GroupDescriptions: formatJsonForTextarea(groupDefaults.GroupDescriptions),
+  })
 
   const saveModelRatios = useCallback(
     async (values: ModelFormValues) => {
@@ -421,10 +416,12 @@ export function RatioSettingsCard({
         return
       }
 
-      for (const key of updates) {
-        const apiKey = apiKeyMap[key as string] || (key as string)
-        await updateOption.mutateAsync({ key: apiKey, value: normalized[key] })
-      }
+      await updateOption.saveOptions(
+        updates.map((key) => ({
+          key: apiKeyMap[key] || key,
+          value: normalized[key],
+        }))
+      )
     },
     [t, updateOption]
   )
@@ -457,10 +454,12 @@ export function RatioSettingsCard({
         (key) => normalized[key] !== groupNormalizedDefaults.current[key]
       )
 
-      for (const key of updates) {
-        const apiKey = apiKeyMap[key] || key
-        await updateOption.mutateAsync({ key: apiKey, value: normalized[key] })
-      }
+      await updateOption.saveOptions(
+        updates.map((key) => ({
+          key: apiKeyMap[key] || key,
+          value: normalized[key],
+        }))
+      )
     },
     [updateOption]
   )
@@ -495,7 +494,7 @@ export function RatioSettingsCard({
     if (tab === 'models') {
       return (
         <ModelRatioForm
-          form={modelForm}
+          form={{ ...modelForm, handleSubmit: submitModelForm }}
           onSave={saveModelRatios}
           onReset={handleResetRatios}
           isSaving={updateOption.isPending}
@@ -506,7 +505,7 @@ export function RatioSettingsCard({
     if (tab === 'unset-models') {
       return (
         <ModelRatioForm
-          form={modelForm}
+          form={{ ...modelForm, handleSubmit: submitModelForm }}
           onSave={saveModelRatios}
           onReset={handleResetRatios}
           isSaving={updateOption.isPending}
@@ -518,7 +517,7 @@ export function RatioSettingsCard({
     if (tab === 'groups') {
       return (
         <GroupRatioForm
-          form={groupForm}
+          form={{ ...groupForm, handleSubmit: submitGroupForm }}
           onSave={saveGroupRatios}
           isSaving={updateOption.isPending}
         />

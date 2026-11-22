@@ -182,25 +182,22 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
       const res = await API.get(url);
       const { success, message, data } = res.data;
       if (success) {
-        setQuotaData(data);
-        if (data.length === 0) {
-          data.push({
-            count: 0,
-            model_name: '无数据',
-            quota: 0,
-            created_at: now.getTime() / 1000,
-          });
-        }
-        data.sort((a, b) => a.created_at - b.created_at);
-        return data;
+        const rows = [...(data || [])].sort(
+          (a, b) => a.created_at - b.created_at,
+        );
+        setQuotaData(rows);
+        return rows;
       } else {
         showError(message);
-        return [];
+        return null;
       }
+    } catch (error) {
+      showError(error);
+      return null;
     } finally {
       setLoading(false);
     }
-  }, [inputs, dataExportDefaultTime, isAdminUser, now]);
+  }, [inputs, dataExportDefaultTime, isAdminUser]);
 
   const loadUptimeData = useCallback(async () => {
     setUptimeLoading(true);
@@ -235,11 +232,11 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
         return data || [];
       } else {
         showError(message);
-        return [];
+        return null;
       }
     } catch (err) {
       console.error(err);
-      return [];
+      return null;
     }
   }, [inputs, isAdminUser]);
 
@@ -262,7 +259,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const handleSearchConfirm = useCallback(
     async (updateChartDataCallback) => {
       const data = await refresh();
-      if (data && data.length > 0 && updateChartDataCallback) {
+      if (Array.isArray(data) && updateChartDataCallback) {
         updateChartDataCallback(data);
       }
       setSearchModalVisible(false);

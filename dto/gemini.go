@@ -20,6 +20,7 @@ type GeminiChatRequest struct {
 	ToolConfig         *ToolConfig                `json:"toolConfig,omitempty"`
 	SystemInstructions *GeminiChatContent         `json:"systemInstruction,omitempty"`
 	CachedContent      string                     `json:"cachedContent,omitempty"`
+	ContinuationToken  json.RawMessage            `json:"continuationToken,omitempty"`
 }
 
 // UnmarshalJSON allows GeminiChatRequest to accept both snake_case and camelCase fields.
@@ -28,6 +29,7 @@ func (r *GeminiChatRequest) UnmarshalJSON(data []byte) error {
 	var aux struct {
 		Alias
 		SystemInstructionSnake *GeminiChatContent `json:"system_instruction,omitempty"`
+		ContinuationTokenSnake json.RawMessage    `json:"continuation_token,omitempty"`
 	}
 
 	if err := common.Unmarshal(data, &aux); err != nil {
@@ -38,6 +40,9 @@ func (r *GeminiChatRequest) UnmarshalJSON(data []byte) error {
 
 	if aux.SystemInstructionSnake != nil {
 		r.SystemInstructions = aux.SystemInstructionSnake
+	}
+	if aux.ContinuationTokenSnake != nil {
+		r.ContinuationToken = aux.ContinuationTokenSnake
 	}
 
 	return nil
@@ -50,8 +55,9 @@ type ToolConfig struct {
 }
 
 type FunctionCallingConfig struct {
-	Mode                 FunctionCallingConfigMode `json:"mode,omitempty"`
-	AllowedFunctionNames []string                  `json:"allowedFunctionNames,omitempty"`
+	Mode                        FunctionCallingConfigMode `json:"mode,omitempty"`
+	AllowedFunctionNames        []string                  `json:"allowedFunctionNames,omitempty"`
+	StreamFunctionCallArguments *bool                     `json:"streamFunctionCallArguments,omitempty"`
 }
 type FunctionCallingConfigMode string
 
@@ -160,8 +166,8 @@ func (r *GeminiChatRequest) SetTools(tools []GeminiChatTool) {
 }
 
 type GeminiThinkingConfig struct {
-	IncludeThoughts bool `json:"includeThoughts,omitempty"`
-	ThinkingBudget  *int `json:"thinkingBudget,omitempty"`
+	IncludeThoughts *bool `json:"includeThoughts,omitempty"`
+	ThinkingBudget  *int  `json:"thinkingBudget,omitempty"`
 	// TODO Conflict with thinkingbudget.
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 }
@@ -183,7 +189,7 @@ func (c *GeminiThinkingConfig) UnmarshalJSON(data []byte) error {
 	*c = GeminiThinkingConfig(aux.Alias)
 
 	if aux.IncludeThoughtsSnake != nil {
-		c.IncludeThoughts = *aux.IncludeThoughtsSnake
+		c.IncludeThoughts = aux.IncludeThoughtsSnake
 	}
 
 	if aux.ThinkingBudgetSnake != nil {
@@ -238,8 +244,20 @@ func (g *GeminiInlineData) UnmarshalJSON(data []byte) error {
 }
 
 type FunctionCall struct {
-	FunctionName string `json:"name"`
-	Arguments    any    `json:"args"`
+	ID           string             `json:"id,omitempty"`
+	FunctionName string             `json:"name"`
+	Arguments    any                `json:"args"`
+	PartialArgs  []GeminiPartialArg `json:"partialArgs,omitempty"`
+	WillContinue *bool              `json:"willContinue,omitempty"`
+}
+
+type GeminiPartialArg struct {
+	JSONPath     string          `json:"jsonPath"`
+	NumberValue  *float64        `json:"numberValue,omitempty"`
+	StringValue  *string         `json:"stringValue,omitempty"`
+	BoolValue    *bool           `json:"boolValue,omitempty"`
+	NullValue    json.RawMessage `json:"nullValue,omitempty"`
+	WillContinue *bool           `json:"willContinue,omitempty"`
 }
 
 type GeminiFunctionResponse struct {
@@ -275,19 +293,21 @@ type GeminiPart struct {
 	FunctionResponse *GeminiFunctionResponse `json:"functionResponse,omitempty"`
 	// Optional. Media resolution for the input media.
 	MediaResolution     json.RawMessage                `json:"mediaResolution,omitempty"`
+	MediaProcessing     json.RawMessage                `json:"mediaProcessing,omitempty"`
 	VideoMetadata       json.RawMessage                `json:"videoMetadata,omitempty"`
 	FileData            *GeminiFileData                `json:"fileData,omitempty"`
 	ExecutableCode      *GeminiPartExecutableCode      `json:"executableCode,omitempty"`
 	CodeExecutionResult *GeminiPartCodeExecutionResult `json:"codeExecutionResult,omitempty"`
 }
 
-// UnmarshalJSON custom unmarshaler for GeminiPart to support snake_case and camelCase for InlineData
+// UnmarshalJSON accepts snake_case aliases for inline data and media processing.
 func (p *GeminiPart) UnmarshalJSON(data []byte) error {
 	// Alias to avoid recursion during unmarshalling
 	type Alias GeminiPart
 	var aux struct {
 		Alias
-		InlineDataSnake *GeminiInlineData `json:"inline_data,omitempty"` // snake_case variant
+		InlineDataSnake      *GeminiInlineData `json:"inline_data,omitempty"`
+		MediaProcessingSnake json.RawMessage   `json:"media_processing,omitempty"`
 	}
 
 	if err := common.Unmarshal(data, &aux); err != nil {
@@ -303,6 +323,9 @@ func (p *GeminiPart) UnmarshalJSON(data []byte) error {
 	} else if aux.InlineData != nil { // Fallback to camelCase from Alias
 		p.InlineData = aux.InlineData
 	}
+	if aux.MediaProcessingSnake != nil {
+		p.MediaProcessing = aux.MediaProcessingSnake
+	}
 	// Other fields like Text, FunctionCall etc. are already populated via aux.Alias
 
 	return nil
@@ -317,6 +340,14 @@ type GeminiChatContent struct {
 type GeminiChatSafetySettings struct {
 	Category  string `json:"category"`
 	Threshold string `json:"threshold"`
+}
+
+// GeminiFunctionDeclaration isolates declaration fields from OpenAI-only strictness
+// and tool-call history arguments. Native Gemini tool groups remain opaque.
+type GeminiFunctionDeclaration struct {
+	Description string `json:"description,omitempty"`
+	Name        string `json:"name"`
+	Parameters  any    `json:"parameters,omitempty"`
 }
 
 type GeminiChatTool struct {

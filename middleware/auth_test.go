@@ -31,6 +31,7 @@ func setupAuthTestDB(t *testing.T, userRole int) {
 	model.DB = db
 	model.LOG_DB = db
 	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.User{}, &model.WebRiskState{}))
+	require.NoError(t, model.MigrateAuthenticationSchema(db))
 	require.NoError(t, db.Create(&model.User{
 		Id:       1,
 		Username: "tester",

@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import i18next from 'i18next'
 import { api } from '@/lib/api'
 import { buildQueryParams } from './lib/utils'
 import type {
@@ -49,6 +50,9 @@ async function fetchLogs<T>(
   })
   const path = buildApiPath(endpoint, isAdmin)
   const res = await api.get(`${path}?${queryParams}`)
+  if (!res.data.success) {
+    throw new Error(res.data.message || i18next.t('Failed to load logs'))
+  }
   return res.data
 }
 
@@ -62,6 +66,9 @@ async function fetchLogStats<T>(
   )
   const path = buildApiPath(endpoint, isAdmin)
   const res = await api.get(`${path}/stat?${queryParams}`)
+  if (!res.data.success) {
+    throw new Error(res.data.message || i18next.t('Failed to load statistics'))
+  }
   return res.data
 }
 

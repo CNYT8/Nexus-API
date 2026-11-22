@@ -6,12 +6,15 @@ const (
 	DatabaseTypeMySQL      = "mysql"
 	DatabaseTypeSQLite     = "sqlite"
 	DatabaseTypePostgreSQL = "postgres"
+	DatabaseTypeClickHouse = "clickhouse"
 )
 
 var UsingSQLite = false
 var UsingPostgreSQL = false
 var LogSqlType = DatabaseTypeSQLite // Default to SQLite for logging SQL queries
 var UsingMySQL = false
+
+// UsingClickHouse describes LOG_DB only; the primary DB stays relational.
 var UsingClickHouse = false
 
 // SQLitePath is the DSN for the default SQLite database. It uses WAL journal

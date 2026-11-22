@@ -63,10 +63,22 @@ export type ConfirmPaymentComplianceResponse = {
   }
 }
 
-export type DeleteLogsResponse = {
+export type LogCleanupTask = {
+  id: number
+  kind: 'log_cleanup'
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+  user_id: number
+  target: number
+  processed: number
+  error?: string
+  created_at: number
+  updated_at: number
+}
+
+export type LogCleanupTaskResponse = {
   success: boolean
   message: string
-  data?: number
+  data?: LogCleanupTask
 }
 
 export type SiteSettings = {
@@ -120,6 +132,7 @@ export type AuthSettings = {
   TurnstileCheckEnabled: boolean
   TurnstileSiteKey: string
   TurnstileSecretKey: string
+  TurnstileSecretKeyConfigured: boolean
   'passkey.enabled': boolean
   'passkey.rp_display_name': string
   'passkey.rp_id': string
@@ -314,6 +327,7 @@ export type OperationsSettings = {
   SelfUseModeEnabled: boolean
   ChannelDisableThreshold: string
   QuotaRemindThreshold: string
+  QuotaRemindEnabled: boolean
   AutomaticDisableChannelEnabled: boolean
   AutomaticEnableChannelEnabled: boolean
   AutomaticDisableKeywords: string

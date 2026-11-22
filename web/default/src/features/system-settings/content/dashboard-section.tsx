@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -47,6 +46,7 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 
@@ -77,9 +77,7 @@ export function DashboardSection({ defaultValues }: DashboardSectionProps) {
     defaultValues,
   })
 
-  useEffect(() => {
-    form.reset(defaultValues)
-  }, [defaultValues, form])
+  const submitForm = useResetForm(form, defaultValues)
 
   const onSubmit = async (values: DataDashboardFormValues) => {
     const updates = Object.entries(values).filter(
@@ -87,9 +85,7 @@ export function DashboardSection({ defaultValues }: DashboardSectionProps) {
         value !== defaultValues[key as keyof DataDashboardFormValues]
     )
 
-    for (const [key, value] of updates) {
-      await updateOption.mutateAsync({ key, value })
-    }
+    await updateOption.saveOptions(updates.map(([key, value]) => ({ key, value })))
   }
 
   const isEnabled = form.watch('DataExportEnabled')
@@ -97,9 +93,9 @@ export function DashboardSection({ defaultValues }: DashboardSectionProps) {
   return (
     <SettingsSection title={t('Data Dashboard')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
           />
           <FormField

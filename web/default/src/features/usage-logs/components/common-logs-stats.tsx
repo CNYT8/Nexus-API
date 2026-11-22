@@ -21,9 +21,11 @@ import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { formatLogQuota } from '@/lib/format'
+import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 import { useIsAdmin } from '@/hooks/use-admin'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@/components/ui/button'
 import { getLogStats, getUserLogStats } from '../api'
 import { DEFAULT_LOG_STATS } from '../constants'
 import { buildApiParams } from '../lib/utils'
@@ -66,7 +68,7 @@ export function CommonLogsStats() {
     return () => window.clearTimeout(timer)
   }, [isAdmin, searchParamsKey])
 
-  const { data: stats, isLoading } = useQuery({
+  const { data: stats, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ['usage-logs-stats', isAdmin, searchParams],
     enabled: statsEnabled,
     queryFn: async () => {
@@ -82,9 +84,8 @@ export function CommonLogsStats() {
         ? await getLogStats(params)
         : await getUserLogStats(params)
 
-      return result.success
-        ? result.data || DEFAULT_LOG_STATS
-        : DEFAULT_LOG_STATS
+      requireServerSuccess(result)
+      return result.data || DEFAULT_LOG_STATS
     },
     staleTime: LOG_STATS_STALE_MS,
     gcTime: 5 * 60 * 1000,
@@ -92,7 +93,23 @@ export function CommonLogsStats() {
     placeholderData: (previousData) => previousData,
   })
 
-  if (!stats || isLoading) {
+  if (isError) {
+    return (
+      <div role='alert' className='text-destructive flex items-center gap-2 text-xs'>
+        <span>{t('Failed to load statistics')}</span>
+        <Button
+          variant='outline'
+          size='sm'
+          disabled={isFetching}
+          onClick={() => void refetch()}
+        >
+          {t('Retry')}
+        </Button>
+      </div>
+    )
+  }
+
+  if ((!statsEnabled && !stats) || isLoading) {
     return (
       <div className='flex items-center gap-2'>
         <Skeleton className='h-7 w-[150px] rounded-md' />

@@ -17,8 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useState } from 'react';
-import { Card, Spin, Tabs } from '@douyinfe/semi-ui';
+import React, { useEffect, useRef, useState } from 'react';
+import { Banner, Button, Card, Spin, Tabs } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 
 import ModelPricingCombined from '../../pages/Setting/Ratio/ModelPricingCombined';
@@ -53,16 +53,20 @@ const RatioSetting = () => {
   });
 
   const [loading, setLoading] = useState(false);
+  const [readFailed, setReadFailed] = useState(false);
+  const readSequence = useRef(0);
 
-  const getOptions = async () => {
-    const res = await API.get('/api/option/');
+  const getOptions = async (sequence) => {
+    const res = await API.get('/api/option/', { disableDuplicate: true });
+    if (sequence !== readSequence.current) return false;
     const { success, message, data } = res.data;
-    if (success) {
+    if (success && Array.isArray(data)) {
       let newInputs = {};
       data.forEach((item) => {
-        if (item.value.startsWith('{') || item.value.startsWith('[')) {
+        let value = item.value;
+        if (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) {
           try {
-            item.value = JSON.stringify(JSON.parse(item.value), null, 2);
+            value = JSON.stringify(JSON.parse(value), null, 2);
           } catch (e) {
             // 如果后端返回的不是合法 JSON，直接展示
           }
@@ -74,25 +78,34 @@ const RatioSetting = () => {
             'CompletionRatioOverrideEnabled',
           ].includes(item.key)
         ) {
-          newInputs[item.key] = toBoolean(item.value);
+          newInputs[item.key] = toBoolean(value);
         } else {
-          newInputs[item.key] = item.value;
+          newInputs[item.key] = value;
         }
       });
       setInputs(newInputs);
+      setReadFailed(false);
+      return newInputs;
     } else {
-      showError(message);
+      showError(message || t('刷新失败'));
+      setReadFailed(true);
+      return false;
     }
   };
 
   const onRefresh = async () => {
+    const sequence = ++readSequence.current;
     try {
       setLoading(true);
-      await getOptions();
+      return await getOptions(sequence);
     } catch (error) {
-      showError(t('刷新失败'));
+      if (sequence === readSequence.current) {
+        setReadFailed(true);
+        showError(t('刷新失败'));
+      }
+      return false;
     } finally {
-      setLoading(false);
+      if (sequence === readSequence.current) setLoading(false);
     }
   };
 
@@ -104,6 +117,14 @@ const RatioSetting = () => {
   return (
     <Spin spinning={loading} size='large'>
       <Card style={{ marginTop: '10px' }}>
+        {readFailed && (
+          <Banner
+            type='danger'
+            closeIcon={null}
+            description={t('刷新失败')}
+            footer={<Button loading={loading} onClick={onRefresh}>{t('重试')}</Button>}
+          />
+        )}
         <Tabs type='card' defaultActiveKey='pricing'>
           <Tabs.TabPane tab={t('模型定价设置')} itemKey='pricing'>
             <ModelPricingCombined options={inputs} refresh={onRefresh} />
@@ -118,7 +139,7 @@ const RatioSetting = () => {
             <UpstreamRatioSync options={inputs} refresh={onRefresh} />
           </Tabs.TabPane>
           <Tabs.TabPane tab={t('工具调用定价')} itemKey='tool_price'>
-            <ToolPriceSettings options={inputs} />
+            <ToolPriceSettings options={inputs} refresh={onRefresh} />
           </Tabs.TabPane>
         </Tabs>
       </Card>

@@ -3,17 +3,41 @@ package dto
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
+	"sync"
 )
 
 type ChannelSettings struct {
-	ForceFormat            bool   `json:"force_format,omitempty"`
-	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
-	ThinkingProcessStrip   bool   `json:"thinking_process_strip,omitempty"`
-	Proxy                  string `json:"proxy"`
-	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
-	SystemPrompt           string `json:"system_prompt,omitempty"`
-	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
+	ResponsesWebSocketEnabled bool   `json:"responses_websocket_enabled,omitempty"`
+	ForceFormat               bool   `json:"force_format,omitempty"`
+	ThinkingToContent         bool   `json:"thinking_to_content,omitempty"`
+	ThinkingProcessStrip      bool   `json:"thinking_process_strip,omitempty"`
+	Proxy                     string `json:"proxy"`
+	HTTPProtocol              string `json:"http_protocol,omitempty"`
+	HTTP2ConnectionShards     int    `json:"http2_connection_shards,omitempty"`
+	TLSInsecureSkipVerify     bool   `json:"tls_insecure_skip_verify,omitempty"`
+	PassThroughBodyEnabled    bool   `json:"pass_through_body_enabled,omitempty"`
+	SystemPrompt              string `json:"system_prompt,omitempty"`
+	SystemPromptOverride      bool   `json:"system_prompt_override,omitempty"`
+}
+
+const (
+	HTTPProtocolAuto         = "auto"
+	HTTPProtocolHTTP1        = "http1"
+	MaxHTTP2ConnectionShards = 8
+)
+
+func (s ChannelSettings) ValidateHTTPTransport() error {
+	switch strings.ToLower(strings.TrimSpace(s.HTTPProtocol)) {
+	case "", HTTPProtocolAuto, HTTPProtocolHTTP1:
+	default:
+		return fmt.Errorf("http_protocol must be one of %q or %q", HTTPProtocolAuto, HTTPProtocolHTTP1)
+	}
+	if s.HTTP2ConnectionShards < 0 || s.HTTP2ConnectionShards > MaxHTTP2ConnectionShards {
+		return fmt.Errorf("http2_connection_shards must be between 0 and %d", MaxHTTP2ConnectionShards)
+	}
+	return nil
 }
 
 type VertexKeyType string
@@ -37,6 +61,13 @@ const (
 	AwsKeyTypeApiKey AwsKeyType = "api_key"
 )
 
+type AwsApiType string
+
+const (
+	AwsApiTypeInvokeModel AwsApiType = "invoke_model"
+	AwsApiTypeMantle      AwsApiType = "mantle"
+)
+
 type ChannelOtherSettings struct {
 	AzureResponsesVersion                 string                `json:"azure_responses_version,omitempty"`
 	VertexKeyType                         VertexKeyType         `json:"vertex_key_type,omitempty"`    // "json" or "api_key"
@@ -51,6 +82,7 @@ type ChannelOtherSettings struct {
 	DisableStore                          bool                  `json:"disable_store,omitempty"`             // 是否禁用 store 透传（默认允许透传，禁用后可能导致 Codex 无法使用）
 	AllowIncludeObfuscation               bool                  `json:"allow_include_obfuscation,omitempty"` // 是否允许 stream_options.include_obfuscation 透传（默认过滤以避免关闭流混淆保护）
 	AwsKeyType                            AwsKeyType            `json:"aws_key_type,omitempty"`
+	AwsApiType                            AwsApiType            `json:"aws_api_type,omitempty"`
 	UpstreamModelUpdateCheckEnabled       bool                  `json:"upstream_model_update_check_enabled,omitempty"`        // 是否检测上游模型更新
 	UpstreamModelUpdateAutoSyncEnabled    bool                  `json:"upstream_model_update_auto_sync_enabled,omitempty"`    // 是否自动同步上游模型更新
 	UpstreamModelUpdateLastCheckTime      int64                 `json:"upstream_model_update_last_check_time,omitempty"`      // 上次检测时间
@@ -74,6 +106,9 @@ const (
 	AdvancedCustomConverterOpenAIChatCompletionsToOpenAIResponses       = "openai_chat_completions_to_openai_responses"
 	AdvancedCustomConverterGeminiGenerateContentToOpenAIChatCompletions = "gemini_generate_content_to_openai_chat_completions"
 	AdvancedCustomConverterOpenAIChatCompletionsToGeminiGenerateContent = "openai_chat_completions_to_gemini_generate_content"
+	AdvancedCustomConverterOpenAIResponsesToOpenAIChatCompletions       = "openai_responses_to_openai_chat_completions"
+	AdvancedCustomConverterOpenAIResponsesToAnthropicMessages           = "openai_responses_to_anthropic_messages"
+	AdvancedCustomConverterOpenAIResponsesToGeminiGenerateContent       = "openai_responses_to_gemini_generate_content"
 )
 
 const (
@@ -87,10 +122,17 @@ type AdvancedCustomConfig struct {
 }
 
 type AdvancedCustomRoute struct {
-	IncomingPath string                   `json:"incoming_path,omitempty"`
-	UpstreamPath string                   `json:"upstream_path,omitempty"`
-	Converter    string                   `json:"converter,omitempty"`
-	Auth         *AdvancedCustomRouteAuth `json:"auth,omitempty"`
+	IncomingPath           string                   `json:"incoming_path,omitempty"`
+	Models                 []string                 `json:"models,omitempty"`
+	UpstreamPath           string                   `json:"upstream_path,omitempty"`
+	Converter              string                   `json:"converter,omitempty"`
+	Auth                   *AdvancedCustomRouteAuth `json:"auth,omitempty"`
+	PassThroughBodyEnabled bool                     `json:"pass_through_body_enabled,omitempty"`
+}
+
+func (r AdvancedCustomRoute) SupportsPassThroughBody() bool {
+	converter := strings.TrimSpace(r.Converter)
+	return converter == "" || converter == AdvancedCustomConverterNone
 }
 
 type AdvancedCustomRouteAuth struct {
@@ -117,6 +159,60 @@ func (c *AdvancedCustomConfig) MatchPath(requestPath string) (AdvancedCustomRout
 		}
 	}
 	return AdvancedCustomRoute{}, false
+}
+
+// MatchPathForModel matches the original client model, before model mapping.
+// Empty models is a fallback; re: rules use Go's bounded-time regexp engine.
+func (c *AdvancedCustomConfig) MatchPathForModel(requestPath string, model string) (AdvancedCustomRoute, bool) {
+	if c == nil {
+		return AdvancedCustomRoute{}, false
+	}
+	model = strings.TrimSpace(model)
+	for _, route := range c.Routes {
+		if !matchAdvancedCustomIncomingPath(strings.TrimSpace(route.IncomingPath), requestPath) {
+			continue
+		}
+		models := normalizeAdvancedCustomRouteModels(route.Models)
+		if len(models) == 0 {
+			return route, true
+		}
+		for _, rule := range models {
+			if strings.HasPrefix(rule, "re:") {
+				re := compileAdvancedCustomModelRegex(strings.TrimPrefix(rule, "re:"))
+				if re != nil && re.MatchString(model) {
+					return route, true
+				}
+			} else if rule == model {
+				return route, true
+			}
+		}
+	}
+	return AdvancedCustomRoute{}, false
+}
+
+var advancedCustomModelRegexCache sync.Map
+
+func compileAdvancedCustomModelRegex(pattern string) *regexp.Regexp {
+	if cached, ok := advancedCustomModelRegexCache.Load(pattern); ok {
+		re, _ := cached.(*regexp.Regexp)
+		return re
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil || pattern == "" {
+		re = nil
+	}
+	advancedCustomModelRegexCache.Store(pattern, re)
+	return re
+}
+
+func normalizeAdvancedCustomRouteModels(models []string) []string {
+	normalized := make([]string, 0, len(models))
+	for _, model := range models {
+		if model = strings.TrimSpace(model); model != "" {
+			normalized = append(normalized, model)
+		}
+	}
+	return normalized
 }
 
 // ModelListRoute returns the explicitly configured OpenAI Models discovery route.
@@ -173,7 +269,10 @@ func IsAdvancedCustomConverterAllowed(converter string) bool {
 		AdvancedCustomConverterOpenAIChatCompletionsToAnthropicMessages,
 		AdvancedCustomConverterOpenAIChatCompletionsToOpenAIResponses,
 		AdvancedCustomConverterGeminiGenerateContentToOpenAIChatCompletions,
-		AdvancedCustomConverterOpenAIChatCompletionsToGeminiGenerateContent:
+		AdvancedCustomConverterOpenAIChatCompletionsToGeminiGenerateContent,
+		AdvancedCustomConverterOpenAIResponsesToOpenAIChatCompletions,
+		AdvancedCustomConverterOpenAIResponsesToAnthropicMessages,
+		AdvancedCustomConverterOpenAIResponsesToGeminiGenerateContent:
 		return true
 	default:
 		return false
@@ -188,7 +287,8 @@ func (c *AdvancedCustomConfig) Validate() error {
 		return fmt.Errorf("advanced_custom requires at least one route")
 	}
 
-	seenPaths := make(map[string]struct{}, len(c.Routes))
+	pathModels := make(map[string]map[string]struct{}, len(c.Routes))
+	catchAllPaths := make(map[string]bool, len(c.Routes))
 	for i := range c.Routes {
 		route := c.Routes[i]
 		route.IncomingPath = strings.TrimSpace(route.IncomingPath)
@@ -207,7 +307,11 @@ func (c *AdvancedCustomConfig) Validate() error {
 		if strings.Contains(route.IncomingPath, "?") {
 			return fmt.Errorf("advanced_custom.advanced_routes[%d].incoming_path must not include query", i)
 		}
+		models := normalizeAdvancedCustomRouteModels(route.Models)
 		if route.IncomingPath == AdvancedCustomModelListPath {
+			if len(models) != 0 || route.PassThroughBodyEnabled {
+				return fmt.Errorf("advanced_custom.advanced_routes[%d]: /v1/models does not support model rules or body passthrough", i)
+			}
 			if route.Converter != AdvancedCustomConverterNone {
 				return fmt.Errorf("advanced_custom.advanced_routes[%d].converter must be none for /v1/models", i)
 			}
@@ -215,10 +319,27 @@ func (c *AdvancedCustomConfig) Validate() error {
 				return fmt.Errorf("advanced_custom.advanced_routes[%d].upstream_path must not contain %s for /v1/models", i, advancedCustomModelPlaceholder)
 			}
 		}
-		if _, exists := seenPaths[route.IncomingPath]; exists {
-			return fmt.Errorf("advanced_custom.advanced_routes[%d].incoming_path must be unique: %s", i, route.IncomingPath)
+		if catchAllPaths[route.IncomingPath] {
+			return fmt.Errorf("advanced_custom.advanced_routes[%d]: catch-all route must be unique and last for incoming_path: %s", i, route.IncomingPath)
 		}
-		seenPaths[route.IncomingPath] = struct{}{}
+		if len(models) == 0 {
+			catchAllPaths[route.IncomingPath] = true
+		}
+		if pathModels[route.IncomingPath] == nil {
+			pathModels[route.IncomingPath] = make(map[string]struct{})
+		}
+		for _, rule := range models {
+			if _, duplicate := pathModels[route.IncomingPath][rule]; duplicate {
+				return fmt.Errorf("advanced_custom.advanced_routes[%d].models contains duplicate rule for incoming_path: %s", i, route.IncomingPath)
+			}
+			if strings.HasPrefix(rule, "re:") && compileAdvancedCustomModelRegex(strings.TrimPrefix(rule, "re:")) == nil {
+				return fmt.Errorf("advanced_custom.advanced_routes[%d].models regex is empty or invalid: %s", i, rule)
+			}
+			pathModels[route.IncomingPath][rule] = struct{}{}
+		}
+		if route.PassThroughBodyEnabled && !route.SupportsPassThroughBody() {
+			return fmt.Errorf("advanced_custom.advanced_routes[%d].pass_through_body_enabled requires converter none", i)
+		}
 
 		if upstreamPath == "" {
 			return fmt.Errorf("advanced_custom.advanced_routes[%d].upstream_path is required", i)
@@ -271,6 +392,12 @@ func validateAdvancedCustomConverterPath(index int, incomingPath string, convert
 		AdvancedCustomConverterOpenAIChatCompletionsToOpenAIResponses,
 		AdvancedCustomConverterOpenAIChatCompletionsToGeminiGenerateContent:
 		if incomingPath == "/v1/chat/completions" {
+			return nil
+		}
+	case AdvancedCustomConverterOpenAIResponsesToOpenAIChatCompletions,
+		AdvancedCustomConverterOpenAIResponsesToAnthropicMessages,
+		AdvancedCustomConverterOpenAIResponsesToGeminiGenerateContent:
+		if incomingPath == "/v1/responses" {
 			return nil
 		}
 	case AdvancedCustomConverterGeminiGenerateContentToOpenAIChatCompletions:

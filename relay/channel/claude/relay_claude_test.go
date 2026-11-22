@@ -279,7 +279,7 @@ func TestBuildOpenAIStyleUsageFromClaudeUsageDefaultsAggregateCacheCreationTo5m(
 	require.Equal(t, 0, openAIUsage.ClaudeCacheCreation1hTokens)
 }
 
-func TestRequestOpenAI2ClaudeMessage_IgnoresUnsupportedFileContent(t *testing.T) {
+func TestRequestOpenAI2ClaudeMessage_RejectsUnsupportedFileContent(t *testing.T) {
 	request := dto.GeneralOpenAIRequest{
 		Model: "claude-3-5-sonnet",
 		Messages: []dto.Message{
@@ -294,7 +294,7 @@ func TestRequestOpenAI2ClaudeMessage_IgnoresUnsupportedFileContent(t *testing.T)
 						Type: dto.ContentTypeFile,
 						File: &dto.MessageFile{
 							FileName: "blob.bin",
-							FileData: "JVBERi0xLjQK",
+							FileData: "data:application/octet-stream;base64,AAEC",
 						},
 					},
 				},
@@ -303,15 +303,8 @@ func TestRequestOpenAI2ClaudeMessage_IgnoresUnsupportedFileContent(t *testing.T)
 	}
 
 	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
-	require.NoError(t, err)
-	require.Len(t, claudeRequest.Messages, 1)
-
-	content, ok := claudeRequest.Messages[0].Content.([]dto.ClaudeMediaMessage)
-	require.True(t, ok)
-	require.Len(t, content, 1)
-	require.Equal(t, "text", content[0].Type)
-	require.NotNil(t, content[0].Text)
-	require.Equal(t, "see attachment", *content[0].Text)
+	require.ErrorContains(t, err, "cannot carry content of MIME type")
+	require.Nil(t, claudeRequest)
 }
 
 func TestRequestOpenAI2ClaudeMessage_ClaudeOpus48HighUsesAdaptiveThinking(t *testing.T) {
@@ -406,7 +399,7 @@ func TestRequestOpenAI2ClaudeMessage_SupportsPDFFileContent(t *testing.T) {
 	require.Equal(t, "summarize it", *content[1].Text)
 }
 
-func TestRequestOpenAI2ClaudeMessage_ConvertsTextFileContentToText(t *testing.T) {
+func TestRequestOpenAI2ClaudeMessage_PreservesTextFileDocument(t *testing.T) {
 	request := dto.GeneralOpenAIRequest{
 		Model: "claude-3-5-sonnet",
 		Messages: []dto.Message{
@@ -432,7 +425,11 @@ func TestRequestOpenAI2ClaudeMessage_ConvertsTextFileContentToText(t *testing.T)
 	content, ok := claudeRequest.Messages[0].Content.([]dto.ClaudeMediaMessage)
 	require.True(t, ok)
 	require.Len(t, content, 1)
-	require.Equal(t, "text", content[0].Type)
-	require.NotNil(t, content[0].Text)
-	require.Equal(t, "alpha\nbeta", *content[0].Text)
+	require.Equal(t, "document", content[0].Type)
+	require.Equal(t, "notes.txt", content[0].Title)
+	require.NotNil(t, content[0].Source)
+	require.Equal(t, "text", content[0].Source.Type)
+	require.Equal(t, "text/plain", content[0].Source.MediaType)
+	require.Equal(t, "alpha\nbeta", content[0].Source.Data)
+	require.Nil(t, content[0].Text)
 }

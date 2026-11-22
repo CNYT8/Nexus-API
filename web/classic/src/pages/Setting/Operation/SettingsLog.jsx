@@ -24,7 +24,6 @@ import {
   Form,
   Row,
   Spin,
-  DatePicker,
   Typography,
   Modal,
 } from '@douyinfe/semi-ui';
@@ -38,12 +37,22 @@ import {
   showWarning,
 } from '../../../helpers';
 
+import { useLogCleanupTask } from '../../../hooks/usage-logs/useLogCleanupTask';
+import LogPolicySettings from '../../../components/settings/LogPolicySettings';
+
 const { Text } = Typography;
 
 export default function SettingsLog(props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
-  const [loadingCleanHistoryLog, setLoadingCleanHistoryLog] = useState(false);
+  const cleanup = useLogCleanupTask();
+  const loadingCleanHistoryLog = cleanup.creating || cleanup.active;
+  const taskStatus = {
+    queued: t('日志清理排队中'),
+    running: t('日志清理进行中'),
+    succeeded: t('日志清理已完成'),
+    failed: t('日志清理失败'),
+  };
   const [inputs, setInputs] = useState({
     LogConsumeEnabled: false,
     historyTimestamp: dayjs().subtract(1, 'month').toDate(),
@@ -51,51 +60,39 @@ export default function SettingsLog(props) {
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
 
-  function onSubmit() {
+  async function onSubmit() {
     const updateArray = compareObjects(inputs, inputsRow).filter(
       (item) => item.key !== 'historyTimestamp',
     );
 
     if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
-    const requestQueue = updateArray.map((item) => {
-      let value = '';
-      if (typeof inputs[item.key] === 'boolean') {
-        value = String(inputs[item.key]);
-      } else {
-        value = inputs[item.key];
-      }
-      return API.put('/api/option/', {
-        key: item.key,
-        value,
-      });
-    });
     setLoading(true);
-    Promise.all(requestQueue)
-      .then((res) => {
-        if (requestQueue.length === 1) {
-          if (res.includes(undefined)) return;
-        } else if (requestQueue.length > 1) {
-          if (res.includes(undefined))
-            return showError(t('部分保存失败，请重试'));
+    try {
+      for (const item of updateArray) {
+        const value = typeof inputs[item.key] === 'boolean'
+          ? String(inputs[item.key])
+          : inputs[item.key];
+        const response = await API.put('/api/option/', { key: item.key, value });
+        if (!response.data.success) {
+          throw new Error(response.data.message || t('保存失败，请重试'));
         }
-        showSuccess(t('保存成功'));
-        props.refresh();
-      })
-      .catch(() => {
-        showError(t('保存失败，请重试'));
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+      }
+      showSuccess(t('保存成功'));
+      await props.refresh();
+    } catch (error) {
+      showError(error?.message || t('保存失败，请重试'));
+    } finally {
+      setLoading(false);
+    }
   }
   async function onCleanHistoryLog() {
-    if (!inputs.historyTimestamp) {
-      showError(t('请选择日志记录时间'));
+    if (loadingCleanHistoryLog) return;
+    const now = dayjs();
+    const targetDate = inputs.historyTimestamp ? dayjs(inputs.historyTimestamp) : null;
+    if (!targetDate?.isValid() || targetDate.unix() <= 0 || targetDate.isAfter(now)) {
+      showError(t('请选择过去的日志记录时间'));
       return;
     }
-
-    const now = dayjs();
-    const targetDate = dayjs(inputs.historyTimestamp);
     const targetTime = targetDate.format('YYYY-MM-DD HH:mm:ss');
     const currentTime = now.format('YYYY-MM-DD HH:mm:ss');
     const daysDiff = now.diff(targetDate, 'day');
@@ -159,21 +156,10 @@ export default function SettingsLog(props) {
       okType: 'danger',
       onOk: async () => {
         try {
-          setLoadingCleanHistoryLog(true);
-          const res = await API.delete(
-            `/api/log/?target_timestamp=${Date.parse(inputs.historyTimestamp) / 1000}`,
-          );
-          const { success, message, data } = res.data;
-          if (success) {
-            showSuccess(`${data} ${t('条日志已清理！')}`);
-            return;
-          } else {
-            throw new Error(t('日志清理失败：') + message);
-          }
+          await cleanup.create(targetDate.unix());
         } catch (error) {
-          showError(error.message);
-        } finally {
-          setLoadingCleanHistoryLog(false);
+          showError(error?.message || t('日志清理失败'));
+          throw error;
         }
       },
     });
@@ -217,7 +203,7 @@ export default function SettingsLog(props) {
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Spin spinning={loadingCleanHistoryLog}>
+                <Spin spinning={cleanup.creating}>
                   <Form.DatePicker
                     label={t('清除历史日志')}
                     field={'historyTimestamp'}
@@ -241,10 +227,29 @@ export default function SettingsLog(props) {
                     size='default'
                     type='danger'
                     onClick={onCleanHistoryLog}
+                    disabled={loadingCleanHistoryLog}
                   >
                     {t('清除历史日志')}
                   </Button>
                 </Spin>
+                {cleanup.taskId > 0 && (
+                  <div className='mt-3 space-y-2 rounded border p-3 text-sm' role='status' aria-live='polite'>
+                    <p>{t('日志清理任务 #{{id}}', { id: cleanup.taskId })}</p>
+                    {cleanup.task && (
+                      <>
+                        <p>{taskStatus[cleanup.task.status]}</p>
+                        <p>{t('已处理 {{count}} 条日志。', { count: cleanup.task.processed })}</p>
+                        <p>{t('清理 {{date}} 之前的日志', { date: dayjs.unix(cleanup.task.target).format('YYYY-MM-DD HH:mm:ss') })}</p>
+                        {cleanup.task.error && <p style={{ color: 'var(--semi-color-danger)' }} role='alert'>{cleanup.task.error}</p>}
+                      </>
+                    )}
+                    {cleanup.error && <p style={{ color: 'var(--semi-color-danger)' }} role='alert'>{cleanup.error.message}</p>}
+                    {cleanup.active && <p>{t('自动查询五分钟后暂停，请刷新状态继续查看。')}</p>}
+                    <Button size='small' disabled={cleanup.fetching} onClick={cleanup.refresh}>
+                      {t('刷新状态')}
+                    </Button>
+                  </div>
+                )}
               </Col>
             </Row>
 
@@ -256,6 +261,7 @@ export default function SettingsLog(props) {
           </Form.Section>
         </Form>
       </Spin>
+      <LogPolicySettings />
     </>
   );
 }

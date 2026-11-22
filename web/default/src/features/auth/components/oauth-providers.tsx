@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   IconDiscord,
@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useOAuthLogin } from '../hooks/use-oauth-login'
 import type { SystemStatus } from '../types'
+import { TelegramLoginDialog } from './telegram-login-dialog'
 
 type OAuthProvidersProps = {
   status: SystemStatus | null
@@ -53,6 +54,8 @@ export function OAuthProviders({
   isWeChatLoading = false,
 }: OAuthProvidersProps) {
   const { t } = useTranslation()
+  const [telegramOpen, setTelegramOpen] = useState(false)
+  const telegramBot = typeof status?.telegram_bot_name === 'string' ? status.telegram_bot_name : ''
   const {
     isLoading,
     githubButtonText,
@@ -61,7 +64,6 @@ export function OAuthProviders({
     handleDiscordLogin,
     handleOIDCLogin,
     handleLinuxDOLogin,
-    handleTelegramLogin,
     handleCustomOAuthLogin,
   } = useOAuthLogin(status)
 
@@ -117,7 +119,8 @@ export function OAuthProviders({
     providerButtons.push({
       key: 'telegram',
       label: t('Continue with Telegram'),
-      onClick: handleTelegramLogin,
+      onClick: () => setTelegramOpen(true),
+      disabled: !telegramBot,
     })
   }
 
@@ -137,6 +140,7 @@ export function OAuthProviders({
 
   return (
     <div className={cn('space-y-3', className)}>
+      <TelegramLoginDialog open={telegramOpen} onOpenChange={setTelegramOpen} botName={telegramBot} />
       <div className='relative'>
         <div className='absolute inset-0 flex items-center'>
           <span className='w-full border-t' />

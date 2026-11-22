@@ -13,12 +13,15 @@ import (
 
 // CreditWalletSourceTx records one server-owned non-top-up wallet credit. The
 // legacy path remains available until the wallet baseline is initialized; once
-// active, every credit is represented by an immutable source lot.
+// active, every credit is represented by an immutable source lot. Callers that
+// lock existing users must acquire the baseline gate before those locks.
 func CreditWalletSourceTx(tx *gorm.DB, userID int, source WalletCreditSource, component, referenceType, referenceID string, quota int) (bool, error) {
 	if tx == nil || userID <= 0 || quota <= 0 || strings.TrimSpace(component) == "" || strings.TrimSpace(referenceType) == "" || strings.TrimSpace(referenceID) == "" {
 		return false, errors.New("invalid wallet credit source")
 	}
-	active, err := walletCreditBaselineState(tx)
+	// The gate returns current mode after any initializer finishes; a plain
+	// MySQL REPEATABLE READ snapshot may still report an absent marker.
+	active, err := LockWalletCreditBaselineTx(tx)
 	if err != nil {
 		return false, err
 	}

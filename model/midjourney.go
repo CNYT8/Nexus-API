@@ -1,5 +1,7 @@
 package model
 
+import "gorm.io/gorm"
+
 type Midjourney struct {
 	Id          int    `json:"id"`
 	Code        int    `json:"code"`
@@ -24,9 +26,13 @@ type Midjourney struct {
 	// BillingKey is the durable pending wallet reservation identity created
 	// before the upstream submit. Non-empty only for ledger wallet submissions;
 	// polling finalizes it on success and refunds it on failure.
-	BillingKey string `json:"billing_key,omitempty" gorm:"type:char(64);not null;default:'';index"`
-	Buttons    string `json:"buttons"`
-	Properties string `json:"properties"`
+	BillingKey    string `json:"billing_key,omitempty" gorm:"type:char(64);not null;default:'';index"`
+	TokenId       int    `json:"-" gorm:"not null;default:0"`
+	BillingSource string `json:"-" gorm:"type:varchar(24);not null;default:''"`
+	BillingState  string `json:"-" gorm:"type:varchar(24);not null;default:'';index"`
+	BillingQuota  int    `json:"-" gorm:"type:bigint;not null;default:0"`
+	Buttons       string `json:"buttons"`
+	Properties    string `json:"properties"`
 }
 
 // TaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段
@@ -150,9 +156,24 @@ func UpdateProgress(id int, progress string) error {
 }
 
 func (midjourney *Midjourney) Insert() error {
-	var err error
-	err = DB.Create(midjourney).Error
-	return err
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := LockTaskBillingUserTx(tx, midjourney.UserId); err != nil {
+			return err
+		}
+		if midjourney.Status == "SUCCESS" || midjourney.Status == "FAILURE" {
+			midjourney.BillingState, midjourney.BillingQuota = TaskBillingPending, midjourney.Quota
+			if midjourney.Status == "FAILURE" {
+				midjourney.BillingQuota = 0
+			}
+		}
+		if err := tx.Create(midjourney).Error; err != nil {
+			return err
+		}
+		if midjourney.BillingKey != "" {
+			return BindWalletReservationTaskTx(tx, midjourney.BillingKey, midjourney.UserId, "midjourney", int64(midjourney.Id))
+		}
+		return nil
+	})
 }
 
 func (midjourney *Midjourney) Update() error {
@@ -167,11 +188,35 @@ func (midjourney *Midjourney) Update() error {
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
 // Uses Model().Select("*").Updates() to avoid GORM Save()'s INSERT fallback.
 func (midjourney *Midjourney) UpdateWithStatus(fromStatus string) (bool, error) {
-	result := DB.Model(midjourney).Where("status = ?", fromStatus).Select("*").Updates(midjourney)
-	if result.Error != nil {
-		return false, result.Error
-	}
-	return result.RowsAffected > 0, nil
+	won := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := LockTaskBillingUserTx(tx, midjourney.UserId); err != nil {
+			return err
+		}
+		var stored Midjourney
+		if err := walletCurrentTx(tx).First(&stored, midjourney.Id).Error; err != nil {
+			return err
+		}
+		if stored.UserId != midjourney.UserId || stored.Status != fromStatus || stored.Status == "SUCCESS" || stored.Status == "FAILURE" {
+			return nil
+		}
+		midjourney.Quota, midjourney.TokenId = stored.Quota, stored.TokenId
+		midjourney.BillingKey, midjourney.BillingSource = stored.BillingKey, stored.BillingSource
+		midjourney.BillingState, midjourney.BillingQuota = stored.BillingState, stored.BillingQuota
+		if midjourney.FailReason != "" {
+			midjourney.Status, midjourney.Progress = "FAILURE", "100%"
+		}
+		if midjourney.Status == "SUCCESS" || midjourney.Status == "FAILURE" {
+			midjourney.BillingState, midjourney.BillingQuota = TaskBillingPending, stored.Quota
+			if midjourney.Status == "FAILURE" {
+				midjourney.BillingQuota = 0
+			}
+		}
+		result := tx.Model(midjourney).Where("status = ?", fromStatus).Select("*").Updates(midjourney)
+		won = result.RowsAffected == 1
+		return result.Error
+	})
+	return won, err
 }
 
 func MjBulkUpdate(mjIds []string, params map[string]any) error {

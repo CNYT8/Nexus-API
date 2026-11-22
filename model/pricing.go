@@ -358,11 +358,19 @@ func updatePricing() {
 }
 
 func mergeMatchedModelMeta(current *Model, matched *Model) *Model {
+	// Each concrete model owns its merged metadata. Rule records are reused
+	// across many models, so mutating either input leaks metadata to siblings.
+	if current == nil {
+		if matched == nil {
+			return nil
+		}
+		cloned := *matched
+		return &cloned
+	}
+	cloned := *current
+	current = &cloned
 	if matched == nil {
 		return current
-	}
-	if current == nil {
-		return matched
 	}
 	if current.VendorID == 0 && matched.VendorID != 0 {
 		current.VendorID = matched.VendorID
@@ -379,9 +387,8 @@ func mergeMatchedModelMeta(current *Model, matched *Model) *Model {
 	if strings.TrimSpace(current.Endpoints) == "" && strings.TrimSpace(matched.Endpoints) != "" {
 		current.Endpoints = matched.Endpoints
 	}
-	if current.Status == 0 && matched.Status != 0 {
-		current.Status = matched.Status
-	}
+	// Status is an explicit policy, including zero (disabled). Exact entries
+	// and the first matching rule keep precedence over later fallback rules.
 	return current
 }
 

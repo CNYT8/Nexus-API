@@ -30,12 +30,8 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { ConfirmDialog } from '@/components/confirm-dialog'
-import {
-  handleDeleteModel,
-  handleToggleModelStatus,
-  isModelEnabled,
-} from '../lib'
+import { handleToggleModelStatus, isModelEnabled } from '../lib'
+import { ModelDeleteDialog } from './model-delete-dialog'
 import type { Model } from '../types'
 import { useModels } from './models-provider'
 
@@ -121,18 +117,12 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         </DropdownMenuItem>
       </DropdownMenuContent>
 
-      <ConfirmDialog
-        open={deleteConfirmOpen}
-        onOpenChange={setDeleteConfirmOpen}
-        title={t('Delete Model')}
-        desc={`Are you sure you want to delete "${model.model_name}"? This action cannot be undone.`}
-        confirmText='Delete'
-        destructive
-        handleConfirm={() => {
-          handleDeleteModel(model.id, queryClient)
-          setDeleteConfirmOpen(false)
-        }}
-      />
+      {deleteConfirmOpen && (
+        <ModelDeleteDialog
+          models={[model]}
+          onClose={() => setDeleteConfirmOpen(false)}
+        />
+      )}
     </DropdownMenu>
   )
 }

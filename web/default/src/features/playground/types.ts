@@ -82,7 +82,11 @@ export interface ChatCompletionChunk {
       role?: MessageRole
       content?: string
       reasoning_content?: string
+      reasoning?: string
+      text?: string
     }
+    message?: { content?: string; reasoning_content?: string; reasoning?: string }
+    text?: string
     finish_reason: string | null
   }>
 }
@@ -98,6 +102,7 @@ export interface ChatCompletionResponse {
       role: MessageRole
       content: string
       reasoning_content?: string
+      reasoning?: string
     }
     finish_reason: string
   }>

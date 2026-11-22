@@ -34,6 +34,7 @@ const defaultOperationsSettings: OperationsSettings = {
   SelfUseModeEnabled: false,
   ChannelDisableThreshold: '',
   QuotaRemindThreshold: '',
+  QuotaRemindEnabled: true,
   AutomaticDisableChannelEnabled: false,
   AutomaticEnableChannelEnabled: false,
   AutomaticDisableKeywords: '',

@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -40,6 +41,12 @@ func setupTaskLedgerTest(t *testing.T) (*gorm.DB, *model.Task) {
 		common.QuotaPerUnit, common.BatchUpdateEnabled = originalUnit, originalBatch
 		require.NoError(t, operation_setting.UpdateRebateSetting(originalSetting))
 	})
+	// 结算读取已提交的配置；测试同时持久化配置以覆盖真实返利路径。
+	fields, err := config.ConfigToMap(operation_setting.GetRebateSetting())
+	require.NoError(t, err)
+	for key, value := range fields {
+		require.NoError(t, db.Create(&model.Option{Key: "rebate_setting." + key, Value: value}).Error)
+	}
 	require.NoError(t, db.Create(&model.RebateSystemState{Key: "wallet_credit_baseline_v1", Value: "initialized:task-test", UpdatedAt: time.Now().UTC()}).Error)
 	inviter := model.User{Username: "task-inviter", AffCode: "task-parent", Status: common.UserStatusEnabled}
 	require.NoError(t, db.Create(&inviter).Error)
@@ -343,6 +350,12 @@ func TestMain(m *testing.M) {
 		&model.WalletLotHold{},
 		&model.RebateRecord{},
 		&model.RebateCapBucket{},
+		&model.WalletDebtRepayment{},
+		&model.WalletSourceReversal{},
+		&model.RebateSourceReversal{},
+		&model.TopUpPaymentBinding{},
+		&model.TopUpReversalState{},
+		&model.TopUpReversalEvent{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -365,6 +378,12 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM top_ups")
 		model.DB.Exec("DELETE FROM user_subscriptions")
 		model.DB.Exec("DELETE FROM user_group_ratio_overrides")
+		model.DB.Exec("DELETE FROM top_up_reversal_events")
+		model.DB.Exec("DELETE FROM top_up_reversal_states")
+		model.DB.Exec("DELETE FROM top_up_payment_bindings")
+		model.DB.Exec("DELETE FROM rebate_source_reversals")
+		model.DB.Exec("DELETE FROM wallet_source_reversals")
+		model.DB.Exec("DELETE FROM wallet_debt_repayments")
 		model.DB.Exec("DELETE FROM wallet_credit_lots")
 		model.DB.Exec("DELETE FROM wallet_consumption_settlements")
 		model.DB.Exec("DELETE FROM wallet_consumption_allocations")
@@ -528,69 +547,43 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 }
 
 func TestRefundTaskQuota_Subscription(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID, subID = 2, 2, 2, 1
 	const preConsumed = 2000
-	const subTotal, subUsed int64 = 100000, 50000
+	const subUsed int64 = 50000
 	const tokenRemain = 8000
+	db, task, sub := setupPendingSubscriptionTask(t, preConsumed, preConsumed)
+	require.NoError(t, db.Model(sub).UpdateColumn("amount_used", subUsed).Error)
+	require.NoError(t, task.Insert())
+	persistTaskBillingOutcome(t, task, 0, true)
 
-	seedUser(t, userID, 0)
-	seedToken(t, tokenID, userID, "sk-sub-key", tokenRemain)
-	seedChannel(t, channelID)
-	seedSubscription(t, subID, userID, subTotal, subUsed)
+	RefundTaskQuota(context.Background(), task, "subscription task failed")
 
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceSubscription, subID)
-
-	RefundTaskQuota(ctx, task, "subscription task failed")
-
-	// Subscription used should decrease by preConsumed
-	assert.Equal(t, subUsed-int64(preConsumed), getSubscriptionUsed(t, subID))
-
-	// Token should also be refunded
-	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
-
+	assert.Equal(t, subUsed-int64(preConsumed), getSubscriptionUsed(t, sub.Id))
+	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, task.PrivateData.TokenId))
+	assert.Equal(t, model.TaskBillingDone, task.BillingState)
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
 }
 
 func TestRefundTaskQuota_SubscriptionDoesNotCrossPeriod(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID, subID = 20, 20, 20, 20
 	const preConsumed = 2000
 	const tokenRemain = 8000
+	db, task, sub := setupPendingSubscriptionTask(t, preConsumed, preConsumed)
+	require.NoError(t, task.Insert())
+	nextPeriod := task.PrivateData.SubscriptionPeriodStart + 1
+	require.NoError(t, db.Model(sub).Updates(map[string]interface{}{
+		"quota_period_start": nextPeriod, "last_reset_time": nextPeriod, "amount_used": 3000,
+	}).Error)
+	persistTaskBillingOutcome(t, task, 0, true)
 
-	seedUser(t, userID, 0)
-	seedToken(t, tokenID, userID, "sk-cross-period", tokenRemain)
-	seedChannel(t, channelID)
-	sub := &model.UserSubscription{
-		Id:            subID,
-		UserId:        userID,
-		AmountTotal:   100000,
-		AmountUsed:    3000,
-		Status:        "active",
-		StartTime:     50,
-		EndTime:       time.Now().Add(30 * 24 * time.Hour).Unix(),
-		LastResetTime: 200,
-	}
-	require.NoError(t, model.DB.Create(sub).Error)
-
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceSubscription, subID)
-	task.SubmitTime = 150
-	task.PrivateData.SubscriptionPeriodStart = 100
-
-	RefundTaskQuota(ctx, task, "old-period task failed")
+	RefundTaskQuota(context.Background(), task, "old-period task failed")
 
 	// The expired subscription period must not refund into the new period.
-	assert.Equal(t, int64(3000), getSubscriptionUsed(t, subID))
+	assert.Equal(t, int64(3000), getSubscriptionUsed(t, sub.Id))
 	// Token quota is lifetime-scoped and still receives its task refund.
-	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, task.PrivateData.TokenId))
 	assert.Equal(t, 0, task.Quota)
-
+	assert.Equal(t, model.TaskBillingDone, task.BillingState)
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	var other map[string]interface{}
@@ -748,32 +741,21 @@ func TestRecalculate_ActualQuotaZero(t *testing.T) {
 }
 
 func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID, subID = 14, 14, 14, 2
 	const preConsumed = 5000
 	const actualQuota = 2000 // over-charged by 3000
-	const subTotal, subUsed int64 = 100000, 50000
-	const tokenRemain = 8000
+	const subUsed int64 = 50000
+	const tokenRemain = 5000
+	db, task, sub := setupPendingSubscriptionTask(t, preConsumed, preConsumed)
+	require.NoError(t, db.Model(sub).UpdateColumn("amount_used", subUsed).Error)
+	require.NoError(t, task.Insert())
+	persistTaskBillingOutcome(t, task, actualQuota, false)
 
-	seedUser(t, userID, 0)
-	seedToken(t, tokenID, userID, "sk-sub-recalc", tokenRemain)
-	seedChannel(t, channelID)
-	seedSubscription(t, subID, userID, subTotal, subUsed)
+	RecalculateTaskQuota(context.Background(), task, actualQuota, "subscription over-charge")
 
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceSubscription, subID)
-
-	RecalculateTaskQuota(ctx, task, actualQuota, "subscription over-charge")
-
-	// Subscription used should decrease by delta (refund 3000)
-	assert.Equal(t, subUsed-int64(preConsumed-actualQuota), getSubscriptionUsed(t, subID))
-
-	// Token refunded
-	assert.Equal(t, tokenRemain+(preConsumed-actualQuota), getTokenRemainQuota(t, tokenID))
-
+	assert.Equal(t, subUsed-int64(preConsumed-actualQuota), getSubscriptionUsed(t, sub.Id))
+	assert.Equal(t, tokenRemain+(preConsumed-actualQuota), getTokenRemainQuota(t, task.PrivateData.TokenId))
 	assert.Equal(t, actualQuota, task.Quota)
-
+	assert.Equal(t, model.TaskBillingDone, task.BillingState)
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
@@ -799,6 +781,9 @@ func simulatePollBilling(ctx context.Context, task *model.Task, newStatus model.
 	case model.TaskStatusSuccess:
 		task.Progress = "100%"
 		task.FinishTime = 9999
+		// Production persists the target with the terminal CAS so recovery
+		// cannot finalize the pre-consumption during the following crash gap.
+		task.BillingState, task.BillingQuota = model.TaskBillingPending, actualQuota
 		shouldSettle = true
 	case model.TaskStatusFailure:
 		task.Progress = "100%"
@@ -825,7 +810,7 @@ func simulatePollBilling(ctx context.Context, task *model.Task, newStatus model.
 		_, _ = task.UpdateWithStatus(snap.Status)
 	}
 
-	if shouldSettle && actualQuota > 0 {
+	if shouldSettle {
 		RecalculateTaskQuota(ctx, task, actualQuota, "test settle")
 	}
 	if shouldRefund {

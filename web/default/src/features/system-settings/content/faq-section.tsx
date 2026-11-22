@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -64,7 +64,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { SettingsSwitchField } from '../components/settings-form-layout'
 import { SettingsSection } from '../components/settings-section'
-import { useUpdateOption } from '../hooks/use-update-option'
+import { useSettingsList } from '../hooks/use-settings-list'
 
 type FAQ = {
   id: number
@@ -92,10 +92,22 @@ type FAQFormValues = z.infer<typeof faqSchema>
 
 export function FAQSection({ enabled, data }: FAQSectionProps) {
   const { t } = useTranslation()
-  const updateOption = useUpdateOption()
-  const [faqList, setFaqList] = useState<FAQ[]>([])
-  const [isEnabled, setIsEnabled] = useState(enabled)
-  const [hasChanges, setHasChanges] = useState(false)
+  const {
+    items: faqList,
+    setItems: setFaqList,
+    isEnabled,
+    hasChanges,
+    isPending,
+    parseError,
+    save: handleSaveAll,
+    toggleEnabled: handleToggleEnabled,
+  } = useSettingsList<FAQ>({
+    enabled,
+    data,
+    dataKey: 'console_setting.faq',
+    enabledKey: 'console_setting.faq_enabled',
+    schema: z.object({ id: z.number().int().positive(), question: z.string(), answer: z.string() }),
+  })
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [showDialog, setShowDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
@@ -109,39 +121,6 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
       answer: '',
     },
   })
-
-  useEffect(() => {
-    try {
-      const parsed = JSON.parse(data || '[]')
-      if (Array.isArray(parsed)) {
-        setFaqList(
-          parsed.map((item, idx) => ({
-            ...item,
-            id: item.id || idx + 1,
-          }))
-        )
-      }
-    } catch {
-      setFaqList([])
-    }
-  }, [data])
-
-  useEffect(() => {
-    setIsEnabled(enabled)
-  }, [enabled])
-
-  const handleToggleEnabled = async (checked: boolean) => {
-    try {
-      await updateOption.mutateAsync({
-        key: 'console_setting.faq_enabled',
-        value: checked,
-      })
-      setIsEnabled(checked)
-      toast.success(t('Setting saved'))
-    } catch {
-      toast.error(t('Failed to update setting'))
-    }
-  }
 
   const handleAdd = () => {
     setEditingFaq(null)
@@ -177,16 +156,15 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
   }
 
   const confirmDelete = () => {
+    if (parseError) return
     if (deleteTarget === 'single' && editingFaq) {
       setFaqList((prev) => prev.filter((item) => item.id !== editingFaq.id))
-      setHasChanges(true)
       toast.success(t('FAQ deleted. Click "Save Settings" to apply.'))
     } else if (deleteTarget === 'batch') {
       setFaqList((prev) =>
         prev.filter((item) => !selectedIds.includes(item.id))
       )
       setSelectedIds([])
-      setHasChanges(true)
       toast.success(
         t('{{count}} FAQs deleted. Click "Save Settings" to apply.', {
           count: selectedIds.length,
@@ -198,6 +176,7 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
   }
 
   const handleSubmitForm = (values: FAQFormValues) => {
+    if (parseError) return
     if (editingFaq) {
       setFaqList((prev) =>
         prev.map((item) =>
@@ -210,21 +189,7 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
       setFaqList((prev) => [...prev, { id: newId, ...values }])
       toast.success(t('FAQ added. Click "Save Settings" to apply.'))
     }
-    setHasChanges(true)
     setShowDialog(false)
-  }
-
-  const handleSaveAll = async () => {
-    try {
-      await updateOption.mutateAsync({
-        key: 'console_setting.faq',
-        value: JSON.stringify(faqList),
-      })
-      setHasChanges(false)
-      toast.success(t('FAQ saved successfully'))
-    } catch {
-      toast.error(t('Failed to save FAQ'))
-    }
   }
 
   const toggleSelectAll = (checked: boolean) => {
@@ -239,10 +204,15 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
 
   return (
     <SettingsSection title={t('FAQ')}>
+      {parseError && (
+        <p role='alert' className='text-destructive break-words text-sm'>
+          {t('Invalid settings list. Fix the source data and reload before editing.')} {parseError}
+        </p>
+      )}
       <div className='space-y-4'>
         <div className='flex flex-wrap items-center justify-between gap-2'>
           <div className='flex flex-wrap items-center gap-2'>
-            <Button onClick={handleAdd} size='sm'>
+            <Button onClick={handleAdd} size='sm' disabled={!!parseError}>
               <Plus className='mr-2 h-4 w-4' />
               {t('Add FAQ')}
             </Button>
@@ -250,7 +220,7 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
               onClick={handleBatchDelete}
               size='sm'
               variant='destructive'
-              disabled={selectedIds.length === 0}
+              disabled={!!parseError || selectedIds.length === 0}
             >
               <Trash2 className='mr-2 h-4 w-4' />
               {t('Delete (')}
@@ -260,15 +230,16 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
               onClick={handleSaveAll}
               size='sm'
               variant='secondary'
-              disabled={!hasChanges || updateOption.isPending}
+              disabled={!!parseError || !hasChanges || isPending}
             >
               <Save className='mr-2 h-4 w-4' />
-              {updateOption.isPending ? t('Saving...') : t('Save Settings')}
+              {isPending ? t('Saving...') : t('Save Settings')}
             </Button>
           </div>
           <SettingsSwitchField
             checked={isEnabled}
             onCheckedChange={handleToggleEnabled}
+            disabled={isPending}
             label={t('Enabled')}
             className='border-b-0 py-0'
           />

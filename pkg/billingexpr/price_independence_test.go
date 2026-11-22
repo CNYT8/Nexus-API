@@ -18,6 +18,8 @@ func TestIsUsageIndependentPrice(t *testing.T) {
 		{`tier("a", call(1)+2*p)`, "a", false},
 		{`tier("a", call(p))`, "a", false},
 		{`tier("a", call(1)+p*0)`, "a", false},
+		{`tier("a", cc12h * 10)`, "a", false},
+		{`tier("a", call(1) + cc12h * 0)`, "a", false},
 		{`len+c <= 250000 ? tier("a", call(1)) : tier("b", call(2))`, "a", true},
 		{`p < 10 ? tier("a", call(0)) : tier("b", 2*p)`, "a", true},
 		{`p < 10 ? tier("a", call(0)) : tier("b", 2*p)`, "b", false},

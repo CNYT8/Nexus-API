@@ -58,9 +58,12 @@ import {
 } from '@/features/auth/lib/validation'
 import type { User } from '@/features/users/types'
 
-type OtpFormProps = React.HTMLAttributes<HTMLFormElement>
+type OtpFormProps = React.HTMLAttributes<HTMLFormElement> & {
+  onVerified?: () => void
+  onVerificationBack?: () => void
+}
 
-export function OtpForm({ className, ...props }: OtpFormProps) {
+export function OtpForm({ className, onVerified, onVerificationBack, ...props }: OtpFormProps) {
   const { t } = useTranslation()
   const [isLoading, setIsLoading] = useState(false)
   const [useBackupCode, setUseBackupCode] = useState(false)
@@ -102,7 +105,7 @@ export function OtpForm({ className, ...props }: OtpFormProps) {
 
       // Handle user data from 2FA login response
       const userData = res.data
-      if (!userData) {
+      if (userData?.id == null) {
         throw new Error('No user data received from login')
       }
 
@@ -115,7 +118,8 @@ export function OtpForm({ className, ...props }: OtpFormProps) {
       }
 
       toast.success(t('Signed in'))
-      redirectToLogin() // This will redirect to dashboard via the redirect logic
+      if (onVerified) onVerified()
+      else redirectToLogin() // Preserve the standalone OTP page behavior.
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('2FA verification error:', error)
@@ -133,7 +137,8 @@ export function OtpForm({ className, ...props }: OtpFormProps) {
   }
 
   function handleBackToLogin() {
-    redirectToLogin()
+    if (onVerificationBack) onVerificationBack()
+    else redirectToLogin()
   }
 
   const isFormValid = useBackupCode

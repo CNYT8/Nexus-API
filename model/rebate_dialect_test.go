@@ -19,6 +19,12 @@ import (
 // owns. The dialect tests drop and recreate exactly these tables so a real
 // PostgreSQL/MySQL server can run them repeatedly without leftover state.
 var walletDialectModels = []interface{}{
+	&Option{},
+	&TopUpReversalEvent{},
+	&TopUpReversalState{},
+	&TopUpPaymentBinding{},
+	&RebateSourceReversal{},
+	&WalletSourceReversal{},
 	&RebateRecord{},
 	&RebateCapBucket{},
 	&RebateSystemState{},
@@ -106,6 +112,7 @@ func openWalletDialectDB(t *testing.T, dialect, dsn string) *gorm.DB {
 
 	require.NoError(t, db.Migrator().DropTable(walletDialectModels...))
 	require.NoError(t, db.AutoMigrate(walletDialectModels...))
+	persistRebateTestSetting(t, db, operation_setting.DefaultRebateSetting())
 	return db
 }
 
@@ -174,7 +181,7 @@ func testWalletLedgerDialect(t *testing.T, db *gorm.DB, dialect string) {
 	t.Run("same billing identity settles exactly once", func(t *testing.T) {
 		setting := rebateRewardSetting()
 		setting.RateBasisPoints = 200
-		useRebateRewardSetting(t, setting)
+		useRebateRewardSetting(t, setting, db)
 
 		inviter, invitee := createRebateInvitation(t, db)
 		creditDialectTopUp(t, db, invitee.Id, "dialect-same-identity", 1000)
@@ -369,7 +376,7 @@ func testWalletLedgerDialect(t *testing.T, db *gorm.DB, dialect string) {
 		setting := rebateRewardSetting()
 		setting.RateBasisPoints = 250
 		setting.PayoutMode = operation_setting.RebatePayoutScheduled
-		useRebateRewardSetting(t, setting)
+		useRebateRewardSetting(t, setting, db)
 
 		inviter, invitee := createRebateInvitation(t, db)
 		creditDialectTopUp(t, db, invitee.Id, "dialect-payout", 1000)

@@ -66,6 +66,16 @@ const TopUp = () => {
 
   const [redemptionCode, setRedemptionCode] = useState('');
   const [amount, setAmount] = useState(0.0);
+  const [waffoQuote, setWaffoQuote] = useState(null);
+  const quoteVersion = useRef(0);
+  const waffoBusy = useRef(false);
+  const accountRef = useRef(userState?.user?.id);
+  accountRef.current = userState?.user?.id;
+  useEffect(() => {
+    setWaffoQuote(null);
+    setOpen(false);
+    return () => { quoteVersion.current += 1; };
+  }, [userState?.user?.id]);
   const [minTopUp, setMinTopUp] = useState(statusState?.status?.min_topup || 1);
   const [topUpCount, setTopUpCount] = useState(
     statusState?.status?.min_topup || 1,
@@ -232,15 +242,25 @@ const TopUp = () => {
       }
     }
 
+    const version = ++quoteVersion.current;
+    const count = Math.floor(topUpCount);
+    setWaffoQuote(null);
     setPayWay(payment);
     setPaymentLoading(true);
     try {
       const selectedMinTopUp = getPaymentMinTopUp(payment);
-      await requestAmountByPayment(payment);
-
-      if (topUpCount < selectedMinTopUp) {
+      if (!Number.isFinite(count) || count < selectedMinTopUp) {
         showError(t('充值数量不能小于') + selectedMinTopUp);
         return;
+      }
+      const quoted = await requestAmountByPayment(payment, count);
+      if (quoteVersion.current !== version) return;
+      if (payment.startsWith('waffo:')) {
+        if (!Number.isFinite(quoted) || quoted <= 0) {
+          showError(t('获取金额失败'));
+          return;
+        }
+        setWaffoQuote({ count, amount: quoted, payment, method: getPayMethodConfig(payment), discount: topupInfo?.discount?.[count] || 1.0, accountId: accountRef.current });
       }
       setOpen(true);
     } catch (error) {
@@ -263,12 +283,17 @@ const TopUp = () => {
     }
 
     if (payWay.startsWith('waffo:')) {
-      const payMethodIndex = Number(payWay.split(':')[1]);
+      if (!waffoQuote || waffoBusy.current || waffoQuote.accountId !== accountRef.current) return;
+      const payMethodIndex = Number(waffoQuote.payment.split(':')[1]);
+      if (!Number.isInteger(payMethodIndex) || payMethodIndex < 0) return;
+      waffoBusy.current = true;
       setConfirmLoading(true);
       try {
-        await waffoTopUp(Number.isFinite(payMethodIndex) ? payMethodIndex : 0);
+        await waffoTopUp(payMethodIndex, waffoQuote.count);
       } finally {
+        waffoBusy.current = false;
         setOpen(false);
+        setWaffoQuote(null);
         setConfirmLoading(false);
       }
       return;
@@ -398,24 +423,27 @@ const TopUp = () => {
     }
   };
 
-  const waffoTopUp = async (payMethodIndex) => {
+  const waffoTopUp = async (payMethodIndex, count) => {
+    const accountId = accountRef.current;
+    const version = quoteVersion.current;
     try {
-      if (topUpCount < waffoMinTopUp) {
+      if (count < waffoMinTopUp) {
         showError(t('充值数量不能小于') + waffoMinTopUp);
         return;
       }
       setPaymentLoading(true);
       const requestBody = {
-        amount: parseInt(topUpCount),
+        amount: count,
       };
       if (payMethodIndex != null) {
         requestBody.pay_method_index = payMethodIndex;
       }
       const res = await API.post('/api/user/waffo/pay', requestBody);
+      if (accountRef.current !== accountId || quoteVersion.current !== version) return;
       if (res !== undefined) {
         const { message, data } = res.data;
-        if (message === 'success' && data?.payment_url) {
-          window.open(data.payment_url, '_blank');
+        if (message === 'success' && isSafeHttpCheckoutUrl(data?.payment_url)) {
+          window.location.assign(data.payment_url);
         } else {
           showError(data || t('支付请求失败'));
         }
@@ -440,17 +468,17 @@ const TopUp = () => {
       });
       if (res !== undefined) {
         const { message, data } = res.data;
-        if (message === 'success') {
-          setAmount(parseFloat(data));
-        } else {
-          setAmount(0);
-          Toast.error({ content: t('错误：') + data, id: 'getAmount' });
+        const price = Number(data);
+        if (message === 'success' && Number.isFinite(price) && price > 0) {
+          setAmount(price);
+          return price;
         }
-      } else {
-        showError(res);
       }
-    } catch (err) {
-      // amount fetch failed silently
+      setAmount(0);
+      return null;
+    } catch {
+      setAmount(0);
+      return null;
     } finally {
       setAmountLoading(false);
     }
@@ -867,7 +895,9 @@ const TopUp = () => {
   };
 
   const handleCancel = () => {
+    if (waffoBusy.current) return;
     setOpen(false);
+    setWaffoQuote(null);
   };
 
   const handleTransferCancel = () => {
@@ -933,14 +963,14 @@ const TopUp = () => {
         onlineTopUp={onlineTopUp}
         handleCancel={handleCancel}
         confirmLoading={confirmLoading}
-        topUpCount={topUpCount}
+        topUpCount={waffoQuote?.count ?? topUpCount}
         renderQuotaWithAmount={renderQuotaWithAmount}
-        amountLoading={amountLoading}
-        renderAmount={renderAmount}
-        payWay={payWay}
-        payMethods={confirmPayMethods}
-        amountNumber={amount}
-        discountRate={topupInfo?.discount?.[topUpCount] || 1.0}
+        amountLoading={waffoQuote ? false : amountLoading}
+        renderAmount={waffoQuote ? () => waffoQuote.amount + ' ' + t('元') : renderAmount}
+        payWay={waffoQuote?.payment ?? payWay}
+        payMethods={waffoQuote?.method ? [waffoQuote.method] : confirmPayMethods}
+        amountNumber={waffoQuote?.amount ?? amount}
+        discountRate={waffoQuote?.discount ?? topupInfo?.discount?.[topUpCount] ?? 1.0}
       />
 
       {/* 充值账单模态框 */}

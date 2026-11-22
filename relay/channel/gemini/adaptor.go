@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/reasoning"
 	"github.com/QuantumNous/new-api/types"
@@ -24,6 +25,12 @@ type Adaptor struct {
 }
 
 func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error) {
+	if request == nil {
+		return nil, errors.New("request is nil")
+	}
+	if err := helper.ApplyReasoningModelSuffix(c, info, request); err != nil {
+		return nil, err
+	}
 	if len(request.Contents) > 0 {
 		for i, content := range request.Contents {
 			if i == 0 {
@@ -131,8 +138,12 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 
 	if model_setting.GetGeminiSettings().ThinkingAdapterEnabled &&
 		!model_setting.ShouldPreserveThinkingSuffix(info.OriginModelName) {
-		// 新增逻辑：处理 -thinking-<budget> 格式
-		if strings.Contains(info.UpstreamModelName, "-thinking-") {
+		// Keep Argon URL aliases aligned with the level-based request mapping.
+		if strings.HasPrefix(strings.ToLower(info.UpstreamModelName), "gemini-4-argon") {
+			if baseModel, config, _ := parseArgonThinkingSuffix(info.UpstreamModelName); config != nil {
+				info.UpstreamModelName = baseModel
+			}
+		} else if strings.Contains(info.UpstreamModelName, "-thinking-") {
 			parts := strings.Split(info.UpstreamModelName, "-thinking-")
 			info.UpstreamModelName = parts[0]
 		} else if strings.HasSuffix(info.UpstreamModelName, "-thinking") { // 旧的适配
@@ -238,8 +249,7 @@ func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *relaycommon.Rela
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
-	// TODO implement me
-	return nil, errors.New("not implemented")
+	return convertResponsesToGemini(a, c, info, request)
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
@@ -247,6 +257,12 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
+	if info.RelayFormat == types.RelayFormatOpenAIResponses {
+		if info.IsStream {
+			return GeminiResponsesStreamHandler(c, resp, info)
+		}
+		return GeminiResponsesHandler(c, resp, info)
+	}
 	if info.RelayMode == constant.RelayModeGemini {
 		if strings.Contains(info.RequestURLPath, ":embedContent") ||
 			strings.Contains(info.RequestURLPath, ":batchEmbedContents") {

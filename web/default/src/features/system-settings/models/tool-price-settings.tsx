@@ -16,7 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { z } from 'zod'
 import { Code2, Copy, Eye, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -33,6 +35,7 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { normalizeSettingValue, useResetForm } from '../hooks/use-reset-form'
 
 const OPTION_KEY = 'tool_price_setting.prices'
 
@@ -50,15 +53,24 @@ const DEFAULT_PRICES: Record<string, number> = {
 type ToolPriceRow = {
   id: number
   key: string
-  price: number
+  price: string | number
 }
 
-function rowsToObject(rows: ToolPriceRow[]): Record<string, number> {
+function rowsToObject(rows: ToolPriceRow[]): Record<string, number> | null {
   const prices: Record<string, number> = {}
   for (const row of rows) {
     const k = row.key.trim()
-    if (!k) continue
-    prices[k] = Number(row.price) || 0
+    const price = Number(row.price)
+    if (
+      !['number', 'string'].includes(typeof row.price) ||
+      String(row.price).trim() === '' ||
+      !Number.isFinite(price) ||
+      price < 0
+    ) {
+      return null
+    }
+    if (!k || Object.hasOwn(prices, k)) return null
+    Object.defineProperty(prices, k, { value: price, enumerable: true })
   }
   return prices
 }
@@ -67,28 +79,48 @@ function objectToRows(prices: Record<string, number>): ToolPriceRow[] {
   return Object.entries(prices).map(([key, price], index) => ({
     id: index + 1,
     key,
-    price: Number(price) || 0,
+    price,
   }))
 }
 
-function parseInitialPrices(
-  rawValue: string | undefined
-): Record<string, number> {
-  if (!rawValue) return { ...DEFAULT_PRICES }
+const pricesSchema = z.record(z.string(), z.number().finite().nonnegative())
+const editorSchema = z.object({
+  rows: z.array(z.object({
+    id: z.number(),
+    key: z.string(),
+    price: z.union([z.string(), z.number()]),
+  })),
+  jsonText: z.string(),
+})
+
+function parsePrices(text: string): Record<string, number> | null {
   try {
-    const parsed = JSON.parse(rawValue) as unknown
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      !Array.isArray(parsed) &&
-      Object.keys(parsed as object).length > 0
-    ) {
-      return parsed as Record<string, number>
-    }
+    const parsed = pricesSchema.safeParse(JSON.parse(text) as unknown)
+    return parsed.success && rowsToObject(objectToRows(parsed.data)) !== null
+      ? parsed.data
+      : null
   } catch {
-    // fall through to defaults
+    return null
   }
-  return { ...DEFAULT_PRICES }
+}
+
+function createEditor(raw: string): string {
+  const jsonText = raw || JSON.stringify(DEFAULT_PRICES, null, 2)
+  const prices = parsePrices(jsonText)
+  return JSON.stringify({ rows: prices ? objectToRows(prices) : [], jsonText })
+}
+
+function readEditor(value: string) {
+  return editorSchema.parse(JSON.parse(value) as unknown)
+}
+
+function normalizeEditor(value: unknown): unknown {
+  if (typeof value !== 'string') return value
+  const editor = readEditor(value)
+  const prices = rowsToObject(editor.rows)
+  return prices !== null && parsePrices(editor.jsonText) !== null
+    ? normalizeSettingValue(prices)
+    : value
 }
 
 type ToolPriceSettingsProps = {
@@ -100,103 +132,65 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
 }: ToolPriceSettingsProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
-  const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
-  const [rows, setRows] = useState<ToolPriceRow[]>([])
-  const [jsonText, setJsonText] = useState('')
-  const [jsonError, setJsonError] = useState('')
-  const [nextRowId, setNextRowId] = useState(1)
-
-  useEffect(() => {
-    const prices = parseInitialPrices(defaultValue)
-    const initialRows = objectToRows(prices)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRows(initialRows)
-    setJsonText(JSON.stringify(prices, null, 2))
-    setJsonError('')
-    setNextRowId(initialRows.length + 1)
-  }, [defaultValue])
-
-  const currentPrices = useMemo(() => rowsToObject(rows), [rows])
-
-  const syncFromRows = useCallback((nextRows: ToolPriceRow[]) => {
-    setRows(nextRows)
-    setJsonText(JSON.stringify(rowsToObject(nextRows), null, 2))
-    setJsonError('')
-  }, [])
-
-  const handleJsonChange = useCallback(
-    (text: string) => {
-      setJsonText(text)
-      try {
-        const parsed = JSON.parse(text) as unknown
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          setJsonError(t('JSON must be an object'))
-          return
-        }
-        const nextRows = objectToRows(parsed as Record<string, number>)
-        setRows(nextRows)
-        setNextRowId(nextRows.length + 1)
-        setJsonError('')
-      } catch (error) {
-        setJsonError(error instanceof Error ? error.message : t('Invalid JSON'))
-      }
-    },
-    [t]
+  const defaults = { editor: createEditor(defaultValue) }
+  const form = useForm({ defaultValues: defaults })
+  const submitForm = useResetForm(form, defaults, normalizeEditor)
+  const { rows, jsonText } = readEditor(form.watch('editor'))
+  const [editMode, setEditMode] = useState<'visual' | 'json'>(
+    parsePrices(jsonText) === null ? 'json' : 'visual'
   )
+  const currentPrices = rowsToObject(rows)
+  const jsonError = parsePrices(jsonText) === null
+    ? t('Invalid tool prices. Use unique, non-empty tool names and finite, non-negative numbers.')
+    : ''
+  const showJson = editMode === 'json' || !!jsonError
 
-  const updateRow = useCallback(
-    (id: number, field: 'key' | 'price', value: string | number) => {
-      syncFromRows(
-        rows.map((r) => (r.id === id ? { ...r, [field]: value } : r))
-      )
-    },
-    [rows, syncFromRows]
-  )
-
-  const addRow = useCallback(() => {
-    const newRow: ToolPriceRow = { id: nextRowId, key: '', price: 0 }
-    setNextRowId((prev) => prev + 1)
-    syncFromRows([...rows, newRow])
-  }, [nextRowId, rows, syncFromRows])
-
-  const removeRow = useCallback(
-    (id: number) => {
-      syncFromRows(rows.filter((r) => r.id !== id))
-    },
-    [rows, syncFromRows]
-  )
-
-  const resetToDefault = useCallback(() => {
-    const initialRows = objectToRows(DEFAULT_PRICES)
-    setRows(initialRows)
-    setJsonText(JSON.stringify(DEFAULT_PRICES, null, 2))
-    setJsonError('')
-    setNextRowId(initialRows.length + 1)
-  }, [])
-
-  const handleCopyJson = useCallback(async () => {
+  const syncFromRows = (nextRows: ToolPriceRow[]) => {
+    const prices = rowsToObject(nextRows)
+    form.setValue('editor', JSON.stringify({
+      rows: nextRows,
+      jsonText: prices === null ? jsonText : JSON.stringify(prices, null, 2),
+    }), { shouldDirty: true })
+  }
+  const handleJsonChange = (text: string) => {
+    const prices = parsePrices(text)
+    form.setValue('editor', JSON.stringify({
+      rows: prices === null ? rows : objectToRows(prices),
+      jsonText: text,
+    }), { shouldDirty: true })
+  }
+  const updateRow = (id: number, field: 'key' | 'price', value: string | number) => {
+    syncFromRows(rows.map((row) => row.id === id ? { ...row, [field]: value } : row))
+  }
+  const addRow = () => {
+    const id = Math.max(0, ...rows.map((row) => row.id)) + 1
+    syncFromRows([...rows, { id, key: '', price: '' }])
+  }
+  const removeRow = (id: number) => syncFromRows(rows.filter((row) => row.id !== id))
+  const resetToDefault = () => {
+    form.setValue('editor', createEditor(''), { shouldDirty: true })
+  }
+  const handleCopyJson = async () => {
     try {
       await navigator.clipboard.writeText(jsonText)
       toast.success(t('Copied to clipboard'))
     } catch {
       toast.error(t('Failed to copy'))
     }
-  }, [jsonText, t])
-
-  const handleSave = useCallback(async () => {
-    if (editMode === 'json' && jsonError) {
-      toast.error(t('Please fix JSON errors before saving'))
+  }
+  const handleSave = submitForm(async (values) => {
+    const editor = readEditor(values.editor)
+    const prices = rowsToObject(editor.rows)
+    if (prices === null || parsePrices(editor.jsonText) === null) {
+      toast.error(t('Invalid tool prices. Use unique, non-empty tool names and finite, non-negative numbers.'))
       return
     }
-    await updateOption.mutateAsync({
-      key: OPTION_KEY,
-      value: JSON.stringify(currentPrices),
-    })
-  }, [currentPrices, editMode, jsonError, t, updateOption])
-
-  const toggleEditMode = useCallback(() => {
-    setEditMode((prev) => (prev === 'visual' ? 'json' : 'visual'))
-  }, [])
+    await updateOption.saveOptions([{ key: OPTION_KEY, value: JSON.stringify(prices) }])
+  })
+  const toggleEditMode = () => {
+    if (jsonError || currentPrices === null) return
+    setEditMode((previous) => previous === 'visual' ? 'json' : 'visual')
+  }
 
   return (
     <div className='space-y-4'>
@@ -223,7 +217,7 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
 
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <div className='flex flex-wrap items-center gap-2'>
-          {editMode === 'visual' ? (
+          {!showJson ? (
             <>
               <Button variant='outline' size='sm' onClick={addRow}>
                 <Plus className='mr-2 h-4 w-4' />
@@ -245,8 +239,8 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
             </>
           )}
         </div>
-        <Button variant='outline' size='sm' onClick={toggleEditMode}>
-          {editMode === 'visual' ? (
+        <Button variant='outline' size='sm' onClick={toggleEditMode} disabled={!!jsonError || currentPrices === null}>
+          {!showJson ? (
             <>
               <Code2 className='mr-2 h-4 w-4' />
               {t('Switch to JSON')}
@@ -260,7 +254,7 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
         </Button>
       </div>
 
-      {editMode === 'visual' ? (
+      {!showJson ? (
         <div className='overflow-hidden rounded-md border'>
           <Table>
             <TableHeader>
@@ -298,15 +292,13 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
                     </TableCell>
                     <TableCell>
                       <Input
-                        type='number'
-                        min={0}
-                        step={0.5}
+                        inputMode='decimal'
                         value={row.price}
                         onChange={(e) =>
                           updateRow(
                             row.id,
                             'price',
-                            Number(e.target.value) || 0
+                            e.target.value
                           )
                         }
                       />
@@ -340,11 +332,14 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
         </div>
       )}
 
+      <p className={currentPrices === null ? 'text-destructive text-sm' : 'text-muted-foreground text-sm'}>
+        {t('Prices must be finite, non-negative numbers. Enter 0 for free.')}
+      </p>
       <div className='flex justify-end'>
         <Button
           onClick={handleSave}
           disabled={
-            updateOption.isPending || (editMode === 'json' && !!jsonError)
+            form.formState.isSubmitting || updateOption.isPending || !!jsonError || currentPrices === null
           }
         >
           {t('Save tool prices')}

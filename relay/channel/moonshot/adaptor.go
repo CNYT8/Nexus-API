@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	channelconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
@@ -67,6 +68,8 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 			return fmt.Sprintf("%s/v1/chat/completions", info.ChannelBaseUrl), nil
 		} else if info.RelayMode == constant.RelayModeCompletions {
 			return fmt.Sprintf("%s/v1/completions", info.ChannelBaseUrl), nil
+		} else if info.RelayMode == constant.RelayModeResponses {
+			return fmt.Sprintf("%s/v1/responses", info.ChannelBaseUrl), nil
 		}
 		return fmt.Sprintf("%s/v1/chat/completions", info.ChannelBaseUrl), nil
 	}
@@ -79,12 +82,22 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 }
 
 func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) (any, error) {
+	if request == nil {
+		return nil, errors.New("request is nil")
+	}
+	modelName := request.Model
+	if info != nil && info.ChannelMeta != nil && info.UpstreamModelName != "" {
+		modelName = info.UpstreamModelName
+	}
+	if request.Temperature != nil && strings.EqualFold(modelName, "kimi-k2.6") && *request.Temperature != 1 {
+		temperature := 1.0
+		request.Temperature = &temperature
+	}
 	return request, nil
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
-	// TODO implement me
-	return nil, errors.New("not implemented")
+	return request, nil
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {

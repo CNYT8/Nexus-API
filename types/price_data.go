@@ -7,6 +7,12 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// 长时缓存写入按短时写入价格的固定倍率计费。
+const (
+	ClaudeCacheCreation1hMultiplier  = 6.0 / 3.75
+	OpenAICacheCreation12hMultiplier = 2
+)
+
 type GroupRatioInfo struct {
 	GroupRatio        float64
 	GroupSpecialRatio float64
@@ -14,22 +20,23 @@ type GroupRatioInfo struct {
 }
 
 type PriceData struct {
-	FreeModel            bool
-	ModelPrice           float64
-	ModelRatio           float64
-	CompletionRatio      float64
-	CacheRatio           float64
-	CacheCreationRatio   float64
-	CacheCreation5mRatio float64
-	CacheCreation1hRatio float64
-	ImageRatio           float64
-	AudioRatio           float64
-	AudioCompletionRatio float64
-	OtherRatios          map[string]float64
-	UsePrice             bool
-	Quota                int // 按次计费的最终额度（MJ / Task）
-	QuotaToPreConsume    int // 按量计费的预消耗额度
-	GroupRatioInfo       GroupRatioInfo
+	FreeModel             bool
+	ModelPrice            float64
+	ModelRatio            float64
+	CompletionRatio       float64
+	CacheRatio            float64
+	CacheCreationRatio    float64
+	CacheCreation5mRatio  float64
+	CacheCreation1hRatio  float64
+	CacheCreation12hRatio float64
+	ImageRatio            float64
+	AudioRatio            float64
+	AudioCompletionRatio  float64
+	OtherRatios           map[string]float64
+	UsePrice              bool
+	Quota                 int // 按次计费的最终额度（MJ / Task）
+	QuotaToPreConsume     int // 按量计费的预消耗额度
+	GroupRatioInfo        GroupRatioInfo
 }
 
 func (p *PriceData) AddOtherRatio(key string, ratio float64) {
@@ -73,5 +80,5 @@ func (p *PriceData) ApplyOtherRatiosToDecimal(value decimal.Decimal) decimal.Dec
 }
 
 func (p *PriceData) ToSetting() string {
-	return fmt.Sprintf("ModelPrice: %f, ModelRatio: %f, CompletionRatio: %f, CacheRatio: %f, GroupRatio: %f, UsePrice: %t, CacheCreationRatio: %f, CacheCreation5mRatio: %f, CacheCreation1hRatio: %f, QuotaToPreConsume: %d, ImageRatio: %f, AudioRatio: %f, AudioCompletionRatio: %f", p.ModelPrice, p.ModelRatio, p.CompletionRatio, p.CacheRatio, p.GroupRatioInfo.GroupRatio, p.UsePrice, p.CacheCreationRatio, p.CacheCreation5mRatio, p.CacheCreation1hRatio, p.QuotaToPreConsume, p.ImageRatio, p.AudioRatio, p.AudioCompletionRatio)
+	return fmt.Sprintf("ModelPrice: %f, ModelRatio: %f, CompletionRatio: %f, CacheRatio: %f, GroupRatio: %f, UsePrice: %t, CacheCreationRatio: %f, CacheCreation5mRatio: %f, CacheCreation1hRatio: %f, CacheCreation12hRatio: %f, QuotaToPreConsume: %d, ImageRatio: %f, AudioRatio: %f, AudioCompletionRatio: %f", p.ModelPrice, p.ModelRatio, p.CompletionRatio, p.CacheRatio, p.GroupRatioInfo.GroupRatio, p.UsePrice, p.CacheCreationRatio, p.CacheCreation5mRatio, p.CacheCreation1hRatio, p.CacheCreation12hRatio, p.QuotaToPreConsume, p.ImageRatio, p.AudioRatio, p.AudioCompletionRatio)
 }

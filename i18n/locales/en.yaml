@@ -299,6 +299,10 @@ ticket.message_limit: "This ticket has reached its message limit. Please create 
 ticket.invalid_settings: "Invalid ticket settings"
 ticket.content_length_invalid: "Ticket content length must be between 100 and 20000 characters"
 
+# API validation messages
+"访问令牌没有联动删除所需的权限": "The access token lacks the permissions required for linked deletion"
+"工具价格必须为 JSON 对象": "Tool prices must be a JSON object"
+
 # Web risk control messages
 web_risk.verification_required: "Please verify that you are human"
 web_risk.verification_failed: "Verification failed. Please try again"

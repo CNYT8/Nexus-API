@@ -16,12 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Banner,
   Button,
   Input,
-  InputNumber,
   Radio,
   RadioGroup,
   Table,
@@ -30,7 +29,8 @@ import {
 } from '@douyinfe/semi-ui';
 import { IconCopy, IconDelete, IconPlus } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
-import { API, copy, showError, showSuccess } from '../../../helpers';
+import { copy, showError } from '../../../helpers';
+import { reconcileOptionDrafts, saveOptionBatch } from './hooks/optionSave';
 
 const { Text } = Typography;
 
@@ -51,8 +51,17 @@ function rowsToObject(rows) {
   const prices = {};
   for (const row of rows) {
     const k = row.key.trim();
+    const price = Number(row.price);
+    if (
+      !['number', 'string'].includes(typeof row.price) ||
+      String(row.price).trim() === '' ||
+      !Number.isFinite(price) ||
+      price < 0
+    ) {
+      return null;
+    }
     if (!k) continue;
-    prices[k] = Number(row.price) || 0;
+    prices[k] = price;
   }
   return prices;
 }
@@ -65,36 +74,64 @@ function objectToRows(prices) {
   }));
 }
 
-export default function ToolPriceSettings({ options }) {
+export default function ToolPriceSettings({ options, refresh }) {
   const { t } = useTranslation();
   const [rows, setRows] = useState([]);
   const [mode, setMode] = useState('visual');
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState('');
   const [saving, setSaving] = useState(false);
+  const baselineRef = useRef(DEFAULT_PRICES);
+  const initializedRef = useRef(false);
+  const submissionRef = useRef(null);
+  const draftRef = useRef(null);
+  draftRef.current = { rows, jsonText, jsonError };
 
   useEffect(() => {
-    let prices = {};
+    if (saving) return;
+    const submission = submissionRef.current;
+    if (submission?.options === options) return;
+    let prices = { ...DEFAULT_PRICES };
     try {
       const raw = options?.[OPTION_KEY];
       if (raw) {
         prices = typeof raw === 'string' ? JSON.parse(raw) : raw;
       }
     } catch {
-      prices = {};
-    }
-
-    if (!prices || Object.keys(prices).length === 0) {
       prices = { ...DEFAULT_PRICES };
     }
 
-    setRows(objectToRows(prices));
-    setJsonText(JSON.stringify(prices, null, 2));
-  }, [options]);
+    if (!prices || typeof prices !== 'object' || Array.isArray(prices)) {
+      prices = { ...DEFAULT_PRICES };
+    }
+
+    const draft = draftRef.current;
+    const current = Object.fromEntries(draft.rows
+      .filter((row) => row.key.trim())
+      .map((row) => [row.key.trim(), row.price]));
+    const merged = reconcileOptionDrafts(
+      { [OPTION_KEY]: initializedRef.current ? current : baselineRef.current },
+      { [OPTION_KEY]: baselineRef.current },
+      { [OPTION_KEY]: prices },
+      submission && { [OPTION_KEY]: submission.prices },
+      submission?.successfulKeys,
+    )[OPTION_KEY];
+    initializedRef.current = true;
+    baselineRef.current = prices;
+    submissionRef.current = null;
+    if (draft.jsonError) return;
+    setRows([
+      ...objectToRows(merged).map((row) => ({ ...row, id: `saved:${row.key}` })),
+      ...draft.rows.filter((row) => !row.key.trim()),
+    ]);
+    setJsonText(JSON.stringify(merged, null, 2));
+    setJsonError('');
+  }, [options, saving]);
 
   const syncToJson = (nextRows) => {
     setRows(nextRows);
-    setJsonText(JSON.stringify(rowsToObject(nextRows), null, 2));
+    const prices = rowsToObject(nextRows);
+    if (prices !== null) setJsonText(JSON.stringify(prices, null, 2));
     setJsonError('');
   };
 
@@ -104,6 +141,12 @@ export default function ToolPriceSettings({ options }) {
       const parsed = JSON.parse(text);
       if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
         setJsonError(t('JSON 必须是对象'));
+        return;
+      }
+      if (Object.values(parsed).some(
+        (price) => typeof price !== 'number' || !Number.isFinite(price) || price < 0,
+      )) {
+        setJsonError(t('价格必须是有限的非负数，免费请明确填写 0。'));
         return;
       }
       setRows(objectToRows(parsed));
@@ -118,7 +161,7 @@ export default function ToolPriceSettings({ options }) {
   };
 
   const addRow = () => {
-    syncToJson([...rows, { id: Date.now(), key: '', price: 0 }]);
+    syncToJson([...rows, { id: Date.now(), key: '', price: '' }]);
   };
 
   const removeRow = (id) => {
@@ -132,19 +175,20 @@ export default function ToolPriceSettings({ options }) {
   const currentPrices = useMemo(() => rowsToObject(rows), [rows]);
 
   const handleSave = async () => {
+    if (saving) return;
+    if (jsonError || currentPrices === null) {
+      showError(jsonError || t('价格必须是有限的非负数，免费请明确填写 0。'));
+      return;
+    }
+    submissionRef.current = { options, prices: currentPrices, successfulKeys: [] };
     setSaving(true);
     try {
-      const res = await API.put('/api/option/', {
-        key: OPTION_KEY,
-        value: JSON.stringify(currentPrices),
-      });
-      if (res.data.success) {
-        showSuccess(t('保存成功'));
-      } else {
-        showError(res.data.message || t('保存失败'));
-      }
-    } catch (e) {
-      showError(e.message);
+      await saveOptionBatch(
+        [{ key: OPTION_KEY, value: JSON.stringify(currentPrices) }],
+        refresh,
+        t,
+        ({ successfulKeys }) => { submissionRef.current.successfulKeys = successfulKeys; },
+      );
     } finally {
       setSaving(false);
     }
@@ -168,11 +212,10 @@ export default function ToolPriceSettings({ options }) {
       dataIndex: 'price',
       width: 160,
       render: (val, record) => (
-        <InputNumber
+        <Input
           value={val}
-          min={0}
-          step={0.5}
-          onChange={(v) => updateRow(record.id, 'price', v ?? 0)}
+          inputMode='decimal'
+          onChange={(v) => updateRow(record.id, 'price', v)}
           style={{ width: '100%' }}
         />
       ),
@@ -213,7 +256,9 @@ export default function ToolPriceSettings({ options }) {
         type='button'
         size='small'
         value={mode}
-        onChange={(e) => setMode(e.target.value)}
+        onChange={(e) => {
+          if (!jsonError && currentPrices !== null) setMode(e.target.value);
+        }}
         style={{ marginBottom: 12 }}
       >
         <Radio value='visual'>{t('可视化')}</Radio>
@@ -267,12 +312,15 @@ export default function ToolPriceSettings({ options }) {
         </>
       )}
 
+      <Text type={currentPrices === null ? 'danger' : 'tertiary'}>
+        {t('价格必须是有限的非负数，免费请明确填写 0。')}
+      </Text>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
         <Button
           theme='solid'
           type='primary'
           loading={saving}
-          disabled={mode === 'json' && !!jsonError}
+          disabled={!!jsonError || currentPrices === null}
           onClick={handleSave}
         >
           {t('保存')}

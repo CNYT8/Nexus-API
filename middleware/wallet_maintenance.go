@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -10,8 +11,9 @@ import (
 )
 
 var (
-	walletMaintenanceActive  atomic.Bool
-	inFlightBusinessRequests atomic.Int64
+	walletMaintenanceAdmission sync.Mutex
+	walletMaintenanceActive    atomic.Bool
+	inFlightBusinessRequests   atomic.Int64
 )
 
 func isWalletMaintenanceExemptPath(path string) bool {
@@ -22,17 +24,25 @@ func isWalletMaintenanceExemptPath(path string) bool {
 
 // BeginWalletMaintenanceGate activates the maintenance gate and waits up to maxWait
 // for in-flight non-exempt HTTP requests on this instance to drain.
-func BeginWalletMaintenanceGate(maxWait time.Duration) {
+func BeginWalletMaintenanceGate(maxWait time.Duration) bool {
+	walletMaintenanceAdmission.Lock()
 	walletMaintenanceActive.Store(true)
+	walletMaintenanceAdmission.Unlock()
 	deadline := time.Now().Add(maxWait)
-	for inFlightBusinessRequests.Load() > 0 && time.Now().Before(deadline) {
+	for inFlightBusinessRequests.Load() > 0 {
+		if !time.Now().Before(deadline) {
+			return false
+		}
 		time.Sleep(25 * time.Millisecond)
 	}
+	return true
 }
 
 // EndWalletMaintenanceGate reopens normal HTTP request processing.
 func EndWalletMaintenanceGate() {
+	walletMaintenanceAdmission.Lock()
 	walletMaintenanceActive.Store(false)
+	walletMaintenanceAdmission.Unlock()
 }
 
 // IsWalletMaintenanceActive reports whether the instance is currently in a
@@ -43,14 +53,18 @@ func IsWalletMaintenanceActive() bool {
 
 // WalletMaintenanceGate rejects new business requests with 503 while the wallet
 // credit baseline is being initialized, and tracks in-flight request count so
-// the initializer can wait for active requests to drain.
+// the initializer can wait for active requests to drain. This is a local drain
+// aid; cross-instance safety comes from the model's transaction baseline gate
+// and persistent legacy reservations, never from this process-local counter.
 func WalletMaintenanceGate() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if isWalletMaintenanceExemptPath(c.Request.URL.Path) {
 			c.Next()
 			return
 		}
+		walletMaintenanceAdmission.Lock()
 		if walletMaintenanceActive.Load() {
+			walletMaintenanceAdmission.Unlock()
 			c.Header("Retry-After", "5")
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
 				"success": false,
@@ -64,6 +78,7 @@ func WalletMaintenanceGate() gin.HandlerFunc {
 			return
 		}
 		inFlightBusinessRequests.Add(1)
+		walletMaintenanceAdmission.Unlock()
 		defer inFlightBusinessRequests.Add(-1)
 		c.Next()
 	}

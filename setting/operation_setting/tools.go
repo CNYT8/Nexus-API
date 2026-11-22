@@ -1,6 +1,8 @@
 package operation_setting
 
 import (
+	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -67,6 +69,7 @@ type prefixEntry struct {
 
 type toolPriceIndex struct {
 	defaults map[string]float64
+	exact    map[string]map[string]float64
 	prefixes map[string][]prefixEntry
 }
 
@@ -83,11 +86,14 @@ func RebuildToolPriceIndex() {
 		merged[k] = v
 	}
 	for k, v := range toolPriceSetting.Prices {
-		merged[k] = v
+		if validateToolPrice(k, v) == nil {
+			merged[k] = v
+		}
 	}
 
 	idx := &toolPriceIndex{
 		defaults: make(map[string]float64),
+		exact:    make(map[string]map[string]float64),
 		prefixes: make(map[string][]prefixEntry),
 	}
 
@@ -99,6 +105,13 @@ func RebuildToolPriceIndex() {
 		}
 		toolName := key[:colonIdx]
 		modelPart := key[colonIdx+1:]
+		if !strings.HasSuffix(modelPart, "*") {
+			if idx.exact[toolName] == nil {
+				idx.exact[toolName] = make(map[string]float64)
+			}
+			idx.exact[toolName][modelPart] = price
+			continue
+		}
 		prefix := strings.TrimSuffix(modelPart, "*")
 		idx.prefixes[toolName] = append(idx.prefixes[toolName], prefixEntry{prefix: prefix, price: price})
 	}
@@ -125,6 +138,9 @@ func GetToolPriceForModel(toolName, modelName string) float64 {
 		return 0
 	}
 
+	if price, ok := idx.exact[toolName][modelName]; ok {
+		return price
+	}
 	if entries, ok := idx.prefixes[toolName]; ok && modelName != "" {
 		for _, e := range entries {
 			if strings.HasPrefix(modelName, e.prefix) {
@@ -136,7 +152,55 @@ func GetToolPriceForModel(toolName, modelName string) float64 {
 	if p, ok := idx.defaults[toolName]; ok {
 		return p
 	}
+	if toolName == "image_generation" {
+		return 150 // Generic image tool fallback; legacy quality/size stays separate.
+	}
 	return 0
+}
+
+// HasConfiguredToolPrice distinguishes an explicit image price (including zero)
+// from the generic fallback, preserving historical quality/size billing.
+func HasConfiguredToolPrice(toolName, modelName string) bool {
+	idx := currentIndex.Load()
+	if idx == nil {
+		return false
+	}
+	if _, ok := idx.defaults[toolName]; ok {
+		return true
+	}
+	if _, ok := idx.exact[toolName][modelName]; ok {
+		return true
+	}
+	for _, entry := range idx.prefixes[toolName] {
+		if strings.HasPrefix(modelName, entry.prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateToolPrice(key string, price float64) error {
+	parts := strings.Split(key, ":")
+	if key == "" || strings.TrimSpace(key) != key || len(parts) > 2 || parts[0] == "" || strings.Contains(parts[0], "*") {
+		return fmt.Errorf("invalid tool price key: %s", key)
+	}
+	if len(parts) == 2 && (parts[1] == "" || strings.Contains(strings.TrimSuffix(parts[1], "*"), "*")) {
+		return fmt.Errorf("invalid tool model pattern: %s", key)
+	}
+	if price < 0 || math.IsNaN(price) || math.IsInf(price, 0) {
+		return fmt.Errorf("tool price must be finite and non-negative: %s", key)
+	}
+	return nil
+}
+
+// ValidateToolPrices is available to the option controller before persistence.
+func ValidateToolPrices(prices map[string]float64) error {
+	for key, price := range prices {
+		if err := validateToolPrice(key, price); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // GetToolPrice is a convenience wrapper when no model name is needed.

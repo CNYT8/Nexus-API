@@ -29,10 +29,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Switch } from '@/components/ui/switch'
 import { PasswordInput } from '@/components/password-input'
 import { updateUserSettings } from '../../api'
-import {
-  DEFAULT_QUOTA_WARNING_THRESHOLD,
-  NOTIFICATION_METHODS,
-} from '../../constants'
+import { NOTIFICATION_METHODS } from '../../constants'
 import { parseUserSettings } from '../../lib'
 import type { UserProfile, UserSettings, NotifyType } from '../../types'
 
@@ -59,7 +56,8 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
   const [loading, setLoading] = useState(false)
   const [settings, setSettings] = useState<UserSettings>({
     notify_type: 'email',
-    quota_warning_threshold: DEFAULT_QUOTA_WARNING_THRESHOLD,
+    quota_warning_enabled: true,
+    quota_warning_threshold: 0,
     notification_email: '',
     webhook_url: '',
     webhook_secret: '',
@@ -85,8 +83,8 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
       const parsed = parseUserSettings(profile.setting)
       setSettings({
         notify_type: parsed.notify_type || 'email',
-        quota_warning_threshold:
-          parsed.quota_warning_threshold ?? DEFAULT_QUOTA_WARNING_THRESHOLD,
+        quota_warning_enabled: parsed.quota_warning_enabled !== false,
+        quota_warning_threshold: parsed.quota_warning_threshold ?? 0,
         notification_email: parsed.notification_email ?? '',
         webhook_url: parsed.webhook_url ?? '',
         webhook_secret: parsed.webhook_secret ?? '',
@@ -103,6 +101,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
     }
   }, [profile])
 
+  const quotaRemindEnabled = status?.quota_remind_enabled !== false
   const recordIpLogForced = status?.default_record_ip_log_forced === true
   const effectiveRecordIpLog = recordIpLogForced
     ? status?.default_record_ip_log_enabled === true
@@ -169,13 +168,28 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
         </RadioGroup>
       </div>
 
+      <div className='flex items-center justify-between gap-3 rounded-lg border p-3 sm:p-4'>
+        <div className='space-y-1'>
+          <Label htmlFor='quota-warning-enabled'>{t('额度提醒')}</Label>
+          {!quotaRemindEnabled && <p className='text-muted-foreground text-xs'>{t('站点已禁用额度提醒')}</p>}
+        </div>
+        <Switch
+          id='quota-warning-enabled'
+          checked={settings.quota_warning_enabled !== false}
+          disabled={!quotaRemindEnabled}
+          onCheckedChange={(checked) => updateField('quota_warning_enabled', checked)}
+        />
+      </div>
+
       {/* Warning Threshold */}
       <div className='space-y-1.5'>
         <Label htmlFor='threshold'>{t('Quota Warning Threshold')}</Label>
         <Input
           id='threshold'
           type='number'
+          min={0}
           className='h-9'
+          disabled={!quotaRemindEnabled || settings.quota_warning_enabled === false}
           value={settings.quota_warning_threshold}
           onChange={(e) =>
             updateField('quota_warning_threshold', Number(e.target.value))
@@ -184,6 +198,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
         />
         <p className='text-muted-foreground text-xs'>
           {t('Get notified when balance falls below this value')}
+          {' '}{t('阈值为 0 时使用站点默认值')}
         </p>
       </div>
 

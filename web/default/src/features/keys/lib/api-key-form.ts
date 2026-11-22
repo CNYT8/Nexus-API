@@ -37,9 +37,20 @@ export function getApiKeyFormSchema(t: TFunction) {
       allow_ips: z.string().optional(),
       group: z.string().optional(),
       cross_group_retry: z.boolean().optional(),
+      auto_groups: z.array(z.string()),
+      // Local UI policy only; never included in the token payload.
+      auto_group_limit: z.number().int().positive().nullish(),
+      allow_user_quota_query: z.boolean(),
       tokenCount: z.number().min(1).optional(),
     })
     .superRefine((data, ctx) => {
+      if (data.group === 'auto' && data.auto_groups.length) {
+        if (data.auto_group_limit == null) {
+          ctx.addIssue({ code: 'custom', path: ['auto_groups'], message: t('请先成功加载自动分组配置，再保存自定义顺序') })
+        } else if (data.auto_groups.length > data.auto_group_limit) {
+          ctx.addIssue({ code: 'custom', path: ['auto_groups'], message: t('自动分组最多允许 {{max}} 个', { max: data.auto_group_limit }) })
+        }
+      }
       if (data.unlimited_quota) {
         return
       }
@@ -72,6 +83,8 @@ export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   allow_ips: '',
   group: DEFAULT_GROUP,
   cross_group_retry: true,
+  auto_groups: [],
+  allow_user_quota_query: true,
   tokenCount: 1,
 }
 
@@ -109,6 +122,8 @@ export function transformFormDataToPayload(
     allow_ips: data.allow_ips || '',
     group: data.group || '',
     cross_group_retry: data.group === 'auto' ? !!data.cross_group_retry : false,
+    auto_groups: data.group === 'auto' ? data.auto_groups : [],
+    allow_user_quota_query: data.allow_user_quota_query,
   }
 }
 
@@ -132,6 +147,8 @@ export function transformApiKeyToFormDefaults(
     allow_ips: apiKey.allow_ips || '',
     group: apiKey.group || DEFAULT_GROUP,
     cross_group_retry: !!apiKey.cross_group_retry,
+    auto_groups: apiKey.auto_groups ?? [],
+    allow_user_quota_query: apiKey.allow_user_quota_query ?? true,
     tokenCount: 1,
   }
 }

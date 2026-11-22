@@ -50,7 +50,9 @@ func CreditTopUpTx(tx *gorm.DB, userID int, referenceID string, quota int) (bool
 	if quota <= 0 {
 		return false, ErrInvalidTopUpQuota
 	}
-	active, err := walletCreditBaselineState(tx)
+	// Decide the mode after the gate: an initializer may commit while this
+	// transaction waits, even if its MySQL snapshot still has no marker.
+	active, err := LockWalletCreditBaselineTx(tx)
 	if err != nil {
 		return false, err
 	}

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -44,7 +44,7 @@ import {
 } from '@/components/ui/form'
 import { Switch } from '@/components/ui/switch'
 import { DateTimePicker } from '@/components/datetime-picker'
-import { deleteLogsBefore } from '../api'
+import { useLogCleanupTask } from '../hooks/use-log-cleanup-task'
 import {
   SettingsControlGroup,
   SettingsForm,
@@ -54,6 +54,8 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { useResetForm } from '../hooks/use-reset-form'
+import { LogPolicySettings } from './log-policy-settings'
 
 const logSettingsSchema = z.object({
   LogConsumeEnabled: z.boolean(),
@@ -105,16 +107,22 @@ export function LogSettingsSection({
   const [purgeDate, setPurgeDate] = useState<Date | undefined>(() =>
     getDateDaysAgo(30)
   )
-  const [isCleaning, setIsCleaning] = useState(false)
+  const cleanup = useLogCleanupTask()
+  const isCleaning = cleanup.create.isPending || cleanup.active
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
+  const taskStatus = {
+    queued: t('Cleanup queued'),
+    running: t('Cleanup running'),
+    succeeded: t('Cleanup completed'),
+    failed: t('Cleanup failed'),
+  }
 
-  useEffect(() => {
-    form.reset({ LogConsumeEnabled: defaultEnabled })
-  }, [defaultEnabled, form])
+  const submitForm = useResetForm(form, { LogConsumeEnabled: defaultEnabled })
 
   const purgeTimestamp = useMemo(() => {
     if (!purgeDate) return null
-    return Math.floor(purgeDate.getTime() / 1000)
+    const timestamp = Math.floor(purgeDate.getTime() / 1000)
+    return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null
   }, [purgeDate])
 
   const formattedPurgeDate = useMemo(() => {
@@ -124,15 +132,14 @@ export function LogSettingsSection({
 
   const onSubmit = async (values: LogSettingsFormValues) => {
     if (values.LogConsumeEnabled === defaultEnabled) return
-    await updateOption.mutateAsync({
-      key: 'LogConsumeEnabled',
-      value: values.LogConsumeEnabled,
-    })
+    await updateOption.saveOptions([
+      { key: 'LogConsumeEnabled', value: values.LogConsumeEnabled },
+    ])
   }
 
   const handleRequestCleanLogs = () => {
-    if (!purgeTimestamp) {
-      toast.error(t('Select a timestamp before clearing logs.'))
+    if (!purgeTimestamp || purgeTimestamp > Math.floor(Date.now() / 1000)) {
+      toast.error(t('Select a past timestamp before clearing logs.'))
       return
     }
 
@@ -140,38 +147,28 @@ export function LogSettingsSection({
   }
 
   const handleCleanLogs = async () => {
-    if (!purgeTimestamp) {
-      toast.error(t('Select a timestamp before clearing logs.'))
+    if (isCleaning) return
+    if (!purgeTimestamp || purgeTimestamp > Math.floor(Date.now() / 1000)) {
+      toast.error(t('Select a past timestamp before clearing logs.'))
       return
     }
 
-    setIsCleaning(true)
     try {
-      const res = await deleteLogsBefore(purgeTimestamp)
-      if (!res.success) {
-        throw new Error(res.message || t('Failed to clean logs'))
-      }
-      const count = res.data ?? 0
-      toast.success(
-        count > 0
-          ? t('{{count}} log entries removed.', { count })
-          : t('No log entries matched the selected time.')
-      )
+      await cleanup.create.mutateAsync(purgeTimestamp)
+      setShowConfirmDialog(false)
     } catch (error) {
       const message =
         error instanceof Error ? error.message : t('Failed to clean logs')
       toast.error(message)
-    } finally {
-      setIsCleaning(false)
     }
   }
 
   return (
     <SettingsSection title={t('Log Maintenance')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
             saveLabel='Save log settings'
           />
@@ -229,9 +226,28 @@ export function LogSettingsSection({
                 {isCleaning ? t('Cleaning...') : t('Clean logs')}
               </Button>
             </div>
+            {cleanup.taskId > 0 && (
+              <div className='space-y-2 rounded-md border p-3 text-sm' role='status' aria-live='polite'>
+                <p>{t('Cleanup task #{{id}}', { id: cleanup.taskId })}</p>
+                {cleanup.task && (
+                  <>
+                    <p>{taskStatus[cleanup.task.status]}</p>
+                    <p>{t('Processed {{count}} log(s).', { count: cleanup.task.processed })}</p>
+                    <p>{t('Logs before {{date}}', { date: formatTimestampToDate(cleanup.task.target, 'seconds') })}</p>
+                    {cleanup.task.error && <p className='text-destructive' role='alert'>{cleanup.task.error}</p>}
+                  </>
+                )}
+                {cleanup.error && <p className='text-destructive' role='alert'>{cleanup.error.message}</p>}
+                {cleanup.active && <p className='text-muted-foreground'>{t('Automatic checks pause after five minutes. Refresh status to continue.')}</p>}
+                <Button type='button' variant='outline' size='sm' disabled={cleanup.fetching} onClick={cleanup.refresh}>
+                  {t('Refresh status')}
+                </Button>
+              </div>
+            )}
           </SettingsControlGroup>
         </SettingsForm>
       </Form>
+      <LogPolicySettings />
       <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>

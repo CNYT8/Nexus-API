@@ -570,7 +570,7 @@ func checkAndSendQuotaNotify(relayInfo *relaycommon.RelayInfo, quota int, preCon
 // the threshold and message. It is pure so boundary/content tests need no
 // goroutines or real email/webhook delivery.
 func buildRemainingQuotaNotify(info *relaycommon.RelayInfo) (dto.Notify, bool) {
-	if info == nil || info.UserId <= 0 {
+	if info == nil || info.UserId <= 0 || !common.IsQuotaRemindEnabled() || !info.UserSetting.IsQuotaWarningEnabled() {
 		return dto.Notify{}, false
 	}
 	threshold := common.QuotaRemindThreshold
@@ -611,6 +611,12 @@ func checkAndSendRemainingQuotaNotify(info *relaycommon.RelayInfo) {
 }
 
 func checkAndSendSubscriptionQuotaNotify(relayInfo *relaycommon.RelayInfo) {
+	if relayInfo == nil || !common.IsQuotaRemindEnabled() || !relayInfo.UserSetting.IsQuotaWarningEnabled() {
+		return
+	}
+	// 异步发送只读取本次结算快照。
+	snapshot := *relayInfo
+	relayInfo = &snapshot
 	gopool.Go(func() {
 		if relayInfo == nil {
 			return

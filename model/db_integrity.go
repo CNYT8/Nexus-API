@@ -24,66 +24,6 @@ type DatabaseIntegrityReport struct {
 	Logs          []string `json:"logs"`
 }
 
-type modelSpec struct {
-	Name  string
-	Model interface{}
-}
-
-func primaryDBModelSpecs() []modelSpec {
-	return []modelSpec{
-		{Name: "Channel", Model: &Channel{}},
-		{Name: "Token", Model: &Token{}},
-		{Name: "User", Model: &User{}},
-		{Name: "PasskeyCredential", Model: &PasskeyCredential{}},
-		{Name: "Option", Model: &Option{}},
-		{Name: "Redemption", Model: &Redemption{}},
-		{Name: "Ability", Model: &Ability{}},
-		{Name: "Log", Model: &Log{}},
-		{Name: "Midjourney", Model: &Midjourney{}},
-		{Name: "TopUp", Model: &TopUp{}},
-		{Name: "QuotaData", Model: &QuotaData{}},
-		{Name: "Task", Model: &Task{}},
-		{Name: "Model", Model: &Model{}},
-		{Name: "Vendor", Model: &Vendor{}},
-		{Name: "PrefillGroup", Model: &PrefillGroup{}},
-		{Name: "Setup", Model: &Setup{}},
-		{Name: "TwoFA", Model: &TwoFA{}},
-		{Name: "TwoFABackupCode", Model: &TwoFABackupCode{}},
-		{Name: "Checkin", Model: &Checkin{}},
-		{Name: "SubscriptionPlan", Model: &SubscriptionPlan{}},
-		{Name: "SubscriptionOrder", Model: &SubscriptionOrder{}},
-		{Name: "UserSubscription", Model: &UserSubscription{}},
-		{Name: "SubscriptionPreConsumeRecord", Model: &SubscriptionPreConsumeRecord{}},
-		{Name: "CustomOAuthProvider", Model: &CustomOAuthProvider{}},
-		{Name: "UserOAuthBinding", Model: &UserOAuthBinding{}},
-		{Name: "PerfMetric", Model: &PerfMetric{}},
-		{Name: "ModelMonitorSample", Model: &ModelMonitorSample{}},
-		{Name: "UserMembership", Model: &UserMembership{}},
-		{Name: "MembershipQuotaGrant", Model: &MembershipQuotaGrant{}},
-		{Name: "UserGroupRatioOverride", Model: &UserGroupRatioOverride{}},
-		{Name: "Ticket", Model: &Ticket{}},
-		{Name: "TicketMessage", Model: &TicketMessage{}},
-		{Name: "WebRiskState", Model: &WebRiskState{}},
-		{Name: "EmptyResponseRecord", Model: &EmptyResponseRecord{}},
-		{Name: "WalletCreditLot", Model: &WalletCreditLot{}},
-		{Name: "WalletConsumptionSettlement", Model: &WalletConsumptionSettlement{}},
-		{Name: "WalletConsumptionAllocation", Model: &WalletConsumptionAllocation{}},
-		{Name: "WalletReservation", Model: &WalletReservation{}},
-		{Name: "WalletLotHold", Model: &WalletLotHold{}},
-		{Name: "WalletDebtRepayment", Model: &WalletDebtRepayment{}},
-		{Name: "RebateCapBucket", Model: &RebateCapBucket{}},
-		{Name: "RebateSystemState", Model: &RebateSystemState{}},
-		{Name: "RebateRecord", Model: &RebateRecord{}},
-	}
-}
-
-func logDBModelSpecs() []modelSpec {
-	return []modelSpec{
-		{Name: "Log", Model: &Log{}},
-		{Name: "ModelMonitorSample", Model: &ModelMonitorSample{}},
-	}
-}
-
 // CheckDatabaseIntegrity performs a strictly read-only inspection of the connected
 // SQL database(s) (MySQL / PostgreSQL / SQLite, excluding Redis). It never executes
 // DDL or DML (no CREATE, ALTER, DROP, INSERT, UPDATE, DELETE).
@@ -127,6 +67,13 @@ func CheckDatabaseIntegrity() DatabaseIntegrityReport {
 	inspectDBTarget(DB, "主数据库 (SQL_DSN)", primaryDBModelSpecs(), &report, addInfo, addIssue, addWarning)
 	if separateLogDB {
 		inspectDBTarget(LOG_DB, "日志数据库 (LOG_SQL_DSN)", logDBModelSpecs(), &report, addInfo, addIssue, addWarning)
+	}
+	if IsClickHouseLogDB() {
+		if LogMetaDB == nil {
+			addIssue("日志辅助关系库未初始化 (LogMetaDB is nil)")
+		} else {
+			inspectDBTarget(LogMetaDB, "日志辅助数据库 (LOG_META_SQL_DSN)", logMetadataModelSpecs(true), &report, addInfo, addIssue, addWarning)
+		}
 	}
 
 	return report
@@ -211,7 +158,7 @@ func inspectDBTarget(
 		var selectCols []string
 		expectedCols := make(map[string]struct{}, len(s.Fields))
 		for _, field := range s.Fields {
-			if field.DBName == "" {
+			if field.DBName == "" || (dialect == "clickhouse" && spec.Name == "Log" && field.Name == "ChannelName") {
 				continue
 			}
 			colLower := strings.ToLower(field.DBName)
@@ -295,6 +242,12 @@ func inspectDBTarget(
 
 		report.CheckedTables++
 		addInfo(fmt.Sprintf("%s: 表 `%s` (%s) 结构与读取校验正常 (%d 个字段)", label, tableName, spec.Name, len(selectCols)))
+	}
+
+	// Archives are registered compatibility data, never unknown/unused tables.
+	// Separate log databases deliberately do not require main-DB receipts.
+	if _, registered := expectedTables[(SchemaCompatibilityMigration{}).TableName()]; registered {
+		inspectCompatibilityArchives(db, label, actualColumnsByTable, expectedTables, report, addInfo, addIssue, addWarning)
 	}
 
 	// Report any unknown tables in the schema that are not recognized by Nexus-API
@@ -383,6 +336,23 @@ func loadDatabaseTableColumnsReadOnly(db *gorm.DB, dialect string) (map[string]m
 	var engineIssues []string
 
 	switch dialect {
+	case "clickhouse":
+		var rows []struct {
+			Table string `gorm:"column:table"`
+			Name  string `gorm:"column:name"`
+			Type  string `gorm:"column:type"`
+		}
+		if err := db.Raw("SELECT table, name, type FROM system.columns WHERE database = currentDatabase()").Scan(&rows).Error; err != nil {
+			return nil, nil, err
+		}
+		for _, row := range rows {
+			table := strings.ToLower(row.Table)
+			if result[table] == nil {
+				result[table] = make(map[string]string)
+			}
+			result[table][strings.ToLower(row.Name)] = row.Type
+		}
+		return result, nil, nil
 	case "mysql":
 		// Verify no corrupted tables with missing engine/comment in information_schema.TABLES
 		type mysqlTableRow struct {

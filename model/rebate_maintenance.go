@@ -112,50 +112,64 @@ func ReconcileWalletCreditBatch(db *gorm.DB, afterUserID, batchSize int) ([]Wall
 	return mismatches, users[len(users)-1].ID, done, nil
 }
 
-// ExpireStaleWalletReservations refunds reservations that were never settled or
-// refunded, for example because the process crashed mid-request. A reservation
-// debits the wallet the moment it is created, so without this sweep an
-// interrupted request would permanently reduce the user's balance.
-//
-// The TTL must be far longer than any legitimate request (including streaming),
-// so an in-flight request is never expired in practice. Errors on individual
-// rows are collected and do not stop the sweep; concurrently finalized rows are
-// skipped instead of reported.
+// ExpireStaleWalletReservations 只退回确定尚未发送的过期预扣。
+// 已发送或升级前发送状态未知的记录必须保留，等待结算或对账。
+// 发送标记与此处退款使用相同用户锁，避免扫描后发生发送的竞态。
+// 活跃会话续租；归属任务的预扣只能由任务恢复处理。
 func ExpireStaleWalletReservations(db *gorm.DB, olderThan time.Time, maxRecords int) (int, error) {
 	if db == nil || olderThan.IsZero() || maxRecords <= 0 {
 		return 0, errors.New("invalid wallet reservation expiry input")
 	}
-	var stale []WalletReservation
-	if err := db.Where("state = ? AND updated_at < ?", WalletReservationReserved, olderThan).
-		Order("updated_at ASC, id ASC").Limit(maxRecords).Find(&stale).Error; err != nil {
-		return 0, err
-	}
-	refunded := 0
+	refunded, afterID := 0, int64(0)
 	var failures []error
-	for _, reservation := range stale {
-		// Re-check the same timestamp and state under the user lock. A request
-		// may have renewed the reservation after the scan but before refund.
-		err := db.Transaction(func(tx *gorm.DB) error {
-			if _, err := walletLockUserTx(tx, reservation.UserID); err != nil {
-				return err
-			}
-			var current WalletReservation
-			if err := tx.Where("id = ? AND reservation_key = ? AND user_id = ? AND state = ? AND updated_at < ?", reservation.ID, reservation.ReservationKey, reservation.UserID, WalletReservationReserved, olderThan).First(&current).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
+	for {
+		var stale []WalletReservation
+		if err := db.Where("id > ? AND state = ? AND dispatch_state = ? AND updated_at < ?", afterID, WalletReservationReserved, BillingDispatchPending, olderThan).
+			Order("id ASC").Limit(maxRecords).Find(&stale).Error; err != nil {
+			return refunded, errors.Join(append(failures, err)...)
+		}
+		for _, reservation := range stale {
+			afterID = reservation.ID
+			// Re-check under the user lock before binding or expiry can proceed.
+			err := db.Transaction(func(tx *gorm.DB) error {
+				if _, err := walletLockUserTx(tx, reservation.UserID); err != nil {
+					return err
+				}
+				var current WalletReservation
+				if err := walletCurrentTx(tx).Where("id = ? AND reservation_key = ? AND user_id = ? AND state = ? AND dispatch_state = ? AND updated_at < ?", reservation.ID, reservation.ReservationKey, reservation.UserID, WalletReservationReserved, BillingDispatchPending, olderThan).First(&current).Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						return ErrWalletReservationConflict
+					}
+					return err
+				}
+				owned, err := WalletReservationTaskOwnerTx(tx, &current)
+				if err != nil {
+					return err
+				}
+				if owned {
+					// Only task recovery may release its token hold and task quota.
 					return ErrWalletReservationConflict
 				}
-				return err
+				return RefundPendingTaskReservationTx(tx, current.ReservationKey, current.UserID)
+			})
+			switch {
+			case err == nil:
+				_ = walletAfterCommit(db, reservation.UserID, nil)
+				if reservation.TokenID > 0 {
+					_ = InvalidateUserTokensCache(reservation.UserID)
+				}
+				refunded++
+			case errors.Is(err, ErrWalletReservationConflict):
+				// Another worker finalized, refunded or bound it first.
+			default:
+				failures = append(failures, err)
 			}
-			return RefundWalletReservationTx(tx, current.ReservationKey, current.UserID)
-		})
-		switch {
-		case err == nil:
-			refunded++
-		case errors.Is(err, ErrWalletReservationConflict):
-			// Another worker finalized or refunded it first.
-		default:
-			failures = append(failures, err)
+			if refunded >= maxRecords {
+				return refunded, errors.Join(failures...)
+			}
+		}
+		if len(stale) < maxRecords {
+			return refunded, errors.Join(failures...)
 		}
 	}
-	return refunded, errors.Join(failures...)
 }

@@ -84,12 +84,19 @@ export interface ChannelSettings {
   thinking_to_content?: boolean
   thinking_process_strip?: boolean
   proxy?: string
+  http_protocol?: 'auto' | 'http1'
+  http2_connection_shards?: number
+  tls_insecure_skip_verify?: boolean
   pass_through_body_enabled?: boolean
   system_prompt?: string
   system_prompt_override?: boolean
 }
 
 export interface ChannelOtherSettings {
+  aws_api_type?: 'invoke_model' | 'mantle'
+  vertex_api_version?: 'v1' | 'v1beta1'
+  ollama_openai_chat?: boolean
+  disable_task_polling_sleep?: boolean
   azure_responses_version?: string
   vertex_key_type?: 'json' | 'api_key'
   vertex_project_id?: string
@@ -115,6 +122,8 @@ export interface AdvancedCustomConfig {
 }
 
 export interface AdvancedCustomRoute {
+  models?: string[]
+  pass_through_body_enabled?: boolean
   incoming_path?: string
   upstream_path?: string
   converter?: AdvancedCustomConverter
@@ -134,6 +143,10 @@ export type AdvancedCustomConverter =
   | 'openai_chat_completions_to_openai_responses'
   | 'gemini_generate_content_to_openai_chat_completions'
   | 'openai_chat_completions_to_gemini_generate_content'
+  | 'claude_messages_to_openai_responses'
+  | 'openai_responses_to_openai_chat_completions'
+  | 'openai_responses_to_gemini_generate_content'
+  | 'gemini_generate_content_to_openai_responses'
 
 export type AdvancedCustomAuthType = 'none' | 'header' | 'query'
 
@@ -183,6 +196,7 @@ export interface ChannelBalanceResponse {
   success: boolean
   message?: string
   balance?: number
+  raw_response?: unknown
   currency?: string
 }
 

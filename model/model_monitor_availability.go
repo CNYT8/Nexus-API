@@ -159,7 +159,7 @@ func queryModelMonitorAvailabilityLogRows(windowStart int64, activeModels []stri
 }
 
 func queryModelMonitorAvailabilitySampleRows(windowStart int64, activeModels []string) ([]modelMonitorAvailabilityRow, error) {
-	groupSQL := "COALESCE(NULLIF(TRIM(" + logGroupCol + "), ''), 'default')"
+	groupSQL := "COALESCE(NULLIF(TRIM(" + logMetaGroupColumn() + "), ''), 'default')"
 	bucketExpr := modelMonitorAvailabilityBucketExpr()
 	selectSQL := "model_name, " + groupSQL + " AS group_name, " + bucketExpr + " AS bucket_start, " +
 		"SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS raw_error_log_count, " +
@@ -185,7 +185,7 @@ func queryModelMonitorAvailabilitySampleRows(windowStart int64, activeModels []s
 	}
 
 	var rows []modelMonitorAvailabilityRow
-	err := LOG_DB.Model(&ModelMonitorSample{}).
+	err := logMetaDB().Model(&ModelMonitorSample{}).
 		Select(selectSQL, args...).
 		Where("created_at >= ? AND model_name IN ? AND status IN ?", windowStart, activeModels, []int{ModelMonitorSampleStatusSuccess, ModelMonitorSampleStatusError}).
 		Group("model_name, " + groupSQL + ", " + bucketExpr).

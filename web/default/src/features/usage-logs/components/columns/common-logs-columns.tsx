@@ -41,6 +41,7 @@ import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
+import { getCacheWriteBreakdown } from '../../lib/cache'
 import {
   formatModelName,
   getFirstResponseTimeColor,
@@ -702,19 +703,16 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
         const promptTokens = log.prompt_tokens || 0
         const completionTokens = log.completion_tokens || 0
-        if (promptTokens === 0 && completionTokens === 0) {
+        const cacheReadTokens = other?.cache_tokens || 0
+        const cacheWriteTokens = getCacheWriteBreakdown(other).total
+        if (
+          promptTokens === 0 &&
+          completionTokens === 0 &&
+          cacheReadTokens === 0 &&
+          cacheWriteTokens === 0
+        ) {
           return <span className='text-muted-foreground text-xs'>-</span>
         }
-
-        const cacheReadTokens = other?.cache_tokens || 0
-        const cacheWrite5m = other?.cache_creation_tokens_5m || 0
-        const cacheWrite1h = other?.cache_creation_tokens_1h || 0
-        const cacheWrite12h = other?.cache_creation_tokens_12h || 0
-        const hasSplitCache =
-          cacheWrite5m > 0 || cacheWrite1h > 0 || cacheWrite12h > 0
-        const cacheWriteTokens = hasSplitCache
-          ? cacheWrite5m + cacheWrite1h + cacheWrite12h
-          : other?.cache_creation_tokens || 0
 
         return (
           <div className='flex flex-col gap-0.5'>
@@ -785,7 +783,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
         return (
           <div className='flex flex-col gap-0.5'>
-            <span className='border-border/80 bg-muted/60 inline-flex h-6 w-fit items-center rounded-md border px-2 text-sm leading-none [font-family:var(--font-body)] font-semibold tabular-nums'>
+            <span className='border-border/80 bg-muted/60 inline-flex h-6 w-fit items-center rounded-md border px-2 [font-family:var(--font-body)] text-sm leading-none font-semibold tabular-nums'>
               {quotaDisplay.prefix && (
                 <span className='mr-1'>{quotaDisplay.prefix}</span>
               )}
@@ -813,7 +811,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <span className='border-border/70 bg-muted/40 inline-block h-6 w-fit max-w-[128px] overflow-hidden rounded-md border px-1.5 text-left text-xs leading-6 text-ellipsis whitespace-nowrap align-bottom' />
+                  <span className='border-border/70 bg-muted/40 inline-block h-6 w-fit max-w-[128px] overflow-hidden rounded-md border px-1.5 text-left align-bottom text-xs leading-6 text-ellipsis whitespace-nowrap' />
                 }
               >
                 {client}

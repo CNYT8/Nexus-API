@@ -16,13 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useAuthStore } from '@/stores/auth-store'
 import { STORAGE_KEYS } from '../constants'
 import type { PlaygroundConfig, ParameterEnabled, Message } from '../types'
 import { sanitizeMessagesOnLoad } from './message-utils'
+import { messageHistoryAdapter, restoreMessages } from './message-schema'
+import { trimHistory, writeHistory } from '../../../../../shared/playground-history-storage'
 
-function storageKey(baseKey: string): string | null {
-  const userId = useAuthStore.getState().auth.user?.id
+function storageKey(baseKey: string, userId: string | null): string | null {
   if (!userId) return null
   // Drop pre-isolation keys that had no owner and were shared across accounts.
   for (const legacyKey of Object.values(STORAGE_KEYS)) {
@@ -33,9 +33,9 @@ function storageKey(baseKey: string): string | null {
 /**
  * Load playground config from localStorage
  */
-export function loadConfig(): Partial<PlaygroundConfig> {
+export function loadConfig(userId: string | null): Partial<PlaygroundConfig> {
   try {
-    const key = storageKey(STORAGE_KEYS.CONFIG)
+    const key = storageKey(STORAGE_KEYS.CONFIG, userId)
     if (!key) return {}
     const saved = localStorage.getItem(key)
     if (saved) {
@@ -51,9 +51,12 @@ export function loadConfig(): Partial<PlaygroundConfig> {
 /**
  * Save playground config to localStorage
  */
-export function saveConfig(config: Partial<PlaygroundConfig>): void {
+export function saveConfig(
+  config: Partial<PlaygroundConfig>,
+  userId: string | null
+): void {
   try {
-    const key = storageKey(STORAGE_KEYS.CONFIG)
+    const key = storageKey(STORAGE_KEYS.CONFIG, userId)
     if (!key) return
     localStorage.setItem(key, JSON.stringify(config))
   } catch (error) {
@@ -65,9 +68,11 @@ export function saveConfig(config: Partial<PlaygroundConfig>): void {
 /**
  * Load parameter enabled state from localStorage
  */
-export function loadParameterEnabled(): Partial<ParameterEnabled> {
+export function loadParameterEnabled(
+  userId: string | null
+): Partial<ParameterEnabled> {
   try {
-    const key = storageKey(STORAGE_KEYS.PARAMETER_ENABLED)
+    const key = storageKey(STORAGE_KEYS.PARAMETER_ENABLED, userId)
     if (!key) return {}
     const saved = localStorage.getItem(key)
     if (saved) {
@@ -84,10 +89,11 @@ export function loadParameterEnabled(): Partial<ParameterEnabled> {
  * Save parameter enabled state to localStorage
  */
 export function saveParameterEnabled(
-  parameterEnabled: Partial<ParameterEnabled>
+  parameterEnabled: Partial<ParameterEnabled>,
+  userId: string | null
 ): void {
   try {
-    const key = storageKey(STORAGE_KEYS.PARAMETER_ENABLED)
+    const key = storageKey(STORAGE_KEYS.PARAMETER_ENABLED, userId)
     if (!key) return
     localStorage.setItem(key, JSON.stringify(parameterEnabled))
   } catch (error) {
@@ -99,22 +105,16 @@ export function saveParameterEnabled(
 /**
  * Load messages from localStorage
  */
-export function loadMessages(): Message[] | null {
+export function loadMessages(userId: string | null): Message[] | null {
   try {
-    const key = storageKey(STORAGE_KEYS.MESSAGES)
+    const key = storageKey(STORAGE_KEYS.MESSAGES, userId)
     if (!key) return null
     const saved = localStorage.getItem(key)
     if (saved) {
       const parsed: unknown = JSON.parse(saved)
-      if (!Array.isArray(parsed)) {
-        return null
-      }
-      const sanitized = sanitizeMessagesOnLoad(parsed as Message[])
-      // Persist sanitized result to avoid re-sanitizing on subsequent loads
-      if (sanitized !== parsed) {
-        saveMessages(sanitized)
-      }
-      return sanitized
+      // Recover old arrays/envelopes row by row before applying current limits.
+      // Loading does not rewrite the old snapshot (important on quota failure).
+      return trimHistory(sanitizeMessagesOnLoad(restoreMessages(parsed)), messageHistoryAdapter)
     }
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -126,37 +126,26 @@ export function loadMessages(): Message[] | null {
 /**
  * Save messages to localStorage
  */
-export function saveMessages(messages: Message[]): void {
+export function saveMessages(messages: Message[], userId: string | null): boolean {
   try {
-    const key = storageKey(STORAGE_KEYS.MESSAGES)
-    if (!key) return
-    // Inline base64 images can be several MB each; writing them into
-    // localStorage would blow the quota and silently lose all history.
-    const sanitized = messages.map((message) => {
-      const versions = Array.isArray(message.versions)
-        ? message.versions.map((version) =>
-            Array.isArray(version.images) && version.images.length > 0
-              ? { ...version, images: [] }
-              : version
-          )
-        : message.versions
-      return { ...message, versions }
-    })
-    localStorage.setItem(key, JSON.stringify(sanitized))
+    const key = storageKey(STORAGE_KEYS.MESSAGES, userId)
+    if (!key) return false
+    return writeHistory(localStorage, key, messages, messageHistoryAdapter)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save messages:', error)
+    return false
   }
 }
 
 /**
  * Clear all playground data
  */
-export function clearPlaygroundData(): void {
+export function clearPlaygroundData(userId: string | null): void {
   try {
-    const configKey = storageKey(STORAGE_KEYS.CONFIG)
-    const paramKey = storageKey(STORAGE_KEYS.PARAMETER_ENABLED)
-    const messagesKey = storageKey(STORAGE_KEYS.MESSAGES)
+    const configKey = storageKey(STORAGE_KEYS.CONFIG, userId)
+    const paramKey = storageKey(STORAGE_KEYS.PARAMETER_ENABLED, userId)
+    const messagesKey = storageKey(STORAGE_KEYS.MESSAGES, userId)
     if (configKey) localStorage.removeItem(configKey)
     if (paramKey) localStorage.removeItem(paramKey)
     if (messagesKey) localStorage.removeItem(messagesKey)

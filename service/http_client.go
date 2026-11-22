@@ -136,7 +136,7 @@ func newRelayHTTPTransport() *http.Transport {
 	return transport
 }
 
-func newRelayHTTPClient(transport *http.Transport) *http.Client {
+func newRelayHTTPClient(transport http.RoundTripper) *http.Client {
 	client := &http.Client{
 		Transport:     transport,
 		CheckRedirect: checkRedirect,
@@ -268,7 +268,13 @@ func (cache *proxyHTTPClientCache) reset() map[string]*http.Client {
 
 func newProxyHTTPClient(proxyURL *url.URL) (*http.Client, error) {
 	transport := newRelayHTTPTransport()
+	if err := configureProxyTransport(transport, proxyURL); err != nil {
+		return nil, err
+	}
+	return newRelayHTTPClient(transport), nil
+}
 
+func configureProxyTransport(transport *http.Transport, proxyURL *url.URL) error {
 	switch proxyURL.Scheme {
 	case "http", "https":
 		transport.Proxy = http.ProxyURL(proxyURL)
@@ -281,19 +287,19 @@ func newProxyHTTPClient(proxyURL *url.URL) (*http.Client, error) {
 		}
 		dialer, err := proxy.FromURL(proxyURL, forwardDialer)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		contextDialer, ok := dialer.(proxy.ContextDialer)
 		if !ok {
-			return nil, fmt.Errorf("SOCKS proxy dialer does not support context cancellation")
+			return fmt.Errorf("SOCKS proxy dialer does not support context cancellation")
 		}
 		transport.DialContext = contextDialer.DialContext
 
 	default:
-		return nil, fmt.Errorf("unsupported proxy scheme")
+		return fmt.Errorf("unsupported proxy scheme")
 	}
 
-	return newRelayHTTPClient(transport), nil
+	return nil
 }
 
 // GetHttpClientWithProxy returns the default client or a cached proxy-enabled client.
@@ -333,10 +339,12 @@ func InvalidateProxyClient(rawProxyURL string) {
 	if client := proxyClients.remove(config.cacheKey); client != nil {
 		client.CloseIdleConnections()
 	}
+	invalidateChannelHTTPClients(&config.cacheKey)
 }
 
 // ResetProxyClientCache clears all cached proxy clients.
 func ResetProxyClientCache() {
+	invalidateChannelHTTPClients(nil)
 	for _, client := range proxyClients.reset() {
 		client.CloseIdleConnections()
 	}

@@ -35,9 +35,9 @@ var (
 // transaction committed. Replaying is safe because finalization is keyed by the
 // durable reservation identity and any completed settlement is returned as-is.
 //
-// Token quota adjustments are request-local and cannot be reconstructed here;
-// this task only guarantees the wallet debit, source-lot consumption, and
-// invitation rebate are eventually consistent.
+// Task and Midjourney recovery run first and atomically restore wallet, token
+// and task quota from durable metadata. The generic wallet worker skips task
+// reservations, including rows written before explicit ownership was added.
 func StartRebateRecoveryTask() {
 	rebateRecoveryOnce.Do(func() {
 		gopool.Go(func() {
@@ -62,9 +62,10 @@ func StartRebateRecoveryTask() {
 }
 
 func runStaleReservationExpiryOnce() {
-	if rebateMaintenancePaused.Load() {
+	if !BeginTaskBillingWork() {
 		return
 	}
+	defer EndTaskBillingWork()
 	refunded, err := model.ExpireStaleWalletReservations(model.DB, time.Now().UTC().Add(-rebateStaleReservationTTL), rebateReservationExpiryBatch)
 	if err != nil {
 		logger.LogWarn(context.Background(), fmt.Sprintf("rebate stale reservation expiry failed: %v", err))
@@ -76,14 +77,22 @@ func runStaleReservationExpiryOnce() {
 }
 
 func runRebateRecoveryOnce() {
-	if rebateMaintenancePaused.Load() {
+	if !BeginTaskBillingWork() {
 		return
 	}
+	defer EndTaskBillingWork()
 	if !rebateRecoveryRunning.CompareAndSwap(false, true) {
 		return
 	}
 	defer rebateRecoveryRunning.Store(false)
 
+	ctx := context.Background()
+	if _, err := RecoverTaskBilling(ctx, rebateRecoveryBatchSize); err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("task billing recovery failed: %v", err))
+	}
+	if _, err := recoverMidjourneyTaskBilling(ctx, rebateRecoveryBatchSize); err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("midjourney billing recovery failed: %v", err))
+	}
 	for {
 		if rebateMaintenancePaused.Load() {
 			return

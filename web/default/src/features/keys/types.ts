@@ -42,6 +42,8 @@ export const apiKeySchema = z.object({
     }, z.boolean())
     .optional()
     .default(false),
+  auto_groups: z.array(z.string()).nullish().transform((value) => value ?? []),
+  allow_user_quota_query: z.boolean().nullish().transform((value) => value ?? true),
   model_limits_enabled: z.boolean(),
   model_limits: z.string().nullish().default(''),
   allow_ips: z.string().nullish().default(''),
@@ -92,6 +94,8 @@ export interface ApiKeyFormData {
   allow_ips: string
   group: string
   cross_group_retry: boolean
+  auto_groups: string[]
+  allow_user_quota_query: boolean
 }
 
 // ============================================================================

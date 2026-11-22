@@ -53,7 +53,13 @@ const (
 
 var (
 	rebateSettingMu sync.RWMutex
-	rebateSetting   = RebateSetting{
+	rebateSetting   = DefaultRebateSetting()
+)
+
+// DefaultRebateSetting is also the baseline for persisted legacy configurations
+// with missing fields. Never merge database values into a process-local cache.
+func DefaultRebateSetting() RebateSetting {
+	return RebateSetting{
 		PayoutMode:          RebatePayoutImmediate,
 		PayoutIntervalHours: 24,
 		PayoutHour:          7,
@@ -61,7 +67,12 @@ var (
 		InviterLimitPeriod:  RebateLimitPeriodMonthly,
 		SiteTimezone:        "UTC",
 	}
-)
+}
+
+// MergeRebateSettingFields validates a candidate without changing active state.
+func MergeRebateSettingFields(current RebateSetting, fields map[string]string) (RebateSetting, error) {
+	return applyRebateSettingFields(current, fields)
+}
 
 // GetRebateSetting returns a value snapshot; callers cannot mutate global
 // configuration or observe a partially updated setting.

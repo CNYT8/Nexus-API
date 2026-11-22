@@ -1,6 +1,7 @@
 package ali
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -71,7 +73,14 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 }
 
 func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, req *dto.ClaudeRequest) (any, error) {
+	if req == nil {
+		return nil, errors.New("request is nil")
+	}
+	if err := helper.ApplyReasoningModelSuffix(c, info, req); err != nil {
+		return nil, err
+	}
 	if supportsAliAnthropicMessages(info.UpstreamModelName) {
+		ensureAnthropicWebSearchEntrypoint(req)
 		return req, nil
 	}
 
@@ -100,7 +109,11 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	default:
 		switch info.RelayMode {
 		case constant.RelayModeEmbeddings:
-			fullRequestURL = fmt.Sprintf("%s/compatible-mode/v1/embeddings", info.ChannelBaseUrl)
+			if isMultimodalEmbeddingModel(info.UpstreamModelName) {
+				fullRequestURL = fmt.Sprintf("%s/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding", info.ChannelBaseUrl)
+			} else {
+				fullRequestURL = fmt.Sprintf("%s/compatible-mode/v1/embeddings", info.ChannelBaseUrl)
+			}
 		case constant.RelayModeRerank:
 			fullRequestURL = fmt.Sprintf("%s/api/v1/services/rerank/text-rerank/text-rerank", info.ChannelBaseUrl)
 		case constant.RelayModeResponses:
@@ -158,6 +171,9 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	if request == nil {
 		return nil, errors.New("request is nil")
 	}
+	if err := helper.ApplyReasoningModelSuffix(c, info, request); err != nil {
+		return nil, err
+	}
 	// docs: https://bailian.console.aliyun.com/?tab=api#/api/?type=model&url=2712216
 	// fix: InternalError.Algo.InvalidParameter: The value of the enable_thinking parameter is restricted to True.
 	//if strings.Contains(request.Model, "thinking") {
@@ -173,6 +189,18 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	switch info.RelayMode {
 	default:
 		aliReq := requestOpenAI2Ali(*request, info.UpstreamModelName)
+		if err := adaptChatWebSearch(aliReq); err != nil {
+			return nil, err
+		}
+		var options struct {
+			Strategy string `json:"search_strategy"`
+		}
+		if len(aliReq.SearchOptions) > 0 {
+			if err := json.Unmarshal(aliReq.SearchOptions, &options); err != nil {
+				return nil, err
+			}
+		}
+		c.Set("ali_search_strategy", options.Strategy)
 		return aliReq, nil
 	}
 }
@@ -222,6 +250,9 @@ func (a *Adaptor) ConvertRerankRequest(c *gin.Context, relayMode int, request dt
 }
 
 func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.EmbeddingRequest) (any, error) {
+	if isMultimodalEmbeddingModel(info.UpstreamModelName) {
+		return convertToMultimodalEmbeddingRequest(request)
+	}
 	return request, nil
 }
 
@@ -239,6 +270,18 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
+	observer := observeAliSearchUsage(resp, info)
+	if observer != nil {
+		defer func() {
+			if usage == nil {
+				if counted := observer.apply(c, info, nil); counted != nil {
+					usage = counted
+				}
+			} else if typed, ok := usage.(*dto.Usage); ok {
+				usage = observer.apply(c, info, typed)
+			}
+		}()
+	}
 	switch info.RelayFormat {
 	case types.RelayFormatClaude:
 		if supportsAliAnthropicMessages(info.UpstreamModelName) {
@@ -256,6 +299,13 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 			err, usage = aliImageHandler(a, c, resp, info)
 		case constant.RelayModeRerank:
 			err, usage = RerankHandler(c, resp, info)
+		case constant.RelayModeEmbeddings:
+			if isMultimodalEmbeddingModel(info.UpstreamModelName) {
+				err, usage = MultimodalEmbeddingHandler(c, resp, info)
+			} else {
+				adaptor := openai.Adaptor{}
+				usage, err = adaptor.DoResponse(c, resp, info)
+			}
 		default:
 			adaptor := openai.Adaptor{}
 			usage, err = adaptor.DoResponse(c, resp, info)

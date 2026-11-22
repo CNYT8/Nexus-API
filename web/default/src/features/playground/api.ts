@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { AxiosRequestHeaders } from 'axios'
 import { api } from '@/lib/api'
 import { API_ENDPOINTS } from './constants'
 import type {
@@ -25,23 +26,50 @@ import type {
   GroupOption,
 } from './types'
 
+// 请求拦截器之后仍使用页面所属账号，避免异步调度时读取到其他账号的 uid。
+function accountRequestOptions(userId: string | null, signal?: AbortSignal) {
+  return {
+    signal,
+    skipErrorHandler: true,
+    disableDuplicate: true,
+    headers: { 'Content-Type': 'application/json' },
+    transformRequest: [
+      (data: unknown, headers: AxiosRequestHeaders) => {
+        if (userId) headers.set('New-Api-User', userId)
+        return data === undefined ? undefined : JSON.stringify(data)
+      },
+    ],
+  }
+}
+
 /**
  * Send chat completion request (non-streaming)
  */
 export async function sendChatCompletion(
-  payload: ChatCompletionRequest
+  payload: ChatCompletionRequest,
+  userId: string | null,
+  signal: AbortSignal
 ): Promise<ChatCompletionResponse> {
-  const res = await api.post(API_ENDPOINTS.CHAT_COMPLETIONS, payload, {
-    skipErrorHandler: true,
-  } as Record<string, unknown>)
+  const res = await api.post(
+    API_ENDPOINTS.CHAT_COMPLETIONS,
+    payload,
+    accountRequestOptions(userId, signal)
+  )
   return res.data
 }
 
 /**
  * Get user available models
  */
-export async function getUserModels(): Promise<ModelOption[]> {
-  const res = await api.get(API_ENDPOINTS.USER_MODELS)
+export async function getUserModels(
+  userId: string | null,
+  group: string,
+  signal: AbortSignal
+): Promise<ModelOption[]> {
+  const res = await api.get(
+    API_ENDPOINTS.USER_MODELS,
+    { ...accountRequestOptions(userId, signal), params: { group } }
+  )
   const { data } = res
 
   if (!data.success || !Array.isArray(data.data)) {
@@ -57,8 +85,14 @@ export async function getUserModels(): Promise<ModelOption[]> {
 /**
  * Get user groups
  */
-export async function getUserGroups(): Promise<GroupOption[]> {
-  const res = await api.get(API_ENDPOINTS.USER_GROUPS)
+export async function getUserGroups(
+  userId: string | null,
+  signal: AbortSignal
+): Promise<GroupOption[]> {
+  const res = await api.get(
+    API_ENDPOINTS.USER_GROUPS,
+    accountRequestOptions(userId, signal)
+  )
   const { data } = res
 
   if (!data.success || !data.data) {

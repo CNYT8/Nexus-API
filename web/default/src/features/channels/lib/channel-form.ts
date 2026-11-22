@@ -175,7 +175,11 @@ export const channelFormSchema = z
     thinking_to_content: z.boolean().optional(),
     thinking_process_strip: z.boolean().optional(),
     proxy: z.string().optional(),
+    http_protocol: z.enum(['auto', 'http1']).optional(),
+    http2_connection_shards: z.number().int().min(0).max(8).optional(),
+    tls_insecure_skip_verify: z.boolean().optional(),
     pass_through_body_enabled: z.boolean().optional(),
+    responses_websocket_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
     // Type-specific settings (stored in settings JSON)
@@ -331,7 +335,11 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   thinking_to_content: false,
   thinking_process_strip: false,
   proxy: '',
+  http_protocol: 'auto',
+  http2_connection_shards: 1,
+  tls_insecure_skip_verify: false,
   pass_through_body_enabled: false,
+  responses_websocket_enabled: false,
   system_prompt: '',
   system_prompt_override: false,
   // Type-specific settings
@@ -358,6 +366,8 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
 // Transform Functions
 // ============================================================================
 
+export const LEGACY_DOUBAO_CODING_PLAN_BASE_URL = 'doubao-coding-plan'
+
 /**
  * Transform Channel from API to Form default values
  */
@@ -370,7 +380,11 @@ export function transformChannelToFormDefaults(
     thinking_to_content: false,
     thinking_process_strip: false,
     proxy: '',
+    http_protocol: 'auto' as 'auto' | 'http1',
+    http2_connection_shards: 1,
+    tls_insecure_skip_verify: false,
     pass_through_body_enabled: false,
+    responses_websocket_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
   }
@@ -383,7 +397,13 @@ export function transformChannelToFormDefaults(
         thinking_to_content: parsed.thinking_to_content || false,
         thinking_process_strip: parsed.thinking_process_strip || false,
         proxy: parsed.proxy || '',
+        http_protocol: parsed.http_protocol === 'http1' ? 'http1' : 'auto',
+        http2_connection_shards: Number.isInteger(parsed.http2_connection_shards)
+          ? Math.max(1, Math.min(8, parsed.http2_connection_shards))
+          : 1,
+        tls_insecure_skip_verify: parsed.tls_insecure_skip_verify === true,
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
+        responses_websocket_enabled: parsed.responses_websocket_enabled === true,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
       }
@@ -447,7 +467,7 @@ export function transformChannelToFormDefaults(
   return {
     name: channel.name || '',
     type: channel.type,
-    base_url: channel.base_url || '',
+    base_url: normalizeBaseUrl(channel.base_url || '', channel.type, true),
     key: '', // Never populate key from backend for security
     openai_organization: channel.openai_organization || '',
     models: channel.models || '',
@@ -498,11 +518,18 @@ export function transformChannelToFormDefaults(
  */
 function buildSettingJSON(formData: ChannelFormValues): string {
   const settingObj = {
+    ...JSON.parse(formData.setting || '{}'),
     force_format: formData.force_format || false,
     thinking_to_content: formData.thinking_to_content || false,
     thinking_process_strip: formData.thinking_process_strip || false,
     proxy: formData.proxy || '',
+    http_protocol: formData.http_protocol || 'auto',
+    http2_connection_shards: formData.http_protocol === 'http1'
+      ? 1
+      : formData.http2_connection_shards || 1,
+    tls_insecure_skip_verify: formData.tls_insecure_skip_verify === true,
     pass_through_body_enabled: formData.pass_through_body_enabled || false,
+    responses_websocket_enabled: formData.responses_websocket_enabled === true,
     system_prompt: formData.system_prompt || '',
     system_prompt_override: formData.system_prompt_override || false,
   }
@@ -637,10 +664,20 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
   return JSON.stringify(settingsObj)
 }
 
-function normalizeBaseUrl(value: string | undefined): string {
-  return String(value || '')
-    .trim()
-    .replace(/\/+$/, '')
+function normalizeBaseUrl(
+  value: string | undefined,
+  type: number,
+  preserveLegacyCodingPlan = false
+): string {
+  const normalized = String(value || '').trim().replace(/\/+$/, '')
+  // Existing channels need the sentinel to select the backend's Coding endpoints.
+  // New channels keep the current regional Ark defaults.
+  return type === 45 &&
+    (!normalized ||
+      (!preserveLegacyCodingPlan &&
+        normalized === LEGACY_DOUBAO_CODING_PLAN_BASE_URL))
+    ? 'https://ark.cn-beijing.volces.com'
+    : normalized
 }
 
 /**
@@ -657,7 +694,7 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
   const channel: Partial<Channel> = {
     name: formData.name,
     type: formData.type,
-    base_url: normalizeBaseUrl(formData.base_url) || null,
+    base_url: normalizeBaseUrl(formData.base_url, formData.type) || null,
     key: formData.key,
     openai_organization: formData.openai_organization || null,
     models: formData.models,
@@ -706,7 +743,7 @@ export function transformFormDataToUpdatePayload(
     id: channelId,
     name: formData.name,
     type: formData.type,
-    base_url: normalizeBaseUrl(formData.base_url) || null,
+    base_url: normalizeBaseUrl(formData.base_url, formData.type, true) || null,
     openai_organization: formData.openai_organization || null,
     models: formData.models,
     group: formatGroups(formData.group),
@@ -739,7 +776,7 @@ export function transformFormDataToUpdatePayload(
   })
 
   // Send explicit empty strings for nullable fields so GORM updates can clear them.
-  payload.base_url = normalizeBaseUrl(formData.base_url) || ''
+  payload.base_url = normalizeBaseUrl(formData.base_url, formData.type, true) || ''
   payload.openai_organization = formData.openai_organization || ''
   payload.test_model = formData.test_model || ''
   payload.tag = formData.tag || ''

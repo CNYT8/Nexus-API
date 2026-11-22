@@ -46,6 +46,7 @@ func setupMJPendingLedgerTest(t *testing.T, ledgerActive bool, tokenQuota int) (
 	model.LOG_DB = db
 	require.NoError(t, db.AutoMigrate(
 		&model.User{},
+		&model.Option{},
 		&model.Token{},
 		&model.Log{},
 		&model.RebateSystemState{},
@@ -57,6 +58,11 @@ func setupMJPendingLedgerTest(t *testing.T, ledgerActive bool, tokenQuota int) (
 		&model.WalletDebtRepayment{},
 		&model.RebateRecord{},
 		&model.RebateCapBucket{},
+		&model.WalletSourceReversal{},
+		&model.RebateSourceReversal{},
+		&model.TopUpPaymentBinding{},
+		&model.TopUpReversalState{},
+		&model.TopUpReversalEvent{},
 		&model.UserSubscription{},
 	))
 	t.Cleanup(func() {
@@ -195,10 +201,12 @@ func TestPrepareMidjourneyWalletSubmitTokenFailureRefundsReservation(t *testing.
 	require.False(t, ledger)
 	require.Empty(t, key)
 
-	// The wallet reservation made before the token check must be refunded.
-	var reservation model.WalletReservation
-	require.NoError(t, db.Where("user_id = ?", user.Id).First(&reservation).Error)
-	require.Equal(t, model.WalletReservationRefunded, reservation.State)
+	// 令牌不足时预扣事务整体回滚，钱包与冻结记录都不得残留。
+	var reservations, holds int64
+	require.NoError(t, db.Model(&model.WalletReservation{}).Count(&reservations).Error)
+	require.NoError(t, db.Model(&model.WalletLotHold{}).Count(&holds).Error)
+	require.Zero(t, reservations)
+	require.Zero(t, holds)
 	require.Equal(t, 10000, mjSubmitUserQuota(t, db, user.Id))
 	require.Equal(t, 100, mjSubmitTokenRemain(t, db, token.Id))
 }

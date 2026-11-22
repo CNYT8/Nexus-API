@@ -33,6 +33,7 @@ func setupWalletSettlementTestDB(t *testing.T) *gorm.DB {
 
 	require.NoError(t, db.AutoMigrate(
 		&model.User{},
+		&model.Option{},
 		&model.RebateSystemState{},
 		&model.WalletCreditLot{},
 		&model.WalletConsumptionSettlement{},
@@ -42,6 +43,11 @@ func setupWalletSettlementTestDB(t *testing.T) *gorm.DB {
 		&model.WalletDebtRepayment{},
 		&model.RebateRecord{},
 		&model.RebateCapBucket{},
+		&model.WalletSourceReversal{},
+		&model.RebateSourceReversal{},
+		&model.TopUpPaymentBinding{},
+		&model.TopUpReversalState{},
+		&model.TopUpReversalEvent{},
 	))
 
 	t.Cleanup(func() {

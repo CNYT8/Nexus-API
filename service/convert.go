@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -73,20 +74,64 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	}
 
 	// Convert tools
-	tools, _ := common.Any2Type[[]dto.Tool](claudeRequest.Tools)
-	openAITools := make([]dto.ToolCallRequest, 0)
-	for _, claudeTool := range tools {
-		openAITool := dto.ToolCallRequest{
+	tools, err := common.Any2Type[[]map[string]json.RawMessage](claudeRequest.Tools)
+	if err != nil && claudeRequest.Tools != nil {
+		return nil, fmt.Errorf("invalid Claude tools: %w", err)
+	}
+	for _, rawTool := range tools {
+		var toolType string
+		_ = json.Unmarshal(rawTool["type"], &toolType)
+		if toolType != "" && toolType != "custom" {
+			if !strings.HasPrefix(toolType, "web_search_") {
+				return nil, fmt.Errorf("Claude hosted tool %q is not supported by Chat conversion", toolType)
+			}
+			// Preserve the provider definition for compatible adapters; it must
+			// never be encoded as a nameless function.
+			delete(rawTool, "type")
+			openAIRequest.Tools = append(openAIRequest.Tools, dto.ToolCallRequest{Type: toolType, Extra: rawTool})
+			continue
+		}
+		claudeTool, err := common.Any2Type[dto.Tool](rawTool)
+		if err != nil {
+			return nil, err
+		}
+		openAIRequest.Tools = append(openAIRequest.Tools, dto.ToolCallRequest{
 			Type: "function",
 			Function: dto.FunctionRequest{
-				Name:        claudeTool.Name,
-				Description: claudeTool.Description,
-				Parameters:  claudeTool.InputSchema,
+				Name: claudeTool.Name, Description: claudeTool.Description,
+				Parameters: claudeTool.InputSchema, Strict: claudeTool.Strict,
 			},
-		}
-		openAITools = append(openAITools, openAITool)
+		})
 	}
-	openAIRequest.Tools = openAITools
+
+	if claudeRequest.ToolChoice != nil {
+		choice, err := common.Any2Type[dto.ClaudeToolChoice](claudeRequest.ToolChoice)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Claude tool_choice: %w", err)
+		}
+		switch choice.Type {
+		case "auto", "none":
+			openAIRequest.ToolChoice = choice.Type
+		case "any":
+			openAIRequest.ToolChoice = "required"
+		case "tool":
+			if choice.Name == "" {
+				return nil, fmt.Errorf("Claude tool_choice requires a tool name")
+			}
+			openAIRequest.ToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": choice.Name}}
+			for _, tool := range openAIRequest.Tools {
+				if strings.HasPrefix(tool.Type, "web_search_") && choice.Name == "web_search" {
+					openAIRequest.ToolChoice = map[string]any{"type": tool.Type}
+					break
+				}
+			}
+		default:
+			return nil, fmt.Errorf("unsupported Claude tool_choice type %q", choice.Type)
+		}
+		if choice.Type != "none" && choice.DisableParallelToolUse {
+			openAIRequest.ParallelTooCalls = lo.ToPtr(false)
+		}
+	}
 
 	// Convert messages
 	openAIMessages := make([]dto.Message, 0)
@@ -157,14 +202,39 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 					}
 					mediaMessages = append(mediaMessages, message)
 				case "image":
-					// Handle image conversion (base64 to URL or keep as is)
-					imageData := fmt.Sprintf("data:%s;base64,%s", mediaMsg.Source.MediaType, mediaMsg.Source.Data)
-					//textContent += fmt.Sprintf("[Image: %s]", imageData)
-					mediaMessage := dto.MediaContent{
-						Type:     "image_url",
-						ImageUrl: &dto.MessageImageUrl{Url: imageData},
+					if mediaMsg.Source == nil {
+						return nil, fmt.Errorf("Claude image source is required")
 					}
-					mediaMessages = append(mediaMessages, mediaMessage)
+					imageData := mediaMsg.Source.Url
+					if mediaMsg.Source.Type != "url" {
+						imageData = fmt.Sprintf("data:%s;base64,%s", mediaMsg.Source.MediaType, common.Interface2String(mediaMsg.Source.Data))
+					}
+					mediaMessages = append(mediaMessages, dto.MediaContent{
+						Type: dto.ContentTypeImageURL, ImageUrl: &dto.MessageImageUrl{Url: imageData},
+					})
+				case "document":
+					if mediaMsg.Source == nil {
+						return nil, fmt.Errorf("Claude document source is required")
+					}
+					source := mediaMsg.Source
+					switch source.Type {
+					case "text":
+						file := &dto.MessageFile{
+							FileName: mediaMsg.Title,
+							FileData: "data:text/plain;base64," + base64.StdEncoding.EncodeToString([]byte(common.Interface2String(source.Data))),
+						}
+						mediaMessages = append(mediaMessages, dto.MediaContent{Type: dto.ContentTypeFile, File: file, CacheControl: mediaMsg.CacheControl})
+					case "base64", "url":
+						file := &dto.MessageFile{FileName: mediaMsg.Title}
+						if source.Type == "url" {
+							file.FileUrl = source.Url
+						} else {
+							file.FileData = fmt.Sprintf("data:%s;base64,%s", source.MediaType, common.Interface2String(source.Data))
+						}
+						mediaMessages = append(mediaMessages, dto.MediaContent{Type: dto.ContentTypeFile, File: file, CacheControl: mediaMsg.CacheControl})
+					default:
+						return nil, fmt.Errorf("unsupported Claude document source type %q", source.Type)
+					}
 				case "tool_use":
 					toolCall := dto.ToolCallRequest{
 						ID:   mediaMsg.Id,
@@ -202,7 +272,7 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 				openAIMessage.SetToolCalls(toolCalls)
 			}
 
-			if len(mediaMessages) > 0 && len(toolCalls) == 0 {
+			if len(mediaMessages) > 0 {
 				openAIMessage.SetMediaContent(mediaMessages)
 			}
 		}
@@ -658,14 +728,55 @@ func toJSONString(v interface{}) string {
 }
 
 func GeminiToOpenAIRequest(geminiRequest *dto.GeminiChatRequest, info *relaycommon.RelayInfo) (*dto.GeneralOpenAIRequest, error) {
-	openaiRequest := &dto.GeneralOpenAIRequest{
-		Model:  info.UpstreamModelName,
-		Stream: lo.ToPtr(info.IsStream),
+	if geminiRequest == nil {
+		return nil, fmt.Errorf("Gemini request is nil")
 	}
+	openaiRequest := &dto.GeneralOpenAIRequest{Stream: lo.ToPtr(false)}
+	if info != nil {
+		openaiRequest.Stream = lo.ToPtr(info.IsStream)
+		if info.ChannelMeta != nil {
+			openaiRequest.Model = info.UpstreamModelName
+		}
+	}
+
+	// 无 ID 的旧版历史仍需生成调用 ID，但不能与已有调用或其它轮次冲突。
+	usedToolCallIDs := make(map[string]bool)
+	for _, content := range geminiRequest.Contents {
+		for _, part := range content.Parts {
+			if part.FunctionCall != nil && part.FunctionCall.ID != "" {
+				usedToolCallIDs[part.FunctionCall.ID] = true
+			}
+			if part.FunctionResponse != nil && len(part.FunctionResponse.ID) > 0 {
+				var id string
+				if err := json.Unmarshal(part.FunctionResponse.ID, &id); err != nil {
+					return nil, fmt.Errorf("invalid Gemini function response ID: %w", err)
+				}
+				if id != "" {
+					usedToolCallIDs[id] = true
+				}
+			}
+		}
+	}
+	nextToolCallID := 0
+	newToolCallID := func() string {
+		for {
+			nextToolCallID++
+			id := fmt.Sprintf("call_%d", nextToolCallID)
+			if !usedToolCallIDs[id] {
+				usedToolCallIDs[id] = true
+				return id
+			}
+		}
+	}
+	type pendingToolCall struct {
+		id   string
+		name string
+	}
+	var pendingToolCalls []pendingToolCall
 
 	// 转换 messages
 	var messages []dto.Message
-	for _, content := range geminiRequest.Contents {
+	for contentIndex, content := range geminiRequest.Contents {
 		message := dto.Message{
 			Role: convertGeminiRoleToOpenAI(content.Role),
 		}
@@ -673,37 +784,36 @@ func GeminiToOpenAIRequest(geminiRequest *dto.GeminiChatRequest, info *relaycomm
 		// 处理 parts
 		var mediaContents []dto.MediaContent
 		var toolCalls []dto.ToolCallRequest
-		for _, part := range content.Parts {
+		var reasoningTexts []string
+		for partIndex, part := range content.Parts {
 			if part.Text != "" {
+				if part.Thought {
+					reasoningTexts = append(reasoningTexts, part.Text)
+					continue
+				}
 				mediaContent := dto.MediaContent{
 					Type: "text",
 					Text: part.Text,
 				}
 				mediaContents = append(mediaContents, mediaContent)
-			} else if part.InlineData != nil {
-				mediaContent := dto.MediaContent{
-					Type: "image_url",
-					ImageUrl: &dto.MessageImageUrl{
-						Url:      fmt.Sprintf("data:%s;base64,%s", part.InlineData.MimeType, part.InlineData.Data),
-						Detail:   "auto",
-						MimeType: part.InlineData.MimeType,
-					},
-				}
-				mediaContents = append(mediaContents, mediaContent)
-			} else if part.FileData != nil {
-				mediaContent := dto.MediaContent{
-					Type: "image_url",
-					ImageUrl: &dto.MessageImageUrl{
-						Url:      part.FileData.FileUri,
-						Detail:   "auto",
-						MimeType: part.FileData.MimeType,
-					},
+			} else if part.InlineData != nil || part.FileData != nil {
+				mediaContent, err := geminiMediaToChatContent(part.InlineData, part.FileData)
+				if err != nil {
+					kind := "inlineData"
+					if part.InlineData == nil {
+						kind = "fileData"
+					}
+					return nil, fmt.Errorf("contents[%d].parts[%d].%s: %w", contentIndex, partIndex, kind, err)
 				}
 				mediaContents = append(mediaContents, mediaContent)
 			} else if part.FunctionCall != nil {
-				// 处理 Gemini 的工具调用
+				// 显式 ID 原样保留；缺省 ID 在整个请求内编号。
+				toolCallID := part.FunctionCall.ID
+				if toolCallID == "" {
+					toolCallID = newToolCallID()
+				}
 				toolCall := dto.ToolCallRequest{
-					ID:   fmt.Sprintf("call_%d", len(toolCalls)+1), // 生成唯一ID
+					ID:   toolCallID,
 					Type: "function",
 					Function: dto.FunctionRequest{
 						Name:      part.FunctionCall.FunctionName,
@@ -711,11 +821,31 @@ func GeminiToOpenAIRequest(geminiRequest *dto.GeminiChatRequest, info *relaycomm
 					},
 				}
 				toolCalls = append(toolCalls, toolCall)
+				pendingToolCalls = append(pendingToolCalls, pendingToolCall{id: toolCallID, name: part.FunctionCall.FunctionName})
 			} else if part.FunctionResponse != nil {
-				// 处理 Gemini 的工具响应，创建单独的 tool 消息
+				var toolCallID string
+				if len(part.FunctionResponse.ID) > 0 {
+					if err := json.Unmarshal(part.FunctionResponse.ID, &toolCallID); err != nil {
+						return nil, fmt.Errorf("invalid Gemini function response ID: %w", err)
+					}
+				}
+				// 显式 ID 优先；无 ID 时按函数名和未完成调用顺序恢复关联。
+				for i, pending := range pendingToolCalls {
+					if (toolCallID != "" && pending.id == toolCallID) ||
+						(toolCallID == "" && pending.name == part.FunctionResponse.Name) {
+						toolCallID = pending.id
+						pendingToolCalls = append(pendingToolCalls[:i], pendingToolCalls[i+1:]...)
+						break
+					}
+				}
+				if toolCallID == "" {
+					toolCallID = newToolCallID()
+				} else {
+					usedToolCallIDs[toolCallID] = true
+				}
 				toolMessage := dto.Message{
 					Role:       "tool",
-					ToolCallId: fmt.Sprintf("call_%d", len(toolCalls)), // 使用对应的调用ID
+					ToolCallId: toolCallID,
 				}
 				toolMessage.SetStringContent(toJSONString(part.FunctionResponse.Response))
 				messages = append(messages, toolMessage)
@@ -735,8 +865,12 @@ func GeminiToOpenAIRequest(geminiRequest *dto.GeminiChatRequest, info *relaycomm
 			message.SetMediaContent(mediaContents)
 		}
 
-		// 只有当消息有内容或工具调用时才添加
-		if len(message.ParseContent()) > 0 || len(message.ToolCalls) > 0 {
+		if len(reasoningTexts) > 0 {
+			message.ReasoningContent = lo.ToPtr(strings.Join(reasoningTexts, "\n"))
+		}
+
+		// 纯思考历史也需要保留，但不能混入可见正文。
+		if len(message.ParseContent()) > 0 || len(message.ToolCalls) > 0 || message.ReasoningContent != nil {
 			messages = append(messages, message)
 		}
 	}
@@ -746,20 +880,20 @@ func GeminiToOpenAIRequest(geminiRequest *dto.GeminiChatRequest, info *relaycomm
 	if geminiRequest.GenerationConfig.Temperature != nil {
 		openaiRequest.Temperature = geminiRequest.GenerationConfig.Temperature
 	}
-	if geminiRequest.GenerationConfig.TopP != nil && *geminiRequest.GenerationConfig.TopP > 0 {
+	if geminiRequest.GenerationConfig.TopP != nil {
 		openaiRequest.TopP = lo.ToPtr(*geminiRequest.GenerationConfig.TopP)
 	}
-	if geminiRequest.GenerationConfig.TopK != nil && *geminiRequest.GenerationConfig.TopK > 0 {
+	if geminiRequest.GenerationConfig.TopK != nil {
 		openaiRequest.TopK = lo.ToPtr(int(*geminiRequest.GenerationConfig.TopK))
 	}
-	if geminiRequest.GenerationConfig.MaxOutputTokens != nil && *geminiRequest.GenerationConfig.MaxOutputTokens > 0 {
+	if geminiRequest.GenerationConfig.MaxOutputTokens != nil {
 		openaiRequest.MaxTokens = lo.ToPtr(*geminiRequest.GenerationConfig.MaxOutputTokens)
 	}
 	// gemini stop sequences 最多 5 个，openai stop 最多 4 个
 	if len(geminiRequest.GenerationConfig.StopSequences) > 0 {
-		openaiRequest.Stop = geminiRequest.GenerationConfig.StopSequences[:4]
+		openaiRequest.Stop = geminiRequest.GenerationConfig.StopSequences[:min(len(geminiRequest.GenerationConfig.StopSequences), 4)]
 	}
-	if geminiRequest.GenerationConfig.CandidateCount != nil && *geminiRequest.GenerationConfig.CandidateCount > 0 {
+	if geminiRequest.GenerationConfig.CandidateCount != nil {
 		openaiRequest.N = lo.ToPtr(*geminiRequest.GenerationConfig.CandidateCount)
 	}
 

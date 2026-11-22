@@ -27,6 +27,7 @@ import ModelsFilters from './ModelsFilters';
 import ModelsTabs from './ModelsTabs';
 import EditModelModal from './modals/EditModelModal';
 import EditVendorModal from './modals/EditVendorModal';
+import DeleteModelsModal from './modals/DeleteModelsModal';
 import { useModelsData } from '../../../hooks/models/useModelsData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
@@ -51,6 +52,9 @@ const ModelsPage = () => {
     setEditingModel,
     setShowEdit,
     batchDeleteModels,
+    deleteTargets,
+    setDeleteTargets,
+    deleting,
 
     // Filters state
     formInitValues,
@@ -109,6 +113,14 @@ const ModelsPage = () => {
 
   return (
     <>
+      {deleteTargets.length > 0 && (
+        <DeleteModelsModal
+          models={deleteTargets}
+          loading={deleting}
+          onCancel={() => setDeleteTargets([])}
+          onConfirm={batchDeleteModels}
+        />
+      )}
       <EditModelModal
         refresh={refresh}
         editingModel={editingModel}
@@ -167,7 +179,7 @@ const ModelsPage = () => {
               setSelectedKeys={setSelectedKeys}
               setEditingModel={setEditingModel}
               setShowEdit={setShowEdit}
-              batchDeleteModels={batchDeleteModels}
+              onDelete={() => setDeleteTargets(selectedKeys)}
               syncing={modelsData.syncing}
               syncUpstream={modelsData.syncUpstream}
               previewing={modelsData.previewing}

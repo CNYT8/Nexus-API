@@ -31,13 +31,14 @@ func setupPendingTaskWalletSubmitTest(t *testing.T) (*gorm.DB, *model.User, *mod
 	originalSetting := operation_setting.GetRebateSetting()
 	originalUnit, originalBatch := common.QuotaPerUnit, common.BatchUpdateEnabled
 	common.QuotaPerUnit, common.BatchUpdateEnabled = 500000, false
-	require.NoError(t, operation_setting.UpdateRebateSetting(operation_setting.RebateSetting{
-		Enabled:            true,
-		RateBasisPoints:    250,
-		PayoutMode:         operation_setting.RebatePayoutImmediate,
-		PayoutHour:         7,
-		InviterLimitPeriod: operation_setting.RebateLimitPeriodMonthly,
-		SiteTimezone:       "UTC",
+	// 账务使用数据库中的配置快照，测试也必须经持久化入口启用返利。
+	require.NoError(t, model.UpdateOptionsBulk(map[string]string{
+		"rebate_setting.enabled":              "true",
+		"rebate_setting.rate_basis_points":    "250",
+		"rebate_setting.payout_mode":          operation_setting.RebatePayoutImmediate,
+		"rebate_setting.payout_hour":          "7",
+		"rebate_setting.inviter_limit_period": operation_setting.RebateLimitPeriodMonthly,
+		"rebate_setting.site_timezone":        "UTC",
 	}))
 	t.Cleanup(func() {
 		common.QuotaPerUnit, common.BatchUpdateEnabled = originalUnit, originalBatch

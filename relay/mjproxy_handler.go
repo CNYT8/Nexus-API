@@ -124,12 +124,8 @@ func RelayMidjourneyNotify(c *gin.Context) *dto.MidjourneyResponse {
 	midjourneyTask.VideoUrls = string(videoUrlsStr)
 	midjourneyTask.Status = midjRequest.Status
 	midjourneyTask.FailReason = midjRequest.FailReason
-	shouldReturnQuota := false
-	if (midjourneyTask.Progress != "100%" && midjRequest.FailReason != "") || (midjourneyTask.Progress == "100%" && midjourneyTask.Status == "FAILURE") {
-		midjourneyTask.Progress = "100%"
-		if midjourneyTask.Quota != 0 {
-			shouldReturnQuota = true
-		}
+	if midjRequest.FailReason != "" || midjourneyTask.Status == "FAILURE" {
+		midjourneyTask.Status, midjourneyTask.Progress = "FAILURE", "100%"
 	}
 	won, err := midjourneyTask.UpdateWithStatus(preStatus)
 	if err != nil {
@@ -138,28 +134,9 @@ func RelayMidjourneyNotify(c *gin.Context) *dto.MidjourneyResponse {
 			Description: "update_midjourney_task_failed",
 		}
 	}
-	if won && midjourneyTask.BillingKey != "" {
-		if shouldReturnQuota {
-			if err := model.RefundWalletReservation(model.DB, midjourneyTask.BillingKey, midjourneyTask.UserId); err != nil {
-				logger.LogError(c, fmt.Sprintf("Midjourney notify wallet refund failed task %s: %v", midjourneyTask.MjId, err))
-			} else {
-				model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-					UserId:    midjourneyTask.UserId,
-					LogType:   model.LogTypeRefund,
-					Content:   "",
-					ChannelId: midjourneyTask.ChannelId,
-					ModelName: service.CovertMjpActionToModelName(midjourneyTask.Action),
-					Quota:     midjourneyTask.Quota,
-					Other: map[string]interface{}{
-						"task_id": midjourneyTask.MjId,
-						"reason":  "构图失败",
-					},
-				})
-			}
-		} else if midjourneyTask.Status == "SUCCESS" && midjourneyTask.Quota > 0 {
-			if err := service.FinalizeTaskWalletConsumption(c, midjourneyTask.BillingKey, midjourneyTask.UserId, midjourneyTask.Quota, midjourneyTask.Quota); err != nil {
-				logger.LogError(c, fmt.Sprintf("Midjourney notify wallet finalize failed task %s: %v", midjourneyTask.MjId, err))
-			}
+	if won && (midjourneyTask.Status == "SUCCESS" || midjourneyTask.Status == "FAILURE") {
+		if _, err := service.SettleMidjourneyTaskBilling(c, midjourneyTask); err != nil {
+			logger.LogError(c, fmt.Sprintf("Midjourney notify billing failed task %s: %v", midjourneyTask.MjId, err))
 		}
 	}
 
@@ -248,17 +225,24 @@ func prepareMidjourneyWalletSubmit(c *gin.Context, info *relaycommon.RelayInfo, 
 		// ledger-backed Midjourney subscription submissions.
 		return "", false, nil
 	}
-	key, err := service.ReservePendingTaskWalletQuota(info.UserId, quota)
+	tokenID := info.TokenId
+	if info.IsPlayground {
+		tokenID = 0
+	}
+	key, err := service.ReservePendingMidjourneyQuota(info.UserId, tokenID, quota)
 	if err != nil {
 		return "", false, service.TaskWalletReserveError(err)
 	}
-	if tokenErr := service.PreConsumeTokenQuota(info, quota); tokenErr != nil {
-		if refundErr := service.RefundPendingTaskWalletQuota(key, info.UserId); refundErr != nil {
-			common.SysLog("refund pending Midjourney wallet quota after token failure: " + refundErr.Error())
-		}
-		return "", false, service.TaskWalletTokenPreConsumeError(tokenErr)
-	}
+	info.BillingSource = service.BillingSourceWallet
 	return key, true, nil
+}
+
+// markMidjourneyWalletDispatched 同时覆盖账本直连预扣与旧计费会话。
+func markMidjourneyWalletDispatched(info *relaycommon.RelayInfo, billingKey string) error {
+	if billingKey != "" {
+		return model.MarkBillingReservationDispatched(model.DB, billingKey, info.UserId)
+	}
+	return service.MarkBillingDispatched(info)
 }
 
 // refundMidjourneyWalletSubmit releases the pending wallet reservation and its
@@ -268,13 +252,8 @@ func refundMidjourneyWalletSubmit(info *relaycommon.RelayInfo, billingKey string
 	if info == nil || billingKey == "" {
 		return
 	}
-	if err := service.RefundPendingTaskWalletQuota(billingKey, info.UserId); err != nil {
+	if err := service.RefundPendingMidjourneyQuota(billingKey, info.UserId); err != nil {
 		common.SysLog("refund pending Midjourney wallet quota error: " + err.Error())
-	}
-	if quota > 0 && !info.IsPlayground {
-		if err := model.IncreaseTokenQuotaDirect(info.TokenId, info.TokenKey, quota); err != nil {
-			common.SysLog("refund Midjourney token quota error: " + err.Error())
-		}
 	}
 }
 
@@ -289,6 +268,20 @@ func finalizeMidjourneyWalletSubmit(info *relaycommon.RelayInfo, billingKey stri
 	}
 	if err := service.FinalizeTaskWalletConsumption(context.Background(), billingKey, info.UserId, quota, quota); err != nil {
 		common.SysLog("finalize Midjourney wallet quota after submit: " + err.Error())
+	}
+}
+
+func setMidjourneyBillingMetadata(task *model.Midjourney, info *relaycommon.RelayInfo, billable bool) {
+	task.BillingSource = info.BillingSource
+	if task.BillingSource == "" {
+		task.BillingSource = service.BillingSourceWallet
+	}
+	if !billable {
+		task.Quota, task.TokenId = 0, 0
+		return
+	}
+	if !info.IsPlayground {
+		task.TokenId = info.TokenId
 	}
 }
 
@@ -333,6 +326,10 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	requestURL := getMjRequestPath(c.Request.URL.String())
 	baseURL := c.GetString("base_url")
 	fullRequestURL := fmt.Sprintf("%s%s", baseURL, requestURL)
+	if dispatchErr := markMidjourneyWalletDispatched(info, billingKey); dispatchErr != nil {
+		refundMidjourneyWalletSubmit(info, billingKey, priceData.Quota)
+		return &dto.MidjourneyResponse{Code: 4, Description: dispatchErr.Error()}
+	}
 	mjResp, _, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
 	if err != nil {
 		refundMidjourneyWalletSubmit(info, billingKey, priceData.Quota)
@@ -388,6 +385,7 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		Quota:       priceData.Quota,
 		BillingKey:  billingKey,
 	}
+	setMidjourneyBillingMetadata(midjourneyTask, info, billable)
 	err = midjourneyTask.Insert()
 	if err != nil {
 		if ledgerBilling {
@@ -650,6 +648,10 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 
+	if dispatchErr := markMidjourneyWalletDispatched(relayInfo, billingKey); dispatchErr != nil {
+		refundMidjourneyWalletSubmit(relayInfo, billingKey, priceData.Quota)
+		return &dto.MidjourneyResponse{Code: 4, Description: dispatchErr.Error()}
+	}
 	midjResponseWithStatus, responseBody, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
 	if err != nil {
 		refundMidjourneyWalletSubmit(relayInfo, billingKey, priceData.Quota)
@@ -763,6 +765,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		midjourneyTask.Progress = "100%"
 		midjourneyTask.Status = "SUCCESS"
 	}
+	setMidjourneyBillingMetadata(midjourneyTask, relayInfo, billable && consumeQuota && midjResponseWithStatus.StatusCode == http.StatusOK)
 	err = midjourneyTask.Insert()
 	if err != nil {
 		if ledgerBilling {
@@ -773,11 +776,10 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			Description: "insert_midjourney_task_failed",
 		}
 	}
-	if ledgerBilling && midjourneyTask.Status == "SUCCESS" {
-		// Code 21 with a task that already finished (or UPLOAD) is persisted at
-		// 100%; the polling loop only scans unfinished tasks, so finalize the
-		// reservation here instead of letting the stale-reservation TTL refund it.
-		finalizeMidjourneyWalletSubmit(relayInfo, billingKey, priceData.Quota)
+	if ledgerBilling && (midjourneyTask.Status == "SUCCESS" || midjourneyTask.Status == "FAILURE") {
+		if _, err := service.SettleMidjourneyTaskBilling(c, midjourneyTask); err != nil {
+			common.SysLog("settle terminal Midjourney submit: " + err.Error())
+		}
 	}
 
 	if midjResponse.Code == 22 { //22-排队中，说明任务已存在

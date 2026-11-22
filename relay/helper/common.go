@@ -88,6 +88,11 @@ func EmitOutputSensitiveStreamTerminal(c *gin.Context, info *relaycommon.RelayIn
 	if payload == "" || requestContextDone(c) {
 		return
 	}
+	// 策略终止帧绕过输出过滤，但仍经过底层写入预算。
+	if writer, ok := c.Writer.(interface{ WritePolicyTerminal([]byte) error }); ok {
+		_ = writer.WritePolicyTerminal([]byte(payload))
+		return
+	}
 	// The streamResponseWriter budget sets the deadline on each Write; no manual call needed.
 	_, _ = c.Writer.Write([]byte(payload))
 	_ = FlushWriter(c)

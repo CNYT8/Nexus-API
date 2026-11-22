@@ -132,7 +132,7 @@ func (*CreemAdaptor) RequestPay(c *gin.Context, req *CreemPayRequest) {
 	}
 
 	// 创建支付链接，传入用户邮箱
-	checkoutUrl, err := genCreemLink(c.Request.Context(), referenceId, selectedProduct, user.Email, user.Username)
+	checkoutUrl, err := genCreemLink(c.Request.Context(), referenceId, selectedProduct, user.Email, user.Username, true)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 创建支付链接失败 user_id=%d trade_no=%s product_id=%s error=%q", id, referenceId, selectedProduct.ProductId, err.Error()))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
@@ -180,10 +180,22 @@ type CreemWebhookEvent struct {
 	EventType string `json:"eventType"`
 	CreatedAt int64  `json:"created_at"`
 	Object    struct {
-		Id        string `json:"id"`
-		Object    string `json:"object"`
-		RequestId string `json:"request_id"`
-		Order     struct {
+		Id             string `json:"id"`
+		Object         string `json:"object"`
+		RequestId      string `json:"request_id"`
+		Amount         int64  `json:"amount"`
+		Currency       string `json:"currency"`
+		RefundAmount   int64  `json:"refund_amount"`
+		RefundCurrency string `json:"refund_currency"`
+		Transaction    struct {
+			Id             string `json:"id"`
+			Order          string `json:"order"`
+			AmountPaid     int64  `json:"amount_paid"`
+			Currency       string `json:"currency"`
+			Status         string `json:"status"`
+			RefundedAmount *int64 `json:"refunded_amount"`
+		} `json:"transaction"`
+		Order struct {
 			Object      string `json:"object"`
 			Id          string `json:"id"`
 			Customer    string `json:"customer"`
@@ -287,10 +299,84 @@ func CreemWebhook(c *gin.Context) {
 	switch webhookEvent.EventType {
 	case "checkout.completed":
 		handleCheckoutCompleted(c, &webhookEvent)
+	case "refund.created", "dispute.created":
+		reversals, err := creemReversalsFromEvent(&webhookEvent)
+		if err == nil {
+			for _, reversal := range reversals {
+				if err = model.ApplyVerifiedTopUpReversal(model.DB, reversal); err != nil {
+					break
+				}
+			}
+		}
+		if err != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 支付冲正未完成 event_type=%s event_id=%s error=%q", webhookEvent.EventType, webhookEvent.Id, err.Error()))
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		c.Status(http.StatusOK)
 	default:
 		logger.LogInfo(c.Request.Context(), fmt.Sprintf("Creem webhook 忽略事件 event_type=%s event_id=%s", webhookEvent.EventType, webhookEvent.Id))
 		c.Status(http.StatusOK)
 	}
+}
+
+// creemReversalsFromEvent 只接受验签后的现金事件，不使用客户端元数据定位充值。
+func creemReversalsFromEvent(event *CreemWebhookEvent) ([]model.VerifiedTopUpReversal, error) {
+	if event == nil || (event.EventType != "refund.created" && event.EventType != "dispute.created") {
+		return nil, model.ErrTopUpReversalConflict
+	}
+	object := &event.Object
+	transaction := &object.Transaction
+	if event.Id == "" || len(event.Id) > 191 || object.Id == "" || event.CreatedAt < 1000 ||
+		transaction.Id == "" || transaction.Order == "" || transaction.AmountPaid <= 0 ||
+		object.Order.Id != transaction.Order || object.Order.Transaction != transaction.Id ||
+		int64(object.Order.AmountPaid) != transaction.AmountPaid ||
+		strings.TrimSpace(transaction.Currency) == "" || !strings.EqualFold(object.Order.Currency, transaction.Currency) {
+		return nil, model.ErrTopUpReversalConflict
+	}
+	reversal := model.VerifiedTopUpReversal{
+		Provider:      model.PaymentProviderCreem,
+		PaymentID:     transaction.Order,
+		EventID:       event.Id,
+		ObjectID:      object.Id,
+		Currency:      transaction.Currency,
+		OriginalMinor: transaction.AmountPaid,
+		OccurredAt:    event.CreatedAt / 1000,
+	}
+	if event.EventType == "dispute.created" {
+		if object.Object != "dispute" || transaction.Status != "chargeback" ||
+			object.Amount <= 0 || object.Amount > transaction.AmountPaid || !strings.EqualFold(object.Currency, transaction.Currency) {
+			return nil, model.ErrTopUpReversalConflict
+		}
+		// 官方仅定义创建事件；不猜测胜诉状态，更不把退款累计字段当争议结果。
+		reversal.Kind, reversal.AmountMinor = "dispute", object.Amount
+		return []model.VerifiedTopUpReversal{reversal}, nil
+	}
+	if object.Object != "refund" || object.Status != "succeeded" ||
+		object.RefundAmount <= 0 || object.RefundAmount > transaction.AmountPaid ||
+		!strings.EqualFold(object.RefundCurrency, transaction.Currency) {
+		return nil, model.ErrTopUpReversalConflict
+	}
+	reversal.Kind, reversal.AmountMinor, reversal.Terminal = "refund_item", object.RefundAmount, true
+	itemKey, err := model.NewRebateIdempotencyKey("creem-refund-item-event-v1", event.Id)
+	if err != nil {
+		return nil, err
+	}
+	reversal.EventID = itemKey
+	if transaction.RefundedAmount == nil {
+		return []model.VerifiedTopUpReversal{reversal}, nil
+	}
+	if *transaction.RefundedAmount < object.RefundAmount || *transaction.RefundedAmount > transaction.AmountPaid {
+		return nil, model.ErrTopUpReversalConflict
+	}
+	// 同时保存单笔不可变金额与渠道累计数；模型取两种表示的最大值，禁止双扣。
+	total := reversal
+	total.Kind, total.ObjectID, total.AmountMinor = "refund_total", transaction.Id, *transaction.RefundedAmount
+	total.EventID, err = model.NewRebateIdempotencyKey("creem-refund-total-event-v1", event.Id)
+	if err != nil {
+		return nil, err
+	}
+	return []model.VerifiedTopUpReversal{total, reversal}, nil
 }
 
 // 处理支付完成事件
@@ -346,7 +432,8 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 
 	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Creem 支付完成回调 trade_no=%s creem_order_id=%s amount_paid=%d currency=%s product_id=%s customer_email_present=%t customer_name_present=%t", referenceId, event.Object.Order.Id, event.Object.Order.AmountPaid, event.Object.Order.Currency, event.Object.Product.Id, event.Object.Customer.Email != "", event.Object.Customer.Name != ""))
 
-	err := model.RechargeCreem(referenceId, c.ClientIP(), confirmation)
+	identity := model.TopUpPaymentIdentity{Provider: model.PaymentProviderCreem, CheckoutID: event.Object.Id, PaymentID: event.Object.Order.Id, Currency: event.Object.Order.Currency, PaidMinor: int64(event.Object.Order.AmountPaid)}
+	err := model.RechargeCreem(referenceId, c.ClientIP(), confirmation, identity)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 充值处理失败 trade_no=%s creem_order_id=%s client_ip=%s error=%q", referenceId, event.Object.Order.Id, c.ClientIP(), err.Error()))
 		c.AbortWithStatus(http.StatusInternalServerError)
@@ -371,7 +458,7 @@ type CreemCheckoutResponse struct {
 	Id          string `json:"id"`
 }
 
-func genCreemLink(ctx context.Context, referenceId string, product *CreemProduct, email string, username string) (string, error) {
+func genCreemLink(ctx context.Context, referenceId string, product *CreemProduct, email string, username string, registerTopUp ...bool) (string, error) {
 	if setting.CreemApiKey == "" {
 		return "", fmt.Errorf("未配置Creem API密钥")
 	}
@@ -451,6 +538,11 @@ func genCreemLink(ctx context.Context, referenceId string, product *CreemProduct
 		return "", fmt.Errorf("Creem API resp no checkout url ")
 	}
 
+	if len(registerTopUp) == 1 && registerTopUp[0] {
+		if err := model.RegisterTopUpCheckout(referenceId, model.PaymentProviderCreem, checkoutResp.Id); err != nil {
+			return "", err
+		}
+	}
 	logger.LogInfo(ctx, fmt.Sprintf("Creem 支付链接创建成功 trade_no=%s response_id=%s", referenceId, checkoutResp.Id))
 	return checkoutResp.CheckoutUrl, nil
 }

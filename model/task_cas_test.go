@@ -72,6 +72,11 @@ func TestMain(m *testing.M) {
 		&RebateCapBucket{},
 		&RebateSystemState{},
 		&RebateRecord{},
+		&WalletSourceReversal{},
+		&RebateSourceReversal{},
+		&TopUpPaymentBinding{},
+		&TopUpReversalState{},
+		&TopUpReversalEvent{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -97,6 +102,11 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM nexus_tickets")
 		DB.Exec("DELETE FROM nexus_web_risk_states")
 		DB.Exec("DELETE FROM empty_response_records")
+		DB.Exec("DELETE FROM top_up_reversal_events")
+		DB.Exec("DELETE FROM top_up_reversal_states")
+		DB.Exec("DELETE FROM top_up_payment_bindings")
+		DB.Exec("DELETE FROM rebate_source_reversals")
+		DB.Exec("DELETE FROM wallet_source_reversals")
 		DB.Exec("DELETE FROM wallet_debt_repayments")
 		DB.Exec("DELETE FROM wallet_lot_holds")
 		DB.Exec("DELETE FROM wallet_reservations")
@@ -126,6 +136,11 @@ func insertTask(t *testing.T, task *Task) {
 	t.Helper()
 	task.CreatedAt = time.Now().Unix()
 	task.UpdatedAt = time.Now().Unix()
+	if task.UserId == 0 {
+		user := &User{Username: "cas-" + common.GetUUID(), AffCode: common.GetUUID()[:8]}
+		require.NoError(t, DB.Create(user).Error)
+		task.UserId = user.Id
+	}
 	require.NoError(t, DB.Create(task).Error)
 }
 
@@ -262,6 +277,7 @@ func TestUpdateWithStatus_ConcurrentWinner(t *testing.T) {
 			t := &Task{}
 			*t = Task{
 				ID:       task.ID,
+				UserId:   task.UserId,
 				TaskID:   task.TaskID,
 				Status:   TaskStatusSuccess,
 				Progress: "100%",

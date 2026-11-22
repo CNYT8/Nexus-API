@@ -51,7 +51,7 @@ func authHelper(c *gin.Context, minRole int) {
 			c.Abort()
 			return
 		}
-		user, authErr := model.ValidateAccessToken(accessToken)
+		user, personalToken, authErr := model.ValidateDashboardAccessToken(accessToken)
 		if authErr != nil {
 			if errors.Is(authErr, model.ErrDatabase) {
 				common.SysLog("ValidateAccessToken database error: " + authErr.Error())
@@ -69,6 +69,9 @@ func authHelper(c *gin.Context, minRole int) {
 			return
 		}
 		if user != nil && user.Username != "" {
+			if !enforceAccessTokenScope(c, personalToken) {
+				return
+			}
 			if !validUserInfo(user.Username, user.Role) {
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,
@@ -93,7 +96,7 @@ func authHelper(c *gin.Context, minRole int) {
 		}
 	}
 	if !useAccessToken {
-		userId, ok := id.(int)
+		_, ok := id.(int)
 		if !ok {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -102,12 +105,11 @@ func authHelper(c *gin.Context, minRole int) {
 			c.Abort()
 			return
 		}
-		currentUser, err := model.GetUserCache(userId)
+		currentUser, _, err := service.CurrentSessionUser(c)
 		if err != nil {
-			common.SysLog("failed to refresh session user cache in auth: " + err.Error())
-			c.JSON(http.StatusInternalServerError, gin.H{
+			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
-				"message": common.TranslateMessage(c, i18n.MsgDatabaseError),
+				"message": common.TranslateMessage(c, i18n.MsgAuthNotLoggedIn),
 			})
 			c.Abort()
 			return
@@ -209,10 +211,8 @@ func authHelper(c *gin.Context, minRole int) {
 
 func TryUserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		session := sessions.Default(c)
-		id := session.Get("id")
-		if id != nil {
-			c.Set("id", id)
+		if user, _, err := service.CurrentSessionUser(c); err == nil {
+			c.Set("id", user.Id)
 		}
 		c.Next()
 	}
@@ -244,14 +244,15 @@ func WssAuth(c *gin.Context) {
 // Used for endpoints that need to be accessible from both the dashboard and API clients.
 func TokenOrUserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		// Try session auth first (dashboard users)
-		session := sessions.Default(c)
-		if id := session.Get("id"); id != nil {
-			if status, ok := session.Get("status").(int); ok && status == common.UserStatusEnabled {
-				c.Set("id", id)
-				c.Next()
+		// Refresh account state from the server-side session before trusting cookies.
+		if user, _, err := service.CurrentSessionUser(c); err == nil {
+			c.Set("id", user.Id)
+			c.Set("role", user.Role)
+			if !enforceWebRisk(c, user.Id) {
 				return
 			}
+			c.Next()
+			return
 		}
 		// Fall back to token auth (API clients)
 		TokenAuth()(c)
@@ -259,8 +260,7 @@ func TokenOrUserAuth() func(c *gin.Context) {
 }
 
 // TokenAuthReadOnly 宽松版本的令牌认证中间件，用于只读查询接口。
-// 只验证令牌 key 是否存在，不检查令牌状态、过期时间和额度。
-// 即使令牌已过期、已耗尽或已禁用，也允许访问。
+// 检查令牌存在且未被主动禁用；允许过期或额度耗尽的令牌查询自身信息。
 // 仍然检查用户是否被封禁。
 func TokenAuthReadOnly() func(c *gin.Context) {
 	return func(c *gin.Context) {
@@ -338,19 +338,16 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 func TokenAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		// 先检测是否为ws
-		if c.Request.Header.Get("Sec-WebSocket-Protocol") != "" {
-			// Sec-WebSocket-Protocol: realtime, openai-insecure-api-key.sk-xxx, openai-beta.realtime-v1
-			// read sk from Sec-WebSocket-Protocol
-			key := c.Request.Header.Get("Sec-WebSocket-Protocol")
-			parts := strings.Split(key, ",")
-			for _, part := range parts {
+		if protocols := c.Request.Header.Get("Sec-WebSocket-Protocol"); protocols != "" {
+			// Preserve an existing bearer unless the dedicated key protocol is present.
+			for _, part := range strings.Split(protocols, ",") {
 				part = strings.TrimSpace(part)
-				if strings.HasPrefix(part, "openai-insecure-api-key") {
-					key = strings.TrimPrefix(part, "openai-insecure-api-key.")
+				if strings.HasPrefix(part, "openai-insecure-api-key.") {
+					key := strings.TrimPrefix(part, "openai-insecure-api-key.")
+					c.Request.Header.Set("Authorization", "Bearer "+key)
 					break
 				}
 			}
-			c.Request.Header.Set("Authorization", "Bearer "+key)
 		}
 		// 检查path包含/v1/messages 或 /v1/models
 		if strings.Contains(c.Request.URL.Path, "/v1/messages") || strings.Contains(c.Request.URL.Path, "/v1/models") {
@@ -479,6 +476,8 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 	c.Set("token_key", token.Key)
 	c.Set("token_name", token.Name)
 	c.Set("token_unlimited_quota", token.UnlimitedQuota)
+	c.Set("token_auto_groups", token.GetAutoGroups())
+	c.Set("allow_user_quota_query", token.AllowUserQuotaQuery)
 	if !token.UnlimitedQuota {
 		c.Set("token_quota", token.RemainQuota)
 	}

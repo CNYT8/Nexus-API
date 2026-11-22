@@ -21,7 +21,7 @@ func enforceAdminPermission(c *gin.Context, minRole int, role int, userId int) b
 		return true
 	}
 
-	allowed, err := model.IsAdminPermissionAllowed(userId, module)
+	allowed, err := model.IsAdminPermissionActionAllowed(userId, module, accessTokenAction(c.Request.Method, c.Request.URL.Path))
 	if err != nil {
 		common.SysLog("failed to check admin permission: " + err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -47,22 +47,28 @@ func adminPermissionModuleForPath(path string) string {
 	path = "/" + strings.Trim(strings.TrimSpace(path), "/")
 
 	switch {
-	case strings.HasPrefix(path, "/api/channel"):
+	case permissionPathMatches(path, "/api/channel"), path == "/api/log/channel_affinity_usage_cache":
 		return model.AdminPermissionChannel
-	case strings.HasPrefix(path, "/api/models"),
-		strings.HasPrefix(path, "/api/deployments"),
-		strings.HasPrefix(path, "/api/vendors"),
-		strings.HasPrefix(path, "/api/prefill_group"):
+	case permissionPathMatches(path, "/api/models"),
+		permissionPathMatches(path, "/api/deployments"),
+		permissionPathMatches(path, "/api/vendors"),
+		permissionPathMatches(path, "/api/group"),
+		permissionPathMatches(path, "/api/prefill_group"):
 		return model.AdminPermissionModels
-	case strings.HasPrefix(path, "/api/user"):
+	case permissionPathMatches(path, "/api/user"), permissionPathMatches(path, "/api/log"),
+		permissionPathMatches(path, "/api/data"), permissionPathMatches(path, "/api/mj"), permissionPathMatches(path, "/api/task"):
 		return model.AdminPermissionUser
-	case strings.HasPrefix(path, "/api/redemption"):
+	case permissionPathMatches(path, "/api/redemption"):
 		return model.AdminPermissionRedemption
-	case strings.HasPrefix(path, "/api/subscription/admin"):
+	case permissionPathMatches(path, "/api/subscription/admin"), permissionPathMatches(path, "/api/membership/admin"):
 		return model.AdminPermissionSubscription
-	case strings.HasPrefix(path, "/api/tickets/admin"):
+	case permissionPathMatches(path, "/api/tickets/admin"):
 		return model.AdminPermissionTicket
 	default:
 		return ""
 	}
+}
+
+func permissionPathMatches(path, prefix string) bool {
+	return path == prefix || strings.HasPrefix(path, prefix+"/")
 }

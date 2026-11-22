@@ -50,6 +50,24 @@ type TaskDto struct {
 	Properties any             `json:"properties"`
 	Username   string          `json:"username,omitempty"`
 	Data       json.RawMessage `json:"data"`
+	// Read-only projection shared by owner and admin views. Funding identities,
+	// plugin IDs and internal price multipliers are never exposed here.
+	UsageSnapshot   *TaskUsageSnapshot `json:"usage_snapshot,omitempty"`
+	ResultDiscarded bool               `json:"result_discarded,omitempty"`
+}
+
+type TaskUsageSnapshot struct {
+	Name       string                    `json:"name"`
+	Version    string                    `json:"version"`
+	Schema     map[string]TaskUsageField `json:"schema"`
+	Expression string                    `json:"expression"`
+}
+
+type TaskUsageField struct {
+	Path     string  `json:"path"`
+	Required bool    `json:"required"`
+	Default  float64 `json:"default"`
+	Max      float64 `json:"max"`
 }
 
 type FetchReq struct {

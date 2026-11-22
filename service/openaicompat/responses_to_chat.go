@@ -1,8 +1,10 @@
 package openaicompat
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/dto"
 )
@@ -29,20 +31,20 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 		} else {
 			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 		}
+		usage.PromptTokensDetails = resp.Usage.PromptTokensDetails.Clone()
 		if resp.Usage.InputTokensDetails != nil {
-			usage.PromptTokensDetails.CachedTokens = resp.Usage.InputTokensDetails.CachedTokens
-			usage.PromptTokensDetails.ImageTokens = resp.Usage.InputTokensDetails.ImageTokens
-			usage.PromptTokensDetails.AudioTokens = resp.Usage.InputTokensDetails.AudioTokens
+			usage.PromptTokensDetails.MergeNonZero(*resp.Usage.InputTokensDetails)
 		}
-		if resp.Usage.CompletionTokenDetails.ReasoningTokens != 0 {
-			usage.CompletionTokenDetails.ReasoningTokens = resp.Usage.CompletionTokenDetails.ReasoningTokens
+		usage.CompletionTokenDetails = resp.Usage.CompletionTokenDetails
+		if resp.Usage.OutputTokensDetails != nil && resp.Usage.OutputTokensDetails.ReasoningTokens != 0 {
+			usage.CompletionTokenDetails.ReasoningTokens = resp.Usage.OutputTokensDetails.ReasoningTokens
 		}
 	}
 
 	created := resp.CreatedAt
 
 	var toolCalls []dto.ToolCallResponse
-	if text == "" && len(resp.Output) > 0 {
+	if len(resp.Output) > 0 {
 		for _, out := range resp.Output {
 			if out.Type != "function_call" {
 				continue
@@ -66,10 +68,7 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 		}
 	}
 
-	finishReason := "stop"
-	if len(toolCalls) > 0 {
-		finishReason = "tool_calls"
-	}
+	finishReason := ResponsesFinishReason(resp, len(toolCalls) > 0)
 
 	msg := dto.Message{
 		Role:    "assistant",
@@ -77,7 +76,31 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 	}
 	if len(toolCalls) > 0 {
 		msg.SetToolCalls(toolCalls)
-		msg.Content = ""
+	}
+	if reasoning := ExtractReasoningFromResponses(resp); reasoning != "" {
+		msg.ReasoningContent = &reasoning
+	}
+	var annotations []any
+	var refusal strings.Builder
+	textOffset := 0
+	for _, output := range resp.Output {
+		if output.Type != "message" {
+			continue
+		}
+		for _, part := range output.Content {
+			annotations = append(annotations, ResponsesAnnotationsToChat(part.Annotations, textOffset)...)
+			refusal.WriteString(part.Refusal)
+			if part.Type == "output_text" {
+				textOffset += utf8.RuneCountInString(part.Text)
+			}
+		}
+	}
+	if len(annotations) > 0 {
+		msg.Annotations, _ = json.Marshal(annotations)
+	}
+	if refusal.Len() > 0 {
+		value := refusal.String()
+		msg.Refusal = &value
 	}
 
 	out := &dto.OpenAITextResponse{
@@ -119,15 +142,49 @@ func ExtractOutputTextFromResponses(resp *dto.OpenAIResponsesResponse) string {
 			}
 		}
 	}
-	if sb.Len() > 0 {
-		return sb.String()
+	return sb.String()
+}
+
+func ExtractReasoningFromResponses(resp *dto.OpenAIResponsesResponse) string {
+	if resp == nil {
+		return ""
 	}
-	for _, out := range resp.Output {
-		for _, c := range out.Content {
-			if c.Text != "" {
-				sb.WriteString(c.Text)
+	var parts []string
+	for _, output := range resp.Output {
+		if output.Type != "reasoning" {
+			continue
+		}
+		for _, part := range output.Summary {
+			if part.Text != "" {
+				parts = append(parts, part.Text)
+			}
+		}
+		if len(output.Summary) == 0 {
+			for _, part := range output.Content {
+				if part.Text != "" {
+					parts = append(parts, part.Text)
+				}
 			}
 		}
 	}
-	return sb.String()
+	return strings.Join(parts, "\n\n")
+}
+
+func ResponsesFinishReason(resp *dto.OpenAIResponsesResponse, hasTools bool) string {
+	if resp != nil && resp.IncompleteDetails != nil {
+		reason := resp.IncompleteDetails.Reason
+		if reason == "" {
+			reason = resp.IncompleteDetails.Reasoning
+		}
+		switch reason {
+		case "max_output_tokens", "max_tokens":
+			return "length"
+		case "content_filter", "safety":
+			return "content_filter"
+		}
+	}
+	if hasTools {
+		return "tool_calls"
+	}
+	return "stop"
 }

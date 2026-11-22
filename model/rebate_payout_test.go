@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -59,7 +58,7 @@ func TestRebatePayoutClosurePaysOldDebtOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, paid)
 	setting.Enabled = true
-	require.NoError(t, operation_setting.UpdateRebateSetting(setting))
+	useRebateRewardSetting(t, setting, db)
 	paid, err = PayDueWalletRebates(db, time.Now().UTC(), 1)
 	require.NoError(t, err)
 	require.Equal(t, 1, paid)

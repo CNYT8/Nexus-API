@@ -17,9 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { API, processModelsData, processGroupsData } from '../../helpers';
+import {
+  API,
+  processModelsData,
+  processGroupsData,
+  showError,
+} from '../../helpers';
 import { API_ENDPOINTS } from '../../constants/playground.constants';
 
 export const useDataLoader = (
@@ -28,68 +33,120 @@ export const useDataLoader = (
   handleInputChange,
   setModels,
   setGroups,
+  session,
 ) => {
   const { t } = useTranslation();
+  const availableModels = useRef(null);
+  const isModelAvailable = useCallback((model, group) => {
+    const loaded = availableModels.current;
+    return session.isCurrent() && loaded?.group === group &&
+      loaded.models.some((option) => option.value === model);
+  }, [session]);
 
-  const loadModels = useCallback(async () => {
-    try {
-      const res = await API.get(API_ENDPOINTS.USER_MODELS);
-      const { success, message, data } = res.data;
+  const loadModels = useCallback(
+    async (signal) => {
+      if (!session.isCurrent() || signal.aborted) return;
+      try {
+        availableModels.current = null;
+        setModels([]);
+        const res = await API.get(API_ENDPOINTS.USER_MODELS, {
+          signal,
+          params: { group: inputs.group },
+          headers: { 'New-Api-User': session.userId },
+          disableDuplicate: true,
+          skipErrorHandler: true,
+        });
+        if (!session.isCurrent() || signal.aborted) return;
+        const { success, message, data } = res.data;
 
-      if (success) {
-        const { modelOptions, selectedModel } = processModelsData(
-          data,
-          inputs.model,
-        );
-        setModels(modelOptions);
+        if (success) {
+          const { modelOptions, selectedModel } = processModelsData(
+            data,
+            inputs.model,
+          );
+          availableModels.current = { group: inputs.group, models: modelOptions };
+          setModels(modelOptions);
 
-        if (selectedModel !== inputs.model) {
-          handleInputChange('model', selectedModel);
+          const nextModel = modelOptions.length ? selectedModel : '';
+          if (nextModel !== inputs.model) {
+            handleInputChange('model', nextModel);
+          }
+        } else {
+          showError(t(message));
         }
-      } else {
-        showError(t(message));
+      } catch (error) {
+        if (session.isCurrent() && !signal.aborted)
+          showError(t('加载模型失败'));
       }
-    } catch (error) {
-      showError(t('加载模型失败'));
-    }
-  }, [inputs.model, handleInputChange, setModels, t]);
+    },
+    [inputs.model, inputs.group, handleInputChange, setModels, t, session],
+  );
 
-  const loadGroups = useCallback(async () => {
-    try {
-      const res = await API.get(API_ENDPOINTS.USER_GROUPS);
-      const { success, message, data } = res.data;
+  const loadGroups = useCallback(
+    async (signal) => {
+      if (!session.isCurrent() || signal.aborted) return;
+      try {
+        const res = await API.get(API_ENDPOINTS.USER_GROUPS, {
+          signal,
+          headers: { 'New-Api-User': session.userId },
+          disableDuplicate: true,
+          skipErrorHandler: true,
+        });
+        if (!session.isCurrent() || signal.aborted) return;
+        const { success, message, data } = res.data;
 
-      if (success) {
-        const userGroup =
-          userState?.user?.group ||
-          JSON.parse(localStorage.getItem('user'))?.group;
-        const groupOptions = processGroupsData(data, userGroup);
-        setGroups(groupOptions);
+        if (success) {
+          const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
+          const userGroup =
+            String(userState?.user?.id) === session.userId
+              ? userState.user.group
+              : storedUser?.group;
+          const groupOptions = processGroupsData(data, userGroup);
+          setGroups(groupOptions);
 
-        const hasCurrentGroup = groupOptions.some(
-          (option) => option.value === inputs.group,
-        );
-        if (!hasCurrentGroup) {
-          handleInputChange('group', groupOptions[0]?.value || '');
+          const hasCurrentGroup = groupOptions.some(
+            (option) => option.value === inputs.group,
+          );
+          if (!hasCurrentGroup) {
+            handleInputChange('group', groupOptions[0]?.value || '');
+          }
+        } else {
+          showError(t(message));
         }
-      } else {
-        showError(t(message));
+      } catch (error) {
+        if (session.isCurrent() && !signal.aborted)
+          showError(t('加载分组失败'));
       }
-    } catch (error) {
-      showError(t('加载分组失败'));
-    }
-  }, [userState, inputs.group, handleInputChange, setGroups, t]);
+    },
+    [userState, inputs.group, handleInputChange, setGroups, t, session],
+  );
 
   // 自动加载数据
   useEffect(() => {
-    if (userState?.user) {
-      loadModels();
-      loadGroups();
-    }
-  }, [userState?.user, loadModels, loadGroups]);
+    if (!session.isCurrent()) return;
+    const controller = new AbortController();
+    const unsubscribe = session.onInvalidate(() => controller.abort());
+    loadModels(controller.signal);
+    return () => {
+      unsubscribe();
+      controller.abort();
+    };
+  }, [session, loadModels]);
+
+  useEffect(() => {
+    if (!session.isCurrent()) return;
+    const controller = new AbortController();
+    const unsubscribe = session.onInvalidate(() => controller.abort());
+    loadGroups(controller.signal);
+    return () => {
+      unsubscribe();
+      controller.abort();
+    };
+  }, [session, loadGroups]);
 
   return {
     loadModels,
     loadGroups,
+    isModelAvailable,
   };
 };

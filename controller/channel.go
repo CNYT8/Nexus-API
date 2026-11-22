@@ -91,9 +91,43 @@ func buildChannelListQuery(group string, statusFilter int, typeFilter int) *gorm
 }
 
 func GetChannelOps(c *gin.Context) {
+	common.OptionMapRWMutex.RLock()
+	automaticDisable, retryTimes := common.AutomaticDisableChannelEnabled, common.RetryTimes
+	common.OptionMapRWMutex.RUnlock()
+	source := "global"
+	if value, present := c.GetQuery("auto_ban"); present {
+		autoBan, err := strconv.ParseBool(value)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if automaticDisable {
+			source = "global_and_channel"
+			if !autoBan {
+				source = "channel"
+			}
+		}
+		automaticDisable = automaticDisable && autoBan
+	}
 	common.ApiSuccess(c, gin.H{
-		"retry_times": common.RetryTimes,
+		"retry_times":    retryTimes,
+		"request_policy": gin.H{"automatic_disable": automaticDisable, "source": source},
 	})
+}
+
+// GetChannelDefaultBaseURLs is exposed by the main router's channel-admin group.
+func GetChannelDefaultBaseURLs(c *gin.Context) {
+	if c.GetInt("id") <= 0 || c.GetInt("role") < common.RoleAdminUser {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	baseURLs := make(map[int]string)
+	for channelType, baseURL := range constant.ChannelBaseURLs {
+		if baseURL != "" {
+			baseURLs[channelType] = baseURL
+		}
+	}
+	common.ApiSuccess(c, baseURLs)
 }
 
 func GetAllChannels(c *gin.Context) {
@@ -2060,40 +2094,9 @@ func ManageMultiKeys(c *gin.Context) {
 		return
 
 	case "disable_all_keys":
-		// 禁用所有启用的密钥
-		if channel.ChannelInfo.MultiKeyStatusList == nil {
-			channel.ChannelInfo.MultiKeyStatusList = make(map[int]int)
-		}
-		if channel.ChannelInfo.MultiKeyDisabledTime == nil {
-			channel.ChannelInfo.MultiKeyDisabledTime = make(map[int]int64)
-		}
-		if channel.ChannelInfo.MultiKeyDisabledReason == nil {
-			channel.ChannelInfo.MultiKeyDisabledReason = make(map[int]string)
-		}
-
-		var disabledCount int
-		for i := 0; i < channel.ChannelInfo.MultiKeySize; i++ {
-			status := 1 // default enabled
-			if s, exists := channel.ChannelInfo.MultiKeyStatusList[i]; exists {
-				status = s
-			}
-
-			// 只禁用当前启用的密钥
-			if status == 1 {
-				channel.ChannelInfo.MultiKeyStatusList[i] = 2 // disabled
-				disabledCount++
-			}
-		}
-
-		if disabledCount == 0 {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "没有可禁用的密钥",
-			})
-			return
-		}
-
-		err = channel.Update()
+		// Commit key states, aggregate channel state and abilities together.
+		disabledCount, disableErr := model.DisableAllChannelKeys(channel.Id)
+		err = disableErr
 		if err != nil {
 			common.ApiError(c, err)
 			return

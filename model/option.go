@@ -1,8 +1,12 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +28,144 @@ import (
 
 const ticketEncryptionSecretOptionKey = "TicketEncryptionSecret"
 const webRiskFingerprintSecretOptionKey = "WebRiskFingerprintSecret"
+const rebateConfigBarrierOptionKey = "_rebate_config_barrier"
+
+var ErrRebateConfigConflict = errors.New("返利配置已被其他管理员修改，请刷新后重试")
+
+// RebateConfigSnapshot keeps int64 money values as decimal strings for browsers.
+// Revision covers all fields, including the hidden legacy reward-money cap.
+type RebateConfigSnapshot struct {
+	Fields   map[string]string `json:"fields"`
+	Revision string            `json:"revision"`
+}
+
+func rebateConfigSnapshot(value operation_setting.RebateSetting) (RebateConfigSnapshot, error) {
+	fields, err := config.ConfigToMap(value)
+	if err != nil {
+		return RebateConfigSnapshot{}, err
+	}
+	encoded, err := common.Marshal(fields)
+	if err != nil {
+		return RebateConfigSnapshot{}, err
+	}
+	digest := sha256.Sum256(encoded)
+	return RebateConfigSnapshot{Fields: fields, Revision: hex.EncodeToString(digest[:])}, nil
+}
+
+func readRebateSetting(db *gorm.DB, locking bool) (operation_setting.RebateSetting, error) {
+	if db == nil {
+		return operation_setting.RebateSetting{}, errors.New("主数据库未初始化")
+	}
+	var options []Option
+	query := db.Where(clause.Like{Column: clause.Column{Name: "key"}, Value: "rebate_setting.%"}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "key"}})
+	if locking && db.Dialector.Name() == "mysql" {
+		// MySQL needs a current read under REPEATABLE READ. NOWAIT avoids
+		// waiting on configuration writes while holding wallet/user locks.
+		// PostgreSQL reads the complete group AFTER GetRebateSettingTx holds
+		// its row guard: that statement can miss concurrently inserted fields.
+		query = query.Clauses(clause.Locking{Strength: "SHARE", Options: "NOWAIT"})
+	}
+	if err := query.Find(&options).Error; err != nil {
+		return operation_setting.RebateSetting{}, err
+	}
+	fields := make(map[string]string, len(options))
+	for _, option := range options {
+		if strings.HasPrefix(option.Key, "rebate_setting.") {
+			fields[strings.TrimPrefix(option.Key, "rebate_setting.")] = option.Value
+		}
+	}
+	return operation_setting.MergeRebateSettingFields(operation_setting.DefaultRebateSetting(), fields)
+}
+
+// GetRebateSettingTx reads one persisted snapshot in the accounting transaction.
+// Financial callers must keep that transaction open through cap consumption.
+func GetRebateSettingTx(tx *gorm.DB) (operation_setting.RebateSetting, error) {
+	if tx != nil && tx.Dialector.Name() == "postgres" {
+		// All configuration saves rewrite the complete group. Holding SHARE on
+		// its existing rows therefore prevents a save from committing until this
+		// accounting transaction finishes, including any wait for a cap bucket.
+		// Readers share these locks: an exclusive global reader barrier would
+		// invert the existing user -> config -> inviter-user lock order. NOWAIT
+		// also prevents a queued config writer from making a reader wait while
+		// holding a user needed by another reader. Conflict rolls back accounting.
+		// Writers hold their private barrier first and never lock wallet/users.
+		var guarded []Option
+		if err := tx.Select("key").
+			Where(clause.Like{Column: clause.Column{Name: "key"}, Value: "rebate_setting.%"}).
+			Order(clause.OrderByColumn{Column: clause.Column{Name: "key"}}).
+			Clauses(clause.Locking{Strength: "SHARE", Options: "NOWAIT"}).Find(&guarded).Error; err != nil {
+			return operation_setting.RebateSetting{}, err
+		}
+		if len(guarded) == 0 {
+			// No row was locked: linearize before the first configuration save.
+			// Do not read a newly inserted, unguarded enabled group. Defaults are
+			// disabled with zero rate and cannot consume or overwrite a cap.
+			return operation_setting.DefaultRebateSetting(), nil
+		}
+		// READ COMMITTED now gets a fresh, complete snapshot after the guard.
+		// Stronger PG isolation aborts on a concurrent row update instead
+		// of admitting an obsolete snapshot. Never use values from the guard.
+	}
+	return readRebateSetting(tx, true)
+}
+
+func GetRebateConfig() (RebateConfigSnapshot, error) {
+	value, err := readRebateSetting(DB, false)
+	if err != nil {
+		return RebateConfigSnapshot{}, err
+	}
+	return rebateConfigSnapshot(value)
+}
+
+func applyPersistedRebateSetting(value operation_setting.RebateSetting) error {
+	snapshot, err := rebateConfigSnapshot(value)
+	if err != nil {
+		return err
+	}
+	common.OptionMapRWMutex.Lock()
+	defer common.OptionMapRWMutex.Unlock()
+	if err := operation_setting.UpdateRebateSetting(value); err != nil {
+		return err
+	}
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	for field, fieldValue := range snapshot.Fields {
+		common.OptionMap["rebate_setting."+field] = fieldValue
+	}
+	return nil
+}
+
+// UpdateRebateConfig requires every field and uses the same persistence path as
+// legacy single-option writes. A stale browser cannot overwrite a newer group.
+func UpdateRebateConfig(fields map[string]string, revision string) (RebateConfigSnapshot, error) {
+	defaults, err := rebateConfigSnapshot(operation_setting.DefaultRebateSetting())
+	if err != nil {
+		return RebateConfigSnapshot{}, err
+	}
+	if revision == "" || len(fields) != len(defaults.Fields) {
+		return RebateConfigSnapshot{}, errors.New("请提交完整的返利配置及版本")
+	}
+	values := make(map[string]string, len(fields))
+	for field := range defaults.Fields {
+		value, ok := fields[field]
+		if !ok {
+			return RebateConfigSnapshot{}, errors.New("请提交完整的返利配置及版本")
+		}
+		values["rebate_setting."+field] = value
+	}
+	candidate, err := operation_setting.MergeRebateSettingFields(operation_setting.DefaultRebateSetting(), fields)
+	if err != nil {
+		return RebateConfigSnapshot{}, err
+	}
+	if err := UpdateOptionsBulk(values, revision); err != nil {
+		return RebateConfigSnapshot{}, err
+	}
+	// A second database read could acknowledge somebody else's concurrent save.
+	// Return precisely the complete, normalized group committed by this request.
+	return rebateConfigSnapshot(candidate)
+}
 
 const (
 	outputSensitiveEnabledOptionKey      = "OutputSensitiveEnabled"
@@ -167,6 +309,7 @@ func InitOptionMap() {
 	common.OptionMap["QuotaForNewUser"] = strconv.Itoa(common.QuotaForNewUser)
 	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
 	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
+	common.OptionMap["QuotaRemindEnabled"] = strconv.FormatBool(common.QuotaRemindEnabled)
 	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
 	common.OptionMap["PreConsumedQuota"] = strconv.Itoa(common.PreConsumedQuota)
 	common.OptionMap["ModelRequestRateLimitCount"] = strconv.Itoa(setting.ModelRequestRateLimitCount)
@@ -342,6 +485,8 @@ func hasLegacyEncryptedTicketRows() (bool, error) {
 func loadOptionsFromDatabase() {
 	outputSensitiveUpdateMutex.Lock()
 	defer outputSensitiveUpdateMutex.Unlock()
+	modelPricingMutationMutex.Lock()
+	defer modelPricingMutationMutex.Unlock()
 	rebateOptionUpdateMutex.Lock()
 	defer rebateOptionUpdateMutex.Unlock()
 
@@ -356,6 +501,9 @@ func loadOptionsFromDatabase() {
 	outputConfigFound := false
 	outputConfigValid := true
 	for _, option := range options {
+		if option.Key == rebateConfigBarrierOptionKey || option.Key == modelPricingBarrierOptionKey {
+			continue
+		}
 		if strings.HasPrefix(option.Key, "rebate_setting.") {
 			rebateUpdates[strings.TrimPrefix(option.Key, "rebate_setting.")] = option.Value
 			continue
@@ -396,19 +544,12 @@ func loadOptionsFromDatabase() {
 			common.SysLog("failed to apply output sensitive config: " + err.Error())
 		}
 	}
-	if len(rebateUpdates) > 0 {
-		if err := operation_setting.UpdateRebateSettingFields(rebateUpdates); err != nil {
-			common.SysLog("failed to apply rebate settings from database: " + err.Error())
-		} else {
-			common.OptionMapRWMutex.Lock()
-			if common.OptionMap == nil {
-				common.OptionMap = make(map[string]string)
-			}
-			for field, value := range rebateUpdates {
-				common.OptionMap["rebate_setting."+field] = value
-			}
-			common.OptionMapRWMutex.Unlock()
-		}
+	rebateValue, err := operation_setting.MergeRebateSettingFields(operation_setting.DefaultRebateSetting(), rebateUpdates)
+	if err == nil {
+		err = applyPersistedRebateSetting(rebateValue)
+	}
+	if err != nil {
+		common.SysLog("failed to apply rebate settings from database: " + err.Error())
 	}
 }
 
@@ -469,9 +610,8 @@ func UpdateOutputSensitiveConfig(configValue setting.OutputSensitiveConfig) erro
 }
 
 func UpdateOption(key string, value string) error {
-	if strings.HasPrefix(key, "rebate_setting.") {
-		rebateOptionUpdateMutex.Lock()
-		defer rebateOptionUpdateMutex.Unlock()
+	if strings.HasPrefix(key, "rebate_setting.") || isModelPricingOptionKey(key) {
+		return UpdateOptionsBulk(map[string]string{key: value})
 	}
 	if err := validateOptionBeforeSave(key, value); err != nil {
 		return err
@@ -496,6 +636,9 @@ func UpdateOption(key string, value string) error {
 }
 
 func validateOptionBeforeSave(key string, value string) error {
+	if strings.EqualFold(strings.TrimSpace(key), rebateConfigBarrierOptionKey) || strings.EqualFold(strings.TrimSpace(key), modelPricingBarrierOptionKey) {
+		return errors.New("internal rebate configuration barrier cannot be changed through the option API")
+	}
 	if IsOutputSensitiveOptionKey(key) {
 		return errors.New("output sensitive settings must be changed through the dedicated API")
 	}
@@ -508,12 +651,37 @@ func validateOptionBeforeSave(key string, value string) error {
 	if strings.HasPrefix(key, "rebate_setting.") {
 		return operation_setting.ValidateRebateSettingField(strings.TrimPrefix(key, "rebate_setting."), value)
 	}
+	if strings.HasPrefix(key, "log_setting.") {
+		return operation_setting.ValidateLogSettingField(strings.TrimPrefix(key, "log_setting."), value)
+	}
 	if key == "membership_setting.tiers" {
 		_, err := membership_setting.ParseTiersJSONString(value)
 		return err
 	}
+	if key == "task_setting.usage_plugins" {
+		return ValidateTaskPluginBindingsJSON(value)
+	}
+	if key == "tool_price_setting.prices" {
+		var prices map[string]float64
+		if err := json.Unmarshal([]byte(value), &prices); err != nil {
+			return err
+		}
+		if prices == nil {
+			return errors.New("工具价格必须为 JSON 对象")
+		}
+		return operation_setting.ValidateToolPrices(prices)
+	}
 	if key == "error_mask_setting.rules" {
 		return error_mask_setting.CheckRules(value)
+	}
+	if key == "QuotaRemindEnabled" && value != "true" && value != "false" {
+		return errors.New("额度提醒开关必须为布尔值")
+	}
+	if key == "QuotaRemindThreshold" {
+		threshold, err := strconv.Atoi(value)
+		if err != nil || threshold < 0 {
+			return errors.New("额度提醒阈值必须为非负整数")
+		}
 	}
 	return nil
 }
@@ -534,12 +702,22 @@ func shouldInvalidatePricingCache(key string) bool {
 // any DB write fails the whole transaction rolls back and no in-memory state
 // is touched — safe for callers that must commit a set of related options
 // atomically (e.g. payment gateway binding).
-func UpdateOptionsBulk(values map[string]string) error {
+func UpdateOptionsBulk(values map[string]string, rebateRevision ...string) error {
 	if len(values) == 0 {
 		return nil
 	}
+	pricingUpdate := false
+	for key := range values {
+		pricingUpdate = pricingUpdate || isModelPricingOptionKey(key)
+	}
+	if pricingUpdate {
+		modelPricingMutationMutex.Lock()
+		defer modelPricingMutationMutex.Unlock()
+	}
 	rebateUpdates := make(map[string]string)
+	persisted := make(map[string]string, len(values))
 	for k, v := range values {
+		persisted[k] = v
 		if strings.HasPrefix(k, "rebate_setting.") {
 			rebateUpdates[strings.TrimPrefix(k, "rebate_setting.")] = v
 			continue
@@ -551,17 +729,76 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if len(rebateUpdates) > 0 {
 		rebateOptionUpdateMutex.Lock()
 		defer rebateOptionUpdateMutex.Unlock()
-		if err := operation_setting.ValidateRebateSettingFields(rebateUpdates); err != nil {
-			return err
-		}
 	}
+	var rebateValue operation_setting.RebateSetting
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		for k, v := range values {
-			option := Option{Key: k}
-			if err := tx.FirstOrCreate(&option, Option{Key: k}).Error; err != nil {
+		if pricingUpdate {
+			if err := lockModelPricingMutation(tx); err != nil {
 				return err
 			}
-			option.Value = v
+		}
+		if len(rebateUpdates) > 0 {
+			// The first statement takes the write barrier on all three dialects,
+			// including SQLite where SELECT FOR UPDATE is unavailable. Keep this
+			// row internal; all rebate writers (including legacy APIs) share it.
+			barrier := Option{Key: rebateConfigBarrierOptionKey, Value: "1"}
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "key"}},
+				DoNothing: true,
+			}).Create(&barrier).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&Option{}).Where(&Option{Key: rebateConfigBarrierOptionKey}).
+				UpdateColumn("value", gorm.Expr("value")).Error; err != nil {
+				return err
+			}
+			current, err := GetRebateSettingTx(tx)
+			if err != nil {
+				return err
+			}
+			if len(rebateRevision) > 0 {
+				snapshot, err := rebateConfigSnapshot(current)
+				if err != nil {
+					return err
+				}
+				if rebateRevision[0] != snapshot.Revision {
+					return ErrRebateConfigConflict
+				}
+			}
+			rebateValue, err = operation_setting.MergeRebateSettingFields(current, rebateUpdates)
+			if err != nil {
+				return err
+			}
+			snapshot, err := rebateConfigSnapshot(rebateValue)
+			if err != nil {
+				return err
+			}
+			// Persist defaults as well, so every reader observes a complete group.
+			for field, value := range snapshot.Fields {
+				persisted["rebate_setting."+field] = value
+			}
+		}
+		keys := make([]string, 0, len(persisted))
+		for key := range persisted {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			option := Option{Key: key, Value: persisted[key]}
+			if strings.HasPrefix(key, "rebate_setting.") {
+				if err := tx.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "key"}},
+					DoUpdates: clause.AssignmentColumns([]string{"value"}),
+				}).Create(&option).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			// Keep the existing persistence semantics for unrelated options.
+			if err := tx.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+				return err
+			}
+			option.Value = persisted[key]
 			if err := tx.Save(&option).Error; err != nil {
 				return err
 			}
@@ -572,18 +809,12 @@ func UpdateOptionsBulk(values map[string]string) error {
 		return err
 	}
 	if len(rebateUpdates) > 0 {
-		if err := operation_setting.UpdateRebateSettingFields(rebateUpdates); err != nil {
+		if err := applyPersistedRebateSetting(rebateValue); err != nil {
 			return err
 		}
 	}
 	for k, v := range values {
 		if strings.HasPrefix(k, "rebate_setting.") {
-			common.OptionMapRWMutex.Lock()
-			if common.OptionMap == nil {
-				common.OptionMap = make(map[string]string)
-			}
-			common.OptionMap[k] = v
-			common.OptionMapRWMutex.Unlock()
 			continue
 		}
 		if err := updateOptionMap(k, v); err != nil {
@@ -664,6 +895,8 @@ func updateOptionMap(key string, value string) (err error) {
 			common.AutomaticDisableChannelEnabled = boolValue
 		case "AutomaticEnableChannelEnabled":
 			common.AutomaticEnableChannelEnabled = boolValue
+		case "QuotaRemindEnabled":
+			common.QuotaRemindEnabled = boolValue
 		case "LogConsumeEnabled":
 			common.LogConsumeEnabled = boolValue
 		case "DisplayInCurrencyEnabled":

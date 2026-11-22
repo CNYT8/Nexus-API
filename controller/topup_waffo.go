@@ -348,6 +348,16 @@ func RequestWaffoPay(c *gin.Context) {
 	}
 
 	orderData := resp.GetData()
+	if orderData.PaymentRequestID != paymentRequestId || orderData.MerchantOrderID != merchantOrderId {
+		logger.LogError(c.Request.Context(), "Waffo 创建响应订单身份不匹配")
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "支付身份不匹配"})
+		return
+	}
+	if err := model.RegisterTopUpCheckout(merchantOrderId, model.PaymentProviderWaffo, orderData.PaymentRequestID); err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo 保存支付身份失败 trade_no=%s error=%q", merchantOrderId, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "保存支付身份失败"})
+		return
+	}
 	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Waffo 充值订单创建成功 user_id=%d trade_no=%s amount=%d money=%.2f pay_method_type=%s pay_method_name=%q", id, merchantOrderId, req.Amount, payMoney, resolvedPayMethodType, resolvedPayMethodName))
 
 	paymentUrl := orderData.FetchRedirectURL()
@@ -380,7 +390,168 @@ type webhookSubscriptionInfo struct {
 	SubscriptionRequest string `json:"subscriptionRequest,omitempty"`
 }
 
-// WaffoWebhook 处理 Waffo 回调通知（支付/退款/订阅）
+const waffoEventChargeback = "CHARGEBACK_NOTIFICATION"
+
+// Waffo's chargeback notification result has the same fields as inquiry data.
+// SDK v1.3.2 does not define this event yet.
+type waffoChargebackResult struct {
+	ChargebackID             string `json:"chargebackId"`
+	OriginalOrderID          string `json:"originalOrderId"`
+	OriginalPaymentRequestID string `json:"originalPaymentRequestId"`
+	MerchantID               string `json:"merchantId"`
+	ChargebackStatus         string `json:"chargebackStatus"`
+	Amount                   string `json:"amount"`
+	Currency                 string `json:"currency"`
+	ChargebackDateTime       string `json:"chargebackDateTime"`
+	LifeCycle                string `json:"lifeCycle"`
+	RelevantChargebackID     string `json:"relevantChargebackId"`
+}
+
+func validWaffoReversalID(id string) bool {
+	return id != "" && len(id) <= 191 && strings.TrimSpace(id) == id
+}
+
+func getWaffoReversalBinding(paymentID string) (*model.TopUpPaymentBinding, error) {
+	if model.DB == nil || !validWaffoReversalID(paymentID) {
+		return nil, model.ErrTopUpPaymentUnbound
+	}
+	key, err := model.NewRebateIdempotencyKey("provider-payment-v1", model.PaymentProviderWaffo, paymentID)
+	if err != nil {
+		return nil, err
+	}
+	var binding model.TopUpPaymentBinding
+	if err := model.DB.Where("payment_key = ?", key).First(&binding).Error; err != nil {
+		return nil, err
+	}
+	return &binding, nil
+}
+
+func waffoReversalPayment(binding *model.TopUpPaymentBinding, paymentID, checkoutID string) (model.VerifiedTopUpReversal, error) {
+	if binding == nil || !validWaffoReversalID(paymentID) || !validWaffoReversalID(checkoutID) ||
+		binding.Provider != model.PaymentProviderWaffo || binding.PaymentID != paymentID || binding.CheckoutID != checkoutID ||
+		binding.PaidMinor <= 0 || binding.CreditedQuota <= 0 || len(binding.Currency) != 3 {
+		return model.VerifiedTopUpReversal{}, model.ErrTopUpReversalConflict
+	}
+	for _, char := range binding.Currency {
+		if char < 'A' || char > 'Z' {
+			return model.VerifiedTopUpReversal{}, model.ErrPaymentCurrencyMismatch
+		}
+	}
+	return model.VerifiedTopUpReversal{
+		Provider: model.PaymentProviderWaffo, PaymentID: paymentID,
+		Currency: binding.Currency, OriginalMinor: binding.PaidMinor,
+	}, nil
+}
+
+func finishWaffoReversal(event model.VerifiedTopUpReversal, eventType, status, amount, occurredAt string) (model.VerifiedTopUpReversal, error) {
+	if !validWaffoReversalID(event.ObjectID) {
+		return model.VerifiedTopUpReversal{}, model.ErrTopUpReversalConflict
+	}
+	minor, err := model.TopUpProviderMinorAmount(amount, waffoCurrencyDecimalPlaces(event.Currency))
+	if err != nil || minor > event.OriginalMinor {
+		return model.VerifiedTopUpReversal{}, model.ErrTopUpReversalConflict
+	}
+	occurred, err := time.Parse(time.RFC3339Nano, occurredAt)
+	if err != nil || occurred.Unix() <= 0 {
+		return model.VerifiedTopUpReversal{}, model.ErrTopUpReversalConflict
+	}
+	event.AmountMinor, event.OccurredAt = minor, occurred.Unix()
+	// There is no official eventId. Scope a stable receipt to payment, object
+	// and status; changed cash/time/group fields must conflict on replay.
+	event.EventID, err = model.NewRebateIdempotencyKey("waffo-reversal-event-v1", eventType, event.PaymentID, event.ObjectID, status)
+	return event, err
+}
+
+func waffoRefundReversal(result *core.RefundNotificationResult, binding *model.TopUpPaymentBinding) (model.VerifiedTopUpReversal, error) {
+	if result == nil || (result.RefundStatus != core.RefundStatusPartiallyRefunded && result.RefundStatus != core.RefundStatusFullyRefunded) {
+		return model.VerifiedTopUpReversal{}, model.ErrTopUpReversalConflict
+	}
+	event, err := waffoReversalPayment(binding, result.AcquiringOrderID, result.OrigPaymentRequestID)
+	if err != nil {
+		return model.VerifiedTopUpReversal{}, err
+	}
+	// refundAmount is one refund in the ORIGINAL order currency. userCurrency,
+	// finalDealAmount and remainingRefundAmount describe different amounts.
+	event.ObjectID, event.Kind, event.Terminal = result.AcquiringRefundOrderID, "refund_item", true
+	return finishWaffoReversal(event, core.EventRefund, result.RefundStatus, result.RefundAmount, result.RefundCompletedAt)
+}
+
+func waffoChargebackReversal(result *waffoChargebackResult, binding *model.TopUpPaymentBinding) (model.VerifiedTopUpReversal, error) {
+	if result == nil || strings.TrimSpace(setting.WaffoMerchantId) == "" || result.MerchantID != strings.TrimSpace(setting.WaffoMerchantId) {
+		return model.VerifiedTopUpReversal{}, model.ErrTopUpReversalConflict
+	}
+	event, err := waffoReversalPayment(binding, result.OriginalOrderID, result.OriginalPaymentRequestID)
+	if err != nil {
+		return model.VerifiedTopUpReversal{}, err
+	}
+	if strings.ToUpper(strings.TrimSpace(result.Currency)) != event.Currency {
+		return model.VerifiedTopUpReversal{}, model.ErrPaymentCurrencyMismatch
+	}
+	event.ObjectID, event.Kind = result.ChargebackID, "dispute"
+	switch result.LifeCycle {
+	case "FIRST_CYCLE":
+		event.GroupID = result.ChargebackID
+	case "SECOND_CYCLE":
+		if !validWaffoReversalID(result.RelevantChargebackID) || result.RelevantChargebackID == result.ChargebackID {
+			return model.VerifiedTopUpReversal{}, model.ErrTopUpReversalConflict
+		}
+		event.GroupID = result.RelevantChargebackID
+	default:
+		return model.VerifiedTopUpReversal{}, model.ErrTopUpReversalConflict
+	}
+	switch result.ChargebackStatus {
+	case "ACTION_REQUIRED", "UNDER_REVIEW", "EVIDENCE_REQUIRED", "SECOND_CYCLE_RESPONSE_REQUIRED", "ESCALATE_TO_2ND_CYCLE":
+		// Escalation keeps the same group's principal; the model takes the max
+		// across its rounds and validates that the root belongs to this payment.
+	case "CASE_WON", "CANCELED", "SETTLED":
+		event.Terminal, event.Released = true, true
+	case "CASE_LOST", "ACCEPTED", "EXPIRED":
+		event.Terminal = true
+	default:
+		return model.VerifiedTopUpReversal{}, model.ErrTopUpReversalConflict
+	}
+	// chargebackDateTime is the official creation time, not an update time.
+	// Terminal outcomes dominate earlier/open deliveries in the model.
+	return finishWaffoReversal(event, waffoEventChargeback, result.ChargebackStatus, result.Amount, result.ChargebackDateTime)
+}
+
+// Called only after the SDK verifies the signature over the original body.
+func waffoReversalFromWebhook(body []byte, eventType string) (model.VerifiedTopUpReversal, error) {
+	switch eventType {
+	case core.EventRefund:
+		var payload core.RefundNotification
+		if err := common.Unmarshal(body, &payload); err != nil {
+			return model.VerifiedTopUpReversal{}, err
+		}
+		if payload.Result == nil {
+			return model.VerifiedTopUpReversal{}, model.ErrTopUpReversalConflict
+		}
+		binding, err := getWaffoReversalBinding(payload.Result.AcquiringOrderID)
+		if err != nil {
+			return model.VerifiedTopUpReversal{}, err
+		}
+		return waffoRefundReversal(payload.Result, binding)
+	case waffoEventChargeback:
+		var payload struct {
+			Result *waffoChargebackResult `json:"result"`
+		}
+		if err := common.Unmarshal(body, &payload); err != nil {
+			return model.VerifiedTopUpReversal{}, err
+		}
+		if payload.Result == nil {
+			return model.VerifiedTopUpReversal{}, model.ErrTopUpReversalConflict
+		}
+		binding, err := getWaffoReversalBinding(payload.Result.OriginalOrderID)
+		if err != nil {
+			return model.VerifiedTopUpReversal{}, err
+		}
+		return waffoChargebackReversal(payload.Result, binding)
+	default:
+		return model.VerifiedTopUpReversal{}, model.ErrTopUpReversalConflict
+	}
+}
+
+// WaffoWebhook 处理 Waffo 回调通知（支付/退款/拒付）
 func WaffoWebhook(c *gin.Context) {
 	webhookPath := c.Request.URL.Path
 	if !isWaffoWebhookEnabled() {
@@ -439,9 +610,20 @@ func WaffoWebhook(c *gin.Context) {
 		}
 		logger.LogInfo(c.Request.Context(), fmt.Sprintf("Waffo webhook 验签并解析成功 event_type=%s merchant_order_id=%s order_status=%s client_ip=%s", event.EventType, payload.Result.MerchantOrderID, payload.Result.OrderStatus, c.ClientIP()))
 		handleWaffoPayment(c, wh, &payload.Result.PaymentNotificationResult)
-	default:
-		logger.LogInfo(c.Request.Context(), fmt.Sprintf("Waffo webhook 忽略事件 event_type=%s client_ip=%s", event.EventType, c.ClientIP()))
+	case core.EventRefund, waffoEventChargeback:
+		reversal, err := waffoReversalFromWebhook(bodyBytes, event.EventType)
+		if err == nil {
+			err = model.ApplyVerifiedTopUpReversal(model.DB, reversal)
+		}
+		if err != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo 退款/拒付处理失败 event_type=%s payload_sha256=%s error=%q", event.EventType, payloadFingerprint, err.Error()))
+			sendWaffoWebhookResponse(c, wh, false, "reversal processing failed")
+			return
+		}
 		sendWaffoWebhookResponse(c, wh, true, "")
+	default:
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Waffo webhook 未知事件 event_type=%s client_ip=%s", event.EventType, c.ClientIP()))
+		sendWaffoWebhookResponse(c, wh, false, "unsupported event")
 	}
 }
 
@@ -466,6 +648,8 @@ func handleWaffoPayment(c *gin.Context, wh *core.WebhookHandler, result *core.Pa
 				!errors.Is(err, model.ErrTopUpNotFound) &&
 				!errors.Is(err, model.ErrTopUpStatusInvalid) {
 				logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo 标记失败订单状态失败 trade_no=%s error=%q", result.MerchantOrderID, err.Error()))
+				sendWaffoWebhookResponse(c, wh, false, "order update failed")
+				return
 			}
 		}
 		sendWaffoWebhookResponse(c, wh, true, "")
@@ -507,7 +691,13 @@ func handleWaffoPayment(c *gin.Context, wh *core.WebhookHandler, result *core.Pa
 	LockOrder(merchantOrderId)
 	defer UnlockOrder(merchantOrderId)
 
-	if err := model.RechargeWaffo(merchantOrderId, c.ClientIP(), confirmation); err != nil {
+	paidMinor, err := model.TopUpProviderMinorAmount(result.OrderAmount, confirmation.DecimalPlaces)
+	if err != nil {
+		sendWaffoWebhookResponse(c, wh, false, "invalid payment amount")
+		return
+	}
+	identity := model.TopUpPaymentIdentity{Provider: model.PaymentProviderWaffo, CheckoutID: result.PaymentRequestID, PaymentID: result.AcquiringOrderID, Currency: callbackCurrency, PaidMinor: paidMinor}
+	if err := model.RechargeWaffo(merchantOrderId, c.ClientIP(), confirmation, identity); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo 充值处理失败 trade_no=%s amount=%s currency=%s client_ip=%s error=%q", merchantOrderId, result.OrderAmount, result.OrderCurrency, c.ClientIP(), err.Error()))
 		sendWaffoWebhookResponse(c, wh, false, err.Error())
 		return
@@ -526,5 +716,9 @@ func sendWaffoWebhookResponse(c *gin.Context, wh *core.WebhookHandler, success b
 		body, sig = wh.BuildFailedResponse(msg)
 	}
 	c.Header("X-SIGNATURE", sig)
-	c.Data(http.StatusOK, "application/json", []byte(body))
+	status := http.StatusOK
+	if !success {
+		status = http.StatusInternalServerError
+	}
+	c.Data(status, "application/json", []byte(body))
 }

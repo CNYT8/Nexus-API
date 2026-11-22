@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -63,7 +63,7 @@ import {
 } from '@/components/ui/table'
 import { SettingsSwitchField } from '../components/settings-form-layout'
 import { SettingsSection } from '../components/settings-section'
-import { useUpdateOption } from '../hooks/use-update-option'
+import { useSettingsList } from '../hooks/use-settings-list'
 
 type UptimeKumaGroup = {
   id: number
@@ -99,11 +99,28 @@ type UptimeKumaFormValues = z.infer<ReturnType<typeof createUptimeKumaSchema>>
 
 export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
   const { t } = useTranslation()
-  const updateOption = useUpdateOption()
   const uptimeKumaSchema = createUptimeKumaSchema(t)
-  const [groups, setGroups] = useState<UptimeKumaGroup[]>([])
-  const [isEnabled, setIsEnabled] = useState(enabled)
-  const [hasChanges, setHasChanges] = useState(false)
+  const {
+    items: groups,
+    setItems: setGroups,
+    isEnabled,
+    hasChanges,
+    isPending,
+    parseError,
+    save: handleSaveAll,
+    toggleEnabled: handleToggleEnabled,
+  } = useSettingsList<UptimeKumaGroup>({
+    enabled,
+    data,
+    dataKey: 'console_setting.uptime_kuma_groups',
+    enabledKey: 'console_setting.uptime_kuma_enabled',
+    schema: z.object({
+      id: z.number().int().positive(),
+      categoryName: z.string(),
+      url: z.string(),
+      slug: z.string(),
+    }),
+  })
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [showDialog, setShowDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
@@ -118,39 +135,6 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
       slug: '',
     },
   })
-
-  useEffect(() => {
-    try {
-      const parsed = JSON.parse(data || '[]')
-      if (Array.isArray(parsed)) {
-        setGroups(
-          parsed.map((item, idx) => ({
-            ...item,
-            id: item.id || idx + 1,
-          }))
-        )
-      }
-    } catch {
-      setGroups([])
-    }
-  }, [data])
-
-  useEffect(() => {
-    setIsEnabled(enabled)
-  }, [enabled])
-
-  const handleToggleEnabled = async (checked: boolean) => {
-    try {
-      await updateOption.mutateAsync({
-        key: 'console_setting.uptime_kuma_enabled',
-        value: checked,
-      })
-      setIsEnabled(checked)
-      toast.success(t('Setting saved'))
-    } catch {
-      toast.error(t('Failed to update setting'))
-    }
-  }
 
   const handleAdd = () => {
     setEditingGroup(null)
@@ -188,14 +172,13 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
   }
 
   const confirmDelete = () => {
+    if (parseError) return
     if (deleteTarget === 'single' && editingGroup) {
       setGroups((prev) => prev.filter((item) => item.id !== editingGroup.id))
-      setHasChanges(true)
       toast.success(t('Group deleted. Click "Save Settings" to apply.'))
     } else if (deleteTarget === 'batch') {
       setGroups((prev) => prev.filter((item) => !selectedIds.includes(item.id)))
       setSelectedIds([])
-      setHasChanges(true)
       toast.success(
         t('{{count}} groups deleted. Click "Save Settings" to apply.', {
           count: selectedIds.length,
@@ -207,6 +190,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
   }
 
   const handleSubmitForm = (values: UptimeKumaFormValues) => {
+    if (parseError) return
     if (editingGroup) {
       setGroups((prev) =>
         prev.map((item) =>
@@ -219,21 +203,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
       setGroups((prev) => [...prev, { id: newId, ...values }])
       toast.success(t('Group added. Click "Save Settings" to apply.'))
     }
-    setHasChanges(true)
     setShowDialog(false)
-  }
-
-  const handleSaveAll = async () => {
-    try {
-      await updateOption.mutateAsync({
-        key: 'console_setting.uptime_kuma_groups',
-        value: JSON.stringify(groups),
-      })
-      setHasChanges(false)
-      toast.success(t('Uptime Kuma groups saved successfully'))
-    } catch {
-      toast.error(t('Failed to save Uptime Kuma groups'))
-    }
   }
 
   const toggleSelectAll = (checked: boolean) => {
@@ -248,10 +218,15 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
 
   return (
     <SettingsSection title={t('Uptime Kuma')}>
+      {parseError && (
+        <p role='alert' className='text-destructive break-words text-sm'>
+          {t('Invalid settings list. Fix the source data and reload before editing.')} {parseError}
+        </p>
+      )}
       <div className='space-y-4'>
         <div className='flex flex-wrap items-center justify-between gap-2'>
           <div className='flex flex-wrap items-center gap-2'>
-            <Button onClick={handleAdd} size='sm'>
+            <Button onClick={handleAdd} size='sm' disabled={!!parseError}>
               <Plus className='mr-2 h-4 w-4' />
               {t('Add Group')}
             </Button>
@@ -259,7 +234,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
               onClick={handleBatchDelete}
               size='sm'
               variant='destructive'
-              disabled={selectedIds.length === 0}
+              disabled={!!parseError || selectedIds.length === 0}
             >
               <Trash2 className='mr-2 h-4 w-4' />
               {t('Delete (')}
@@ -269,15 +244,16 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
               onClick={handleSaveAll}
               size='sm'
               variant='secondary'
-              disabled={!hasChanges || updateOption.isPending}
+              disabled={!!parseError || !hasChanges || isPending}
             >
               <Save className='mr-2 h-4 w-4' />
-              {updateOption.isPending ? t('Saving...') : t('Save Settings')}
+              {isPending ? t('Saving...') : t('Save Settings')}
             </Button>
           </div>
           <SettingsSwitchField
             checked={isEnabled}
             onCheckedChange={handleToggleEnabled}
+            disabled={isPending}
             label={t('Enabled')}
             className='border-b-0 py-0'
           />

@@ -28,7 +28,7 @@ import zhTWTranslation from './locales/zh-TW.json';
 import ruTranslation from './locales/ru.json';
 import jaTranslation from './locales/ja.json';
 import viTranslation from './locales/vi.json';
-import { supportedLanguages } from './language';
+import { normalizeLanguage, supportedLanguages } from './language';
 
 i18n
   .use(LanguageDetector)
@@ -47,6 +47,11 @@ i18n
     },
     fallbackLng: 'zh-CN',
     nsSeparator: false,
+    detection: {
+      order: ['localStorage', 'navigator'],
+      caches: ['localStorage'],
+      convertDetectedLanguage: normalizeLanguage,
+    },
     interpolation: {
       escapeValue: false,
     },

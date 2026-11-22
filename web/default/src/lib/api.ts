@@ -17,9 +17,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import axios, { type AxiosRequestConfig } from 'axios'
-import { t } from 'i18next'
-import { toast } from 'sonner'
+import { normalizeInterfaceLanguage } from '@/i18n/languages'
+import i18next, { t } from 'i18next'
 import { useAuthStore } from '@/stores/auth-store'
+import {
+  getServerMessage,
+  isServerErrorCancelled,
+  markServerErrorNotified,
+  notifyServerError,
+  safeServerErrorMessage,
+} from '@/lib/server-error-message'
 import {
   dispatchWebRiskVerificationRequired,
   isWebRiskVerificationRequired,
@@ -65,7 +72,13 @@ api.get = ((url: string, config: ApiRequestConfig = {}) => {
   if (disableDuplicate) return originalGet(url, config)
 
   const params = config.params ? JSON.stringify(config.params) : '{}'
-  const key = `${url}?${params}`
+  const language =
+    config.headers instanceof axios.AxiosHeaders
+      ? config.headers.get('Accept-Language') || getRequestLanguage()
+      : Object.entries(config.headers || {}).find(
+          ([key]) => key.toLowerCase() === 'accept-language'
+        )?.[1] || getRequestLanguage()
+  const key = `${getUserId() || ''}|${language}|${Boolean(config.skipBusinessError)}|${Boolean(config.skipErrorHandler)}|${url}?${params}`
 
   // Return existing in-flight request if available
   if (inFlightGet.has(key)) return inFlightGet.get(key)!
@@ -84,6 +97,10 @@ api.get = ((url: string, config: ApiRequestConfig = {}) => {
 api.interceptors.response.use(
   (response) => {
     const skipBusiness = response.config.skipBusinessError
+    const message = getServerMessage(response.data)
+    if (response.data && typeof response.data === 'object' && message) {
+      response.data.message = message
+    }
 
     // Unified business response format: { success, message, data }
     if (
@@ -93,18 +110,18 @@ api.interceptors.response.use(
       typeof response.data.success === 'boolean'
     ) {
       if (!response.data.success) {
-        // Show error toast for business failures
-        const msg = response.data.message || t('Request failed')
-        toast.error(msg)
+        notifyServerError(response.data)
       }
     }
     return response
   },
   (error) => {
+    if (isServerErrorCancelled(error)) return Promise.reject(error)
     if (isWebRiskVerificationRequired(error)) {
       dispatchWebRiskVerificationRequired(
         error?.response?.data?.data?.turnstile_site_key || ''
       )
+      markServerErrorNotified(error)
       return Promise.reject(error)
     }
     const skip = error?.config?.skipErrorHandler
@@ -117,15 +134,10 @@ api.interceptors.response.use(
         /* empty */
       }
 
-      if (!skip) {
-        toast.error(t('Session expired!'))
-      }
-    } else if (!skip) {
-      // Other errors: show error message from response or default
-      const msg =
-        error?.response?.data?.message || error?.message || t('Request failed')
-      toast.error(msg)
+      error.message = t('Session expired!')
+      error[safeServerErrorMessage] = true
     }
+    if (!skip) notifyServerError(error)
     return Promise.reject(error)
   }
 )
@@ -151,9 +163,17 @@ function getUserId(): string | null {
 /**
  * Get common request headers (for both axios and SSE requests)
  */
+function getRequestLanguage(): string {
+  const language = normalizeInterfaceLanguage(
+    i18next.resolvedLanguage || i18next.language
+  )
+  return language === 'zh' ? 'zh-CN' : language
+}
+
 export function getCommonHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'Accept-Language': getRequestLanguage(),
   }
 
   const uid = getUserId()
@@ -170,6 +190,9 @@ export function getCommonHeaders(): Record<string, string> {
 
 // Attach user ID header for all requests
 api.interceptors.request.use((config) => {
+  if (!config.headers.has('Accept-Language')) {
+    config.headers.set('Accept-Language', getRequestLanguage())
+  }
   const uid = getUserId()
   if (uid) {
     // Custom header for user identification

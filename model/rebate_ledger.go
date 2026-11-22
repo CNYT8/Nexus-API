@@ -34,17 +34,19 @@ func AddWalletCreditLotTx(tx *gorm.DB, lot WalletCreditLot) (bool, error) {
 	if err := lot.BeforeCreate(tx); err != nil {
 		return false, err
 	}
-	user, err := walletLockUserTx(tx, lot.UserID)
-	if err != nil {
-		return false, err
-	}
-
-	initialized, err := walletCreditBaselineState(tx)
+	// Use the gate's current state before acquiring the user lock. A plain
+	// read can retain a pre-initialization MySQL REPEATABLE READ snapshot.
+	// Callers already holding user locks must have entered through the gate.
+	initialized, err := LockWalletCreditBaselineTx(tx)
 	if err != nil {
 		return false, err
 	}
 	if !initialized {
 		return false, errors.New("wallet credit baseline is not initialized")
+	}
+	user, err := walletLockUserTx(tx, lot.UserID)
+	if err != nil {
+		return false, err
 	}
 
 	// Check under the user lock, not INSERT ... DO NOTHING RowsAffected:
@@ -238,6 +240,9 @@ func FinalizeWalletConsumptionTx(tx *gorm.DB, finalSettlementKey string, userID 
 	if err != nil {
 		return nil, err
 	}
+	if err := refreshPendingSourceReversalsTx(tx, userID); err != nil {
+		return nil, err
+	}
 	paidInviterID := 0
 	if rebateRecord != nil && rebateRecord.Status == RebateStatusPaid && rebateRecord.InviterID > 0 {
 		paidInviterID = rebateRecord.InviterID
@@ -274,15 +279,20 @@ func allocateWalletLotsTx(tx *gorm.DB, settlementKey string, userID int, walletQ
 		own[h.LotID] = h.QuotaHeld
 	}
 
+	pending, _, err := walletPendingReversalQuotasTx(tx, userID)
+	if err != nil {
+		return 0, 0, 0, err
+	}
 	// Preserve non-eligible-first, created_at, id order; this is not global FIFO.
-	// Only this reservation's holds plus unheld quota may be consumed.
+	// Previously acquired holds can finish; quarantined free quota cannot fund
+	// new use. Any actual overrun remains ordinary unallocated consumption debt.
 	remaining := walletQuota
 	var allocated, eligibleQuota, eligibleMoney int64
 	for _, lot := range lots {
 		if remaining == 0 {
 			break
 		}
-		consume := lot.QuotaRemaining - held[lot.ID] + own[lot.ID]
+		consume := max(int64(0), lot.QuotaRemaining-held[lot.ID]-pending[lot.ID]) + own[lot.ID]
 		if consume <= 0 {
 			continue
 		}
@@ -383,8 +393,9 @@ type walletBaselineUser struct {
 // predates source-attributed wallet accounting as non-eligible legacy lots.
 // Negative balances become explicit non-eligible debt, only in this offline
 // initialization. No request path automatically reconstructs lots from balances.
-// The unique marker is locked inside the same transaction as the complete
-// backfill, making competing initializers serialize across database nodes.
+// The baseline gate is held inside the same transaction as the complete
+// backfill. Compatible writers and legacy reservation registration share it;
+// open legacy reservations prevent activation even when their debit is zero.
 // Wallet writes from old application versions must be stopped during rollout.
 func InitializeWalletCreditBaseline(db *gorm.DB) error {
 	if db == nil {
@@ -398,6 +409,15 @@ func InitializeWalletCreditBaseline(db *gorm.DB) error {
 	ownerToken := "running:" + hex.EncodeToString(nonceBytes[:])
 
 	return db.Transaction(func(tx *gorm.DB) error {
+		// Acquire the barrier before any snapshot read, so MySQL REPEATABLE
+		// READ cannot miss a user committed while this initializer waited.
+		active, err := lockWalletCreditBaselineTx(tx, false)
+		if err != nil || active {
+			return err
+		}
+		if err := rejectOpenLegacyWalletReservationsTx(tx); err != nil {
+			return err
+		}
 		marker := RebateSystemState{
 			Key:       walletCreditBaselineStateKey,
 			Value:     ownerToken,
@@ -439,9 +459,14 @@ func InitializeWalletCreditBaseline(db *gorm.DB) error {
 			lots := make([]WalletCreditLot, 0, len(users))
 			createdAt := time.Now().UTC()
 			for _, user := range users {
-				locked, err := walletLockUserTx(tx, user.ID)
-				if err != nil {
-					return err
+				// This initializer already owns the baseline barrier and running
+				// marker. The ordinary wallet lock would re-enter the gate and
+				// correctly reject that incomplete marker. Lock the user directly;
+				// SQLite already holds its write lock from acquiring the barrier.
+				var locked User
+				if err := lockForUpdate(tx).Select("id", "COALESCE(quota, 0) AS quota").
+					Where("id = ?", user.ID).First(&locked).Error; err != nil {
+					return fmt.Errorf("lock wallet baseline user %d: %w", user.ID, err)
 				}
 				user.Quota = locked.Quota
 				if user.Quota == 0 {

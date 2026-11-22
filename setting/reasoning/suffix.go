@@ -10,7 +10,7 @@ var EffortSuffixes = []string{"-max", "-xhigh", "-high", "-medium", "-low", "-mi
 
 var OpenAIEffortSuffixes = []string{"-high", "-minimal", "-low", "-medium", "-none", "-xhigh"}
 
-var DeepSeekV4EffortSuffixes = []string{"-none", "-max"}
+var DeepSeekV4EffortSuffixes = []string{"-none", "-low", "-max"}
 
 // TrimEffortSuffix -> modelName level(low) exists
 func TrimEffortSuffix(modelName string) (string, string, bool) {
@@ -43,8 +43,8 @@ func ParseDeepSeekV4ThinkingSuffix(modelName string) (baseModel string, thinking
 	switch suffix {
 	case "none":
 		return baseModel, "disabled", "", true
-	case "max":
-		return baseModel, "enabled", "max", true
+	case "low", "max":
+		return baseModel, "enabled", suffix, true
 	default:
 		return modelName, "", "", false
 	}

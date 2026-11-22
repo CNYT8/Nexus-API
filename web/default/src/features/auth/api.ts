@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+import { preparePasswordLogin } from './lib/password-encryption'
+import { rememberOAuthReturn } from './lib/oauth-return-target'
 import type {
   LoginPayload,
   LoginResponse,
@@ -37,11 +39,12 @@ import type {
 // User login with username and password
 export async function login(payload: LoginPayload) {
   const turnstile = payload.turnstile ?? ''
+  const passwordFields = await preparePasswordLogin(payload.password)
   const res = await api.post<LoginResponse>(
     `/api/user/login?turnstile=${turnstile}`,
     {
       username: payload.username,
-      password: payload.password,
+      ...passwordFields,
     }
   )
   return res.data
@@ -89,13 +92,37 @@ export async function getOAuthState(): Promise<string> {
   const aff =
     typeof window !== 'undefined' ? (localStorage.getItem('aff') ?? '') : ''
   const res = await api.get('/api/oauth/state', { params: { aff } })
-  if (res.data?.success) return res.data.data
+  if (res.data?.success && typeof res.data.data === 'string') {
+    rememberOAuthReturn(res.data.data)
+    return res.data.data
+  }
   return ''
 }
 
 // WeChat login by authorization code
 export async function wechatLoginByCode(code: string): Promise<ApiResponse> {
   const res = await api.get('/api/oauth/wechat', { params: { code } })
+  return res.data
+}
+
+export interface TelegramAuthorization {
+  id: number
+  auth_date: number
+  hash: string
+  first_name: string
+  last_name?: string
+  username?: string
+  photo_url?: string
+}
+
+export async function telegramLogin(
+  authorization: TelegramAuthorization,
+  signal: AbortSignal
+): Promise<LoginResponse> {
+  const res = await api.get<LoginResponse>('/api/oauth/telegram/login', {
+    params: authorization,
+    signal,
+  })
   return res.data
 }
 

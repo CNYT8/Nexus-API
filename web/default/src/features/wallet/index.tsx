@@ -18,6 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+import { useAuthStore } from '@/stores/auth-store'
+import { calculateWaffoAmount, isApiSuccess } from './api'
 import { getSelf } from '@/lib/api'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
@@ -75,6 +78,18 @@ export function Wallet(props: WalletProps) {
   const [selectedCreemProduct, setSelectedCreemProduct] =
     useState<CreemProduct | null>(null)
   const [showSubscriptionPanel, setShowSubscriptionPanel] = useState(true)
+  const [quote, setWaffoQuote] = useState<{
+    accountId: number | undefined
+    amount: number
+    price: number
+    index: number
+    method: PaymentMethod
+    discount: number
+  } | null>(null)
+  const quoteRequest = useRef<AbortController | null>(null)
+  const accountId = useAuthStore((state) => state.auth.user?.id)
+  const waffoQuote = quote?.accountId === accountId ? quote : null
+  useEffect(() => () => { quoteRequest.current?.abort() }, [accountId])
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
@@ -101,7 +116,7 @@ export function Wallet(props: WalletProps) {
   } = useAffiliate()
   const { redeeming, redeemCode } = useRedemption()
   const { processing: creemProcessing, processCreemPayment } = useCreemPayment()
-  const { processWaffoPayment } = useWaffoPayment()
+  const { processing: waffoProcessing, processWaffoPayment } = useWaffoPayment()
   const { processing: pancakeProcessing, processWaffoPancakePayment } =
     useWaffoPancakePayment()
 
@@ -243,13 +258,27 @@ export function Wallet(props: WalletProps) {
   }
 
   const handleWaffoMethodSelect = async (_method: unknown, index: number) => {
-    const loadingKey = `waffo-${index}`
-    setPaymentLoading(loadingKey)
-
+    const method = topupInfo?.waffo_pay_methods?.[index]
+    const amount = Math.floor(topupAmount)
+    if (!method || !Number.isFinite(amount) || amount < (topupInfo?.waffo_min_topup || 1)) return
+    quoteRequest.current?.abort()
+    const request = new AbortController()
+    quoteRequest.current = request
+    setPaymentLoading(`waffo-${index}`)
+    setWaffoQuote(null)
     try {
-      await processWaffoPayment(topupAmount, index)
+      const response = await calculateWaffoAmount({ amount }, request.signal)
+      if (request.signal.aborted || accountId !== useAuthStore.getState().auth.user?.id) return
+      const price = Number(response.data)
+      if (!isApiSuccess(response) || !Number.isFinite(price) || price <= 0) {
+        toast.error(response.message === 'success' ? t('获取金额失败') : response.message || t('获取金额失败'))
+        return
+      }
+      setWaffoQuote({ accountId, amount, price, index, method: { ...method, type: `waffo:${index}` }, discount: topupInfo?.discount?.[amount] || DEFAULT_DISCOUNT_RATE })
+    } catch {
+      if (!request.signal.aborted) toast.error(t('获取金额失败'))
     } finally {
-      setPaymentLoading(null)
+      if (quoteRequest.current === request) setPaymentLoading(null)
     }
   }
 
@@ -346,6 +375,22 @@ export function Wallet(props: WalletProps) {
         calculating={calculating}
         processing={processing || pancakeProcessing}
         discountRate={getDiscountRate()}
+        usdExchangeRate={effectiveUsdExchangeRate}
+      />
+
+      <PaymentConfirmDialog
+        open={waffoQuote !== null}
+        onOpenChange={(open) => { if (!open && !waffoProcessing) setWaffoQuote(null) }}
+        onConfirm={async () => {
+          if (!waffoQuote || waffoProcessing) return
+          if (await processWaffoPayment(waffoQuote.amount, waffoQuote.index)) setWaffoQuote(null)
+        }}
+        topupAmount={waffoQuote?.amount ?? 0}
+        paymentAmount={waffoQuote?.price ?? 0}
+        paymentMethod={waffoQuote?.method}
+        calculating={false}
+        processing={waffoProcessing}
+        discountRate={waffoQuote?.discount}
         usdExchangeRate={effectiveUsdExchangeRate}
       />
 

@@ -138,6 +138,10 @@ export function SubscriptionsMutateDrawer({
 
   const durationUnit = form.watch('duration_unit')
   const resetPeriod = form.watch('quota_reset_period')
+  const downgradeGroup = form.watch('downgrade_group')
+  const downgradeGroupOptions = Array.from(
+    new Set([...groupOptions, downgradeGroup].filter((g): g is string => !!g))
+  )
   // Gate "+ Create on Pancake" on the same checks the mint handler runs.
   const watchedTitle = form.watch('title')
   const watchedPrice = form.watch('price_amount')
@@ -405,6 +409,56 @@ export function SubscriptionsMutateDrawer({
 
                 <FormField
                   control={form.control}
+                  name='downgrade_group'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Downgrade Group')}</FormLabel>
+                      <Select
+                        items={[
+                          {
+                            value: '__none__',
+                            label: t('Downgrade to pre-purchase group'),
+                          },
+                          ...downgradeGroupOptions.map((g) => ({
+                            value: g,
+                            label: g,
+                          })),
+                        ]}
+                        onValueChange={(v) =>
+                          field.onChange(v === '__none__' ? '' : v)
+                        }
+                        value={field.value || '__none__'}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent alignItemWithTrigger={false}>
+                          <SelectGroup>
+                            <SelectItem value='__none__'>
+                              {t('Downgrade to pre-purchase group')}
+                            </SelectItem>
+                            {downgradeGroupOptions.map((g) => (
+                              <SelectItem key={g} value={g}>
+                                {g}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        {t(
+                          'An explicit group applies after expiry, cancellation, or deletion even without an upgrade group. Other active upgrade plans take priority. Without a target, restore the previous group only if the current group still matches this plan.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
                   name='max_purchase_per_user'
                   render={({ field }) => (
                     <FormItem>
@@ -475,6 +529,31 @@ export function SubscriptionsMutateDrawer({
                       <FormLabel className='!mt-0'>
                         {t('Allow balance redemption')}
                       </FormLabel>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='allow_wallet_overflow'
+                  render={({ field }) => (
+                    <FormItem className={sideDrawerSwitchItemClassName()}>
+                      <div className='space-y-1'>
+                        <FormLabel className='!mt-0'>
+                          {t('Allow wallet balance after quota used up')}
+                        </FormLabel>
+                        <FormDescription>
+                          {t(
+                            'When disabled, requests that exceed the subscription quota will not fall back to the wallet. Policy changes apply to newly issued subscriptions.'
+                          )}
+                        </FormDescription>
+                      </div>
                       <FormControl>
                         <Switch
                           checked={field.value}

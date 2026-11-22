@@ -96,12 +96,13 @@ export function QuotaSettingsSection({
       >,
       defaultValues,
       onSubmit: async (_data, changedFields) => {
+        const updates: Array<{ key: string; value: string | number | boolean }> = []
         for (const [key, value] of Object.entries(changedFields)) {
-          await updateOption.mutateAsync({
-            key,
-            value: value as string | number | boolean,
-          })
+          if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+            updates.push({ key, value })
+          }
         }
+        await updateOption.saveOptions(updates)
       },
     })
 

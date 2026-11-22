@@ -16,8 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState } from 'react';
-import { API, showError, showSuccess } from '../../../../helpers';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { showError, showSuccess } from '../../../../helpers';
+import { optionValuesEqual, reconcileModelDrafts, reconcileOptionDrafts, saveOptionBatch } from './optionSave';
 import {
   combineBillingExpr,
   splitBillingExprAndRequestRules,
@@ -122,22 +123,10 @@ const normalizeCompletionRatioMeta = (rawMeta) => {
 };
 
 const buildModelState = (name, sourceMaps) => {
-  const billingMode = sourceMaps.ModelBillingMode?.[name];
-  if (billingMode === 'tiered_expr') {
-    const fullBillingExpr = sourceMaps.ModelBillingExpr?.[name] || '';
-    const { billingExpr, requestRuleExpr } =
-      splitBillingExprAndRequestRules(fullBillingExpr);
-    return {
-      ...EMPTY_MODEL,
-      name,
-      billingMode: 'tiered_expr',
-      billingExpr,
-      requestRuleExpr,
-      rawRatios: { ...EMPTY_MODEL.rawRatios },
-      hasConflict: false,
-    };
-  }
-
+  const isTiered = sourceMaps.ModelBillingMode?.[name] === 'tiered_expr';
+  const { billingExpr, requestRuleExpr } = isTiered
+    ? splitBillingExprAndRequestRules(sourceMaps.ModelBillingExpr?.[name] || '')
+    : { billingExpr: '', requestRuleExpr: '' };
   const modelRatio = toNumericString(sourceMaps.ModelRatio[name]);
   const completionRatio = toNumericString(sourceMaps.CompletionRatio[name]);
   const completionRatioMeta = normalizeCompletionRatioMeta(
@@ -161,7 +150,9 @@ const buildModelState = (name, sourceMaps) => {
   return {
     ...EMPTY_MODEL,
     name,
-    billingMode: hasValue(fixedPrice) ? 'per-request' : 'per-token',
+    billingMode: isTiered ? 'tiered_expr' : hasValue(fixedPrice) ? 'per-request' : 'per-token',
+    billingExpr,
+    requestRuleExpr,
     fixedPrice,
     inputPrice,
     completionRatioLocked: completionRatioMeta.locked,
@@ -199,7 +190,6 @@ const buildModelState = (name, sourceMaps) => {
       toNumberOrNull(audioInputPrice) !== null && hasValue(audioCompletionRatio)
         ? formatNumber(Number(audioInputPrice) * Number(audioCompletionRatio))
         : '',
-    requestRuleExpr: '',
     rawRatios: {
       modelRatio,
       completionRatio,
@@ -210,7 +200,7 @@ const buildModelState = (name, sourceMaps) => {
       audioCompletionRatio,
     },
     hasConflict:
-      hasValue(fixedPrice) &&
+      !isTiered && hasValue(fixedPrice) &&
       [
         modelRatio,
         completionRatio,
@@ -346,11 +336,11 @@ const serializeModel = (model, t) => {
     AudioCompletionRatio: null,
   };
 
-  if (model.billingMode === 'per-request') {
+  if (model.billingMode === 'per-request' || model.billingMode === 'tiered_expr') {
     if (hasValue(model.fixedPrice)) {
       result.ModelPrice = toNormalizedNumber(model.fixedPrice);
     }
-    return result;
+    if (model.billingMode === 'per-request') return result;
   }
 
   const inputPrice = toNumberOrNull(model.inputPrice);
@@ -618,6 +608,29 @@ export const buildPreviewRows = (model, t) => {
   return rows;
 };
 
+const modelsFromOptions = (options, candidateModelNames) => {
+  const sourceMaps = {
+    ModelPrice: parseOptionJSON(options.ModelPrice),
+    ModelRatio: parseOptionJSON(options.ModelRatio),
+    CompletionRatio: parseOptionJSON(options.CompletionRatio),
+    CompletionRatioMeta: parseOptionJSON(options.CompletionRatioMeta),
+    CacheRatio: parseOptionJSON(options.CacheRatio),
+    CreateCacheRatio: parseOptionJSON(options.CreateCacheRatio),
+    ImageRatio: parseOptionJSON(options.ImageRatio),
+    AudioRatio: parseOptionJSON(options.AudioRatio),
+    AudioCompletionRatio: parseOptionJSON(options.AudioCompletionRatio),
+    ModelBillingMode: parseOptionJSON(options['billing_setting.billing_mode']),
+    ModelBillingExpr: parseOptionJSON(options['billing_setting.billing_expr']),
+  };
+  const names = new Set([
+    ...candidateModelNames,
+    ...Object.values(sourceMaps).flatMap((values) => Object.keys(values)),
+  ]);
+  return Array.from(names)
+    .map((name) => buildModelState(name, sourceMaps))
+    .sort((a, b) => a.name.localeCompare(b.name));
+};
+
 export function useModelPricingEditorState({
   options,
   refresh,
@@ -634,66 +647,67 @@ export function useModelPricingEditorState({
   const [loading, setLoading] = useState(false);
   const [conflictOnly, setConflictOnly] = useState(false);
   const [optionalFieldToggles, setOptionalFieldToggles] = useState({});
+  const baselineModelsRef = useRef([]);
+  const submittedModelsRef = useRef(null);
+  const modelsRef = useRef(models);
+  modelsRef.current = models;
 
   useEffect(() => {
-    const sourceMaps = {
-      ModelPrice: parseOptionJSON(options.ModelPrice),
-      ModelRatio: parseOptionJSON(options.ModelRatio),
-      CompletionRatio: parseOptionJSON(options.CompletionRatio),
-      CompletionRatioMeta: parseOptionJSON(options.CompletionRatioMeta),
-      CacheRatio: parseOptionJSON(options.CacheRatio),
-      CreateCacheRatio: parseOptionJSON(options.CreateCacheRatio),
-      ImageRatio: parseOptionJSON(options.ImageRatio),
-      AudioRatio: parseOptionJSON(options.AudioRatio),
-      AudioCompletionRatio: parseOptionJSON(options.AudioCompletionRatio),
-      ModelBillingMode: parseOptionJSON(options['billing_setting.billing_mode']),
-      ModelBillingExpr: parseOptionJSON(options['billing_setting.billing_expr']),
-    };
-
-    const names = new Set([
-      ...candidateModelNames,
-      ...Object.keys(sourceMaps.ModelPrice),
-      ...Object.keys(sourceMaps.ModelRatio),
-      ...Object.keys(sourceMaps.CompletionRatio),
-      ...Object.keys(sourceMaps.CompletionRatioMeta),
-      ...Object.keys(sourceMaps.CacheRatio),
-      ...Object.keys(sourceMaps.CreateCacheRatio),
-      ...Object.keys(sourceMaps.ImageRatio),
-      ...Object.keys(sourceMaps.AudioRatio),
-      ...Object.keys(sourceMaps.AudioCompletionRatio),
-      ...Object.keys(sourceMaps.ModelBillingMode),
-      ...Object.keys(sourceMaps.ModelBillingExpr),
-    ]);
-
-    const nextModels = Array.from(names)
-      .map((name) => buildModelState(name, sourceMaps))
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    setModels(nextModels);
-    setInitialVisibleModelNames(
-      filterMode === 'unset'
-        ? nextModels
-            .filter((model) => isBasePricingUnset(model))
-            .map((model) => model.name)
-        : nextModels.map((model) => model.name),
+    if (loading) return;
+    const submission = submittedModelsRef.current;
+    if (submission?.options === options) return;
+    const nextModels = modelsFromOptions(options, candidateModelNames);
+    const previousModels = baselineModelsRef.current;
+    let draftModels = nextModels;
+    if (submission) {
+      const previousValues = Object.fromEntries(
+        Object.keys(submission.values).map((key) => [key, submission.options[key] || '{}']),
+      );
+      const confirmedValues = Object.fromEntries(
+        Object.keys(submission.values).map((key) => [key, options[key] || '{}']),
+      );
+      const draftValues = reconcileOptionDrafts(
+        submission.values, previousValues, confirmedValues,
+        submission.values, submission.successfulKeys,
+      );
+      draftModels = modelsFromOptions(
+        { ...options, ...draftValues },
+        [...candidateModelNames, ...submission.models.map((model) => model.name)],
+      );
+    }
+    baselineModelsRef.current = nextModels;
+    submittedModelsRef.current = null;
+    const reconciledModels = reconcileModelDrafts(
+      modelsRef.current, previousModels, draftModels, submission?.models,
     );
-    setOptionalFieldToggles(
-      nextModels.reduce((acc, model) => {
-        acc[model.name] = buildOptionalFieldToggles(model);
+    setModels(reconciledModels);
+    const visibleNames = reconciledModels.filter((model) => {
+      const baseline = nextModels.find((item) => item.name === model.name);
+      return filterMode !== 'unset' || isBasePricingUnset(model) ||
+        !baseline || !optionValuesEqual(model, baseline);
+    }).map((model) => model.name);
+    setInitialVisibleModelNames(visibleNames);
+    setOptionalFieldToggles((current) =>
+      reconciledModels.reduce((acc, model) => {
+        const previousModel = previousModels.find((item) => item.name === model.name);
+        const previousToggles = submission?.toggles[model.name] ||
+          (previousModel && buildOptionalFieldToggles(previousModel));
+        const nextToggles = buildOptionalFieldToggles(model);
+        acc[model.name] = Object.fromEntries(
+          Object.entries(nextToggles).map(([key, value]) => [
+            key,
+            current[model.name] && current[model.name][key] !== previousToggles?.[key]
+              ? current[model.name][key]
+              : value,
+          ]),
+        );
         return acc;
-      }, {}),
+      }, { ...current }),
     );
     setSelectedModelName((previous) => {
-      if (previous && nextModels.some((model) => model.name === previous)) {
-        return previous;
-      }
-      const nextVisibleModels =
-        filterMode === 'unset'
-          ? nextModels.filter((model) => isBasePricingUnset(model))
-          : nextModels;
-      return nextVisibleModels[0]?.name || '';
+      return visibleNames.includes(previous) ? previous : visibleNames[0] || '';
     });
-  }, [candidateModelNames, filterMode, options]);
+  }, [candidateModelNames, filterMode, options, loading]);
 
   const visibleModels = useMemo(() => {
     return filterMode === 'unset'
@@ -1021,6 +1035,7 @@ export function useModelPricingEditorState({
   };
 
   const handleSubmit = async () => {
+    if (loading) return;
     setLoading(true);
     try {
       const output = {
@@ -1069,30 +1084,25 @@ export function useModelPricingEditorState({
         }
       }
 
-      const requestQueue = [
-        ...Object.entries(output).map(([key, value]) =>
-          API.put('/api/option/', {
-            key,
-            value: JSON.stringify(value, null, 2),
-          }),
+      const values = Object.fromEntries(
+        Object.entries({ ...output, ...tieredOutput }).map(
+          ([key, value]) => [key, JSON.stringify(value, null, 2)],
         ),
-        ...Object.entries(tieredOutput).map(([key, value]) =>
-          API.put('/api/option/', {
-            key,
-            value: JSON.stringify(value, null, 2),
-          }),
-        ),
-      ];
-
-      const results = await Promise.all(requestQueue);
-      for (const res of results) {
-        if (!res?.data?.success) {
-          throw new Error(res?.data?.message || t('保存失败，请重试'));
-        }
-      }
-
-      showSuccess(t('保存成功'));
-      await refresh();
+      );
+      const updates = Object.entries(values)
+        .filter(([key, value]) => !optionValuesEqual(value, options[key] || '{}'))
+        .map(([key, value]) => ({ key, value }));
+      if (!updates.length) return;
+      submittedModelsRef.current = {
+        models: structuredClone(models),
+        toggles: structuredClone(optionalFieldToggles),
+        options,
+        values,
+        successfulKeys: [],
+      };
+      await saveOptionBatch(updates, refresh, t, ({ successfulKeys }) => {
+        submittedModelsRef.current.successfulKeys = successfulKeys;
+      });
     } catch (error) {
       console.error('保存失败:', error);
       showError(error.message || t('保存失败，请重试'));

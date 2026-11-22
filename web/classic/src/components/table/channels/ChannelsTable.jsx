@@ -25,6 +25,7 @@ import {
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
 import { getChannelsColumns } from './ChannelsColumnDefs';
+import { useChannelBalanceQuery } from '../../../hooks/channels/useChannelBalanceQuery';
 
 const ChannelsTable = (channelsData) => {
   const {
@@ -44,7 +45,8 @@ const ChannelsTable = (channelsData) => {
     t,
     COLUMN_KEYS,
     // Column functions and data
-    updateChannelBalance,
+    updateChannelBalance: legacyUpdateChannelBalance,
+    updateChannelProperty,
     manageChannel,
     manageTag,
     submitTagEdit,
@@ -64,6 +66,10 @@ const ChannelsTable = (channelsData) => {
     openUpstreamUpdateModal,
     detectChannelUpstreamUpdates,
   } = channelsData;
+
+  const updateChannelBalance = useChannelBalanceQuery({
+    t, updateChannelProperty, updateChannelBalance: legacyUpdateChannelBalance,
+  });
 
   // Get all columns
   const allColumns = useMemo(() => {

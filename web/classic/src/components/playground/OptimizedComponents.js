@@ -39,6 +39,11 @@ export const OptimizedMessageContent = React.memo(
         nextProps.message.isReasoningExpanded &&
       prevProps.isEditing === nextProps.isEditing &&
       prevProps.editValue === nextProps.editValue &&
+      prevProps.onEditSave === nextProps.onEditSave &&
+      prevProps.onEditSaveAndSubmit === nextProps.onEditSaveAndSubmit &&
+      prevProps.onEditCancel === nextProps.onEditCancel &&
+      prevProps.onEditValueChange === nextProps.onEditValueChange &&
+      prevProps.onToggleReasoningExpansion === nextProps.onToggleReasoningExpansion &&
       prevProps.styleState.isMobile === nextProps.styleState.isMobile
     );
   },
@@ -53,7 +58,11 @@ export const OptimizedMessageActions = React.memo(
       prevProps.message.role === nextProps.message.role &&
       prevProps.isAnyMessageGenerating === nextProps.isAnyMessageGenerating &&
       prevProps.isEditing === nextProps.isEditing &&
-      prevProps.onMessageReset === nextProps.onMessageReset
+      prevProps.onMessageReset === nextProps.onMessageReset &&
+      prevProps.onMessageEdit === nextProps.onMessageEdit &&
+      prevProps.onMessageDelete === nextProps.onMessageDelete &&
+      prevProps.onMessageCopy === nextProps.onMessageCopy &&
+      prevProps.onRoleToggle === nextProps.onRoleToggle
     );
   },
 );

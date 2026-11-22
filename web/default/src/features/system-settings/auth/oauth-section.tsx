@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import * as z from 'zod'
 import axios from 'axios'
 import { ExternalLink } from 'lucide-react'
@@ -47,6 +47,7 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import {
   buildOAuthCallbackUrl,
@@ -270,18 +271,7 @@ export function OAuthSection(props: OAuthSectionProps) {
     defaultValues: formDefaults,
   })
 
-  const baselineRef = useRef<FlatOAuthDefaults>(props.defaultValues)
-  const baselineSerializedRef = useRef<string>(
-    JSON.stringify(props.defaultValues)
-  )
-
-  useEffect(() => {
-    const serialized = JSON.stringify(props.defaultValues)
-    if (serialized === baselineSerializedRef.current) return
-    baselineRef.current = props.defaultValues
-    baselineSerializedRef.current = serialized
-    form.reset(buildFormDefaults(props.defaultValues))
-  }, [props.defaultValues, form])
+  const submitForm = useResetForm(form, formDefaults)
 
   const onSubmit = async (values: OAuthFormValues) => {
     let finalValues = values
@@ -312,9 +302,18 @@ export function OAuthSection(props: OAuthSectionProps) {
           },
         }
 
-        form.setValue('oidc.authorization_endpoint', authEndpoint)
-        form.setValue('oidc.token_endpoint', tokenEndpoint)
-        form.setValue('oidc.user_info_endpoint', userInfoEndpoint)
+        // Discovery must not overwrite endpoint edits made while it ran.
+        const endpoints = {
+          authorization_endpoint: authEndpoint,
+          token_endpoint: tokenEndpoint,
+          user_info_endpoint: userInfoEndpoint,
+        }
+        for (const key of Object.keys(endpoints) as Array<keyof typeof endpoints>) {
+          const path = `oidc.${key}` as const
+          if (form.getValues(path) === values.oidc[key]) {
+            form.setValue(path, endpoints[key], { shouldDirty: true })
+          }
+        }
 
         toast.success(t('OIDC configuration fetched successfully'))
       } catch (err) {
@@ -332,27 +331,20 @@ export function OAuthSection(props: OAuthSectionProps) {
     const normalized = normalizeFormValues(finalValues)
     const changedKeys = (
       Object.keys(normalized) as Array<keyof FlatOAuthDefaults>
-    ).filter((key) => normalized[key] !== baselineRef.current[key])
+    ).filter((key) => normalized[key] !== props.defaultValues[key])
 
     if (changedKeys.length === 0) {
       toast.info(t('No changes to save'))
       return
     }
 
-    for (const key of changedKeys) {
-      await updateOption.mutateAsync({
-        key,
-        value: normalized[key],
-      })
-    }
-
-    baselineRef.current = normalized
-    baselineSerializedRef.current = JSON.stringify(normalized)
-    form.reset(buildFormDefaults(normalized))
+    await updateOption.saveOptions(
+      changedKeys.map((key) => ({ key, value: normalized[key] }))
+    )
   }
 
   const handleReset = () => {
-    form.reset(buildFormDefaults(baselineRef.current))
+    form.reset(formDefaults)
     toast.success(t('Form reset to saved values'))
   }
 
@@ -362,9 +354,9 @@ export function OAuthSection(props: OAuthSectionProps) {
 
       <SettingsSection title={t('OAuth Integrations')}>
         <Form {...form}>
-          <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+          <SettingsForm onSubmit={submitForm(onSubmit)}>
             <SettingsPageFormActions
-              onSave={form.handleSubmit(onSubmit)}
+              onSave={submitForm(onSubmit)}
               onReset={handleReset}
               isSaving={updateOption.isPending}
               isResetDisabled={!form.formState.isDirty}

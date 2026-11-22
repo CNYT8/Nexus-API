@@ -16,6 +16,8 @@ func TestClassifyTieredExprQuotaType(t *testing.T) {
 		{"tiered call", `len <= 128000 ? tier("short", call(3)) : tier("long", call(5))`, TieredQuotaCall},
 		{"handwritten per-call const", `len + c <= 250000 ? tier("under_250k", 0.25 * 1000000) : tier("over_250k", 0.35 * 1000000)`, TieredQuotaCall},
 		{"call plus tokens", `tier("base", call(3) + p * 2 + c * 6)`, TieredQuotaHybrid},
+		{"十二小时缓存按量", `tier("base", cc12h * 10)`, TieredQuotaToken},
+		{"固定费加十二小时缓存", `tier("base", call(0.25) + cc12h * 10)`, TieredQuotaHybrid},
 		{"tier mixing call and token tiers", `len <= 100000 ? tier("a", call(1)) : tier("b", p * 2 + c * 4)`, TieredQuotaHybrid},
 		{"request rules ignored for classification", `tier("base", call(5))|||when(header("x") has "y") * 2`, TieredQuotaCall},
 		{"call with token in request rule only", `tier("base", p * 2 + c * 4)|||when(param("tier") == "fast") * 6`, TieredQuotaToken},

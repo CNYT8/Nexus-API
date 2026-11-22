@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	constant2 "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -26,7 +28,6 @@ func getImageToken(c *gin.Context, fileMeta *types.FileMeta, model string, strea
 
 	// Defaults for 4o/4.1/4.5 family unless overridden below
 	baseTokens := 85
-	tileTokens := 170
 
 	// Model classification
 	lowerModel := strings.ToLower(model)
@@ -36,49 +37,28 @@ func getImageToken(c *gin.Context, fileMeta *types.FileMeta, model string, strea
 		return 1047, nil
 	}
 
-	// Patch-based models (32x32 patches, capped at 1536, with multiplier)
-	isPatchBased := false
-	multiplier := 1.0
-	switch {
-	case strings.Contains(lowerModel, "gpt-4.1-mini"):
-		isPatchBased = true
-		multiplier = 1.62
-	case strings.Contains(lowerModel, "gpt-4.1-nano"):
-		isPatchBased = true
-		multiplier = 2.46
-	case strings.HasPrefix(lowerModel, "o4-mini"):
-		isPatchBased = true
-		multiplier = 1.72
-	case strings.HasPrefix(lowerModel, "gpt-5-mini"):
-		isPatchBased = true
-		multiplier = 1.62
-	case strings.HasPrefix(lowerModel, "gpt-5-nano"):
-		isPatchBased = true
-		multiplier = 2.46
-	}
+	major, minor := imageModelVersion(lowerModel, "gpt-")
+	isPatchBased := (major >= 6 || major == 5 && (minor >= 2 || strings.Contains(lowerModel, "mini") || strings.Contains(lowerModel, "nano"))) ||
+		strings.Contains(lowerModel, "gpt-4.1-mini") || strings.Contains(lowerModel, "gpt-4.1-nano") || strings.Contains(lowerModel, "o4-mini")
+	isOtherFamily := strings.Contains(lowerModel, "claude") || strings.Contains(lowerModel, "gemini")
 
 	// Tile-based model tokens and bases per doc
 	if !isPatchBased {
 		if strings.HasPrefix(lowerModel, "gpt-4o-mini") {
 			baseTokens = 2833
-			tileTokens = 5667
 		} else if strings.HasPrefix(lowerModel, "gpt-5-chat-latest") || (strings.HasPrefix(lowerModel, "gpt-5") && !strings.Contains(lowerModel, "mini") && !strings.Contains(lowerModel, "nano")) {
 			baseTokens = 70
-			tileTokens = 140
 		} else if strings.HasPrefix(lowerModel, "o1") || strings.HasPrefix(lowerModel, "o3") || strings.HasPrefix(lowerModel, "o1-pro") {
 			baseTokens = 75
-			tileTokens = 150
 		} else if strings.Contains(lowerModel, "computer-use-preview") {
 			baseTokens = 65
-			tileTokens = 129
 		} else if strings.Contains(lowerModel, "4.1") || strings.Contains(lowerModel, "4o") || strings.Contains(lowerModel, "4.5") {
 			baseTokens = 85
-			tileTokens = 170
 		}
 	}
 
 	// Respect existing feature flags/short-circuits
-	if fileMeta.Detail == "low" && !isPatchBased {
+	if fileMeta.Detail == "low" && !isPatchBased && !isOtherFamily {
 		return baseTokens, nil
 	}
 
@@ -90,9 +70,10 @@ func getImageToken(c *gin.Context, fileMeta *types.FileMeta, model string, strea
 	if !constant.GetMediaTokenNotStream && !stream {
 		return 3 * baseTokens, nil
 	}
-	// Normalize detail
-	if fileMeta.Detail == "auto" || fileMeta.Detail == "" {
-		fileMeta.Detail = "high"
+	if strings.Contains(lowerModel, "gemini") {
+		if major, _ := imageModelVersion(lowerModel, "gemini-"); major == 0 || major >= 3 {
+			return estimateImageTokens(lowerModel, 1024, 1024, fileMeta.Detail), nil
+		}
 	}
 
 	// 使用统一的文件服务获取图片配置
@@ -100,7 +81,7 @@ func getImageToken(c *gin.Context, fileMeta *types.FileMeta, model string, strea
 	if err != nil {
 		return 0, err
 	}
-	if config.Width == 0 || config.Height == 0 {
+	if config.Width <= 0 || config.Height <= 0 {
 		// not an image, but might be a valid file
 		if format != "" {
 			// file type
@@ -113,67 +94,172 @@ func getImageToken(c *gin.Context, fileMeta *types.FileMeta, model string, strea
 	height := config.Height
 	logger.LogDebug(c, "image token input: format=%s, width=%d, height=%d", format, width, height)
 
-	if isPatchBased {
-		// 32x32 patch-based calculation with 1536 cap and model multiplier
-		ceilDiv := func(a, b int) int { return (a + b - 1) / b }
-		rawPatchesW := ceilDiv(width, 32)
-		rawPatchesH := ceilDiv(height, 32)
-		rawPatches := rawPatchesW * rawPatchesH
-		if rawPatches > 1536 {
-			// scale down
-			area := float64(width * height)
-			r := math.Sqrt(float64(32*32*1536) / area)
-			wScaled := float64(width) * r
-			hScaled := float64(height) * r
-			// adjust to fit whole number of patches after scaling
-			adjW := math.Floor(wScaled/32.0) / (wScaled / 32.0)
-			adjH := math.Floor(hScaled/32.0) / (hScaled / 32.0)
-			adj := math.Min(adjW, adjH)
-			if !math.IsNaN(adj) && adj > 0 {
-				r = r * adj
+	return estimateImageTokens(lowerModel, width, height, fileMeta.Detail), nil
+}
+
+func imageModelVersion(model, prefix string) (major, minor int) {
+	_, rest, ok := strings.Cut(model, prefix)
+	if !ok {
+		return 0, 0
+	}
+	parts := strings.FieldsFunc(rest, func(r rune) bool { return r == '-' || r == '.' })
+	found := false
+	for _, part := range parts {
+		n := len(part) - len(strings.TrimLeft(part, "0123456789"))
+		if n == 0 || n > 2 {
+			if found {
+				break
 			}
-			wScaled = float64(width) * r
-			hScaled = float64(height) * r
-			patchesW := math.Ceil(wScaled / 32.0)
-			patchesH := math.Ceil(hScaled / 32.0)
-			imageTokens := int(patchesW * patchesH)
-			if imageTokens > 1536 {
-				imageTokens = 1536
-			}
-			return int(math.Round(float64(imageTokens) * multiplier)), nil
+			continue
 		}
-		// below cap
-		imageTokens := rawPatches
-		return int(math.Round(float64(imageTokens) * multiplier)), nil
+		value, _ := strconv.Atoi(part[:n])
+		if found {
+			return major, value
+		}
+		major, found = value, true
+		if n < len(part) {
+			break
+		}
 	}
+	return major, 0
+}
 
-	// Tile-based calculation for 4o/4.1/4.5/o1/o3/etc.
-	// Step 1: fit within 2048x2048 square
-	maxSide := math.Max(float64(width), float64(height))
-	fitScale := 1.0
-	if maxSide > 2048 {
-		fitScale = maxSide / 2048.0
+// estimateImageTokens mirrors upstream family sizing with bounded dimensions.
+// It estimates request preconsumption; provider usage remains authoritative.
+func estimateImageTokens(model string, width, height int, detail string) int {
+	model, detail = strings.ToLower(model), strings.ToLower(detail)
+	if width <= 0 || height <= 0 {
+		width, height = 1024, 1024
 	}
-	fitW := int(math.Round(float64(width) / fitScale))
-	fitH := int(math.Round(float64(height) / fitScale))
-
-	// Step 2: scale so that shortest side is exactly 768
-	minSide := math.Min(float64(fitW), float64(fitH))
-	if minSide == 0 {
-		return baseTokens, nil
+	fit := func(limit int) {
+		if max(width, height) > limit {
+			scale := float64(limit) / float64(max(width, height))
+			width, height = max(1, int(float64(width)*scale)), max(1, int(float64(height)*scale))
+		}
 	}
-	shortScale := 768.0 / minSide
-	finalW := int(math.Round(float64(fitW) * shortScale))
-	finalH := int(math.Round(float64(fitH) * shortScale))
-
-	// Count 512px tiles
-	tilesW := (finalW + 512 - 1) / 512
-	tilesH := (finalH + 512 - 1) / 512
-	tiles := tilesW * tilesH
-
-	logger.LogDebug(c, "image token scaled size: width=%d, height=%d, tiles=%d", finalW, finalH, tiles)
-
-	return tiles*tileTokens + baseTokens, nil
+	fit(65535)
+	ceil := func(n, d int) int { return (n + d - 1) / d }
+	if strings.Contains(model, "gemini") {
+		major, _ := imageModelVersion(model, "gemini-")
+		if major == 0 || major >= 3 {
+			switch detail {
+			case "media_resolution_low":
+				return 280
+			case "media_resolution_medium":
+				return 560
+			case "media_resolution_ultra_high":
+				return 2240
+			default:
+				return 1120
+			}
+		}
+		if width <= 384 && height <= 384 {
+			return 258
+		}
+		tile := min(max(min(width, height)*2/3, 256), 768)
+		return (min(ceil(width, tile)*ceil(height, tile), 12) + 1) * 258
+	}
+	if strings.Contains(model, "claude") {
+		edge, budget, framing := 1568, 1568, 4
+		major, minor := imageModelVersion(model, "claude-")
+		if major == 0 || major > 4 || major == 4 && minor >= 7 {
+			edge, budget, framing = 2576, 4784, 3
+		}
+		fits := func(w, h int) bool {
+			return ceil(w, 28)*28 <= edge && ceil(h, 28)*28 <= edge && ceil(w, 28)*ceil(h, 28) <= budget
+		}
+		if !fits(width, height) {
+			if height > width {
+				width, height = height, width
+			}
+			ratio := float64(width) / float64(height)
+			lo, hi := 1, width
+			for lo+1 < hi {
+				mid := (lo + hi) / 2
+				if fits(mid, max(1, int(math.RoundToEven(float64(mid)/ratio)))) {
+					lo = mid
+				} else {
+					hi = mid
+				}
+			}
+			width, height = lo, max(1, int(math.RoundToEven(float64(lo)/ratio)))
+		}
+		return ceil(width, 28)*ceil(height, 28) + framing
+	}
+	major, minor := imageModelVersion(model, "gpt-")
+	base, tile, budget, side, short := 85, 170, 0, 0, 0
+	multiplier := float32(0)
+	switch {
+	case major >= 6:
+		multiplier = 1.2
+		if detail == "low" {
+			side = 512
+		} else if detail == "high" {
+			side, budget = 2048, 2500
+		}
+	case major == 5 && minor >= 5:
+		multiplier = 1.2
+		if detail == "low" {
+			side = 512
+		} else if detail == "high" {
+			side, short = 2048, 768
+		} else if minor == 5 {
+			side, budget = 6000, 10000
+		}
+	case major == 5 && minor == 4:
+		multiplier, side, budget = 1.2, 2048, 2500
+		if detail == "low" {
+			budget = 6144
+		} else if detail == "original" {
+			side, budget = 6000, 10000
+		}
+	case major == 5 && minor >= 2:
+		multiplier, side, budget = 1.2, 2048, 6144
+	case major == 5 && strings.Contains(model, "nano"):
+		multiplier, budget = 1.5, 1536
+	case major == 5 && strings.Contains(model, "mini"):
+		multiplier, budget = 1.2, 1536
+	case major == 5:
+		base, tile = 70, 140
+	case strings.Contains(model, "gpt-4.1-mini"):
+		multiplier, side, budget = 1.62, 2048, 6144
+	case strings.Contains(model, "gpt-4.1-nano"):
+		multiplier, budget = 2.46, 1536
+	case strings.Contains(model, "o4-mini"):
+		multiplier, budget = 1.72, 1536
+	case strings.Contains(model, "4o-mini"):
+		base, tile = 2833, 5667
+	case strings.Contains(model, "o1") || strings.Contains(model, "o3"):
+		base, tile = 75, 150
+	case strings.Contains(model, "computer-use-preview"):
+		base, tile = 65, 129
+	}
+	if multiplier == 0 {
+		if detail == "low" {
+			return base
+		}
+		fit(2048)
+		if min(width, height) > 768 {
+			scale := 768.0 / float64(min(width, height))
+			width, height = max(1, int(float64(width)*scale)), max(1, int(float64(height)*scale))
+		}
+		return base + tile*ceil(width, 512)*ceil(height, 512)
+	}
+	if side > 0 {
+		fit(side)
+	}
+	patches := ceil(width, 32) * ceil(height, 32)
+	if short > 0 && min(width, height) > short {
+		patches = ceil(short, 32) * ceil(max(width, height)*short, min(width, height)*32)
+	}
+	if budget > 0 && patches > budget {
+		scale := math.Sqrt(float64(32*32*budget) / (float64(width) * float64(height)))
+		w, h := float64(width)*scale/32, float64(height)*scale/32
+		scale *= math.Min(math.Floor(w)/w, math.Floor(h)/h)
+		width, height = max(1, int(float64(width)*scale)), max(1, int(float64(height)*scale))
+		patches = min(budget, ceil(width, 32)*ceil(height, 32))
+	}
+	return int(math.Ceil(float64(min(patches, 30000)) * float64(multiplier)))
 }
 
 func EstimateRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *relaycommon.RelayInfo) (int, error) {
@@ -220,6 +306,9 @@ func EstimateRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *rela
 		return totalAudioToken, nil
 	}
 
+	if limit := operation_setting.GetTokenCountMaxBytes(); limit > 0 && len(meta.CombineText) > limit {
+		return 0, fmt.Errorf("token count input exceeds %d bytes", limit)
+	}
 	model := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
 	tkm := 0
 
@@ -277,7 +366,7 @@ func EstimateRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *rela
 	for i, file := range meta.Files {
 		switch file.FileType {
 		case types.FileTypeImage:
-			if common.IsOpenAITextModel(model) {
+			if common.IsOpenAITextModel(model) || strings.Contains(strings.ToLower(model), "claude") || strings.Contains(strings.ToLower(model), "gemini") {
 				token, err := getImageToken(c, file, model, info.IsStream)
 				if err != nil {
 					return 0, fmt.Errorf("error counting image token, media index[%d], identifier[%s], err: %v", i, file.GetIdentifier(), err)

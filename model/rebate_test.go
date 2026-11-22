@@ -225,6 +225,7 @@ func newRebateTestDB(t *testing.T) *gorm.DB {
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(
+		&Option{},
 		&User{},
 		&WalletReservation{},
 		&WalletLotHold{},
@@ -235,7 +236,13 @@ func newRebateTestDB(t *testing.T) *gorm.DB {
 		&RebateCapBucket{},
 		&RebateSystemState{},
 		&RebateRecord{},
+		&WalletSourceReversal{},
+		&RebateSourceReversal{},
+		&TopUpPaymentBinding{},
+		&TopUpReversalState{},
+		&TopUpReversalEvent{},
 	))
+	persistRebateTestSetting(t, db, operation_setting.GetRebateSetting())
 	return db
 }
 
@@ -545,6 +552,11 @@ func TestAccountingMigrationCreatesTablesOnSQLite(t *testing.T) {
 		&RebateCapBucket{},
 		&RebateSystemState{},
 		&RebateRecord{},
+		&WalletSourceReversal{},
+		&RebateSourceReversal{},
+		&TopUpPaymentBinding{},
+		&TopUpReversalState{},
+		&TopUpReversalEvent{},
 	} {
 		require.True(t, DB.Migrator().HasTable(model))
 	}

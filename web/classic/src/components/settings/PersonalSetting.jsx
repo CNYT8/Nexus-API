@@ -32,7 +32,7 @@ import {
   setUserData,
 } from '../../helpers';
 import { UserContext } from '../../context/User';
-import { Modal } from '@douyinfe/semi-ui';
+import { Modal, Switch } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 
 // 导入子组件
@@ -73,7 +73,6 @@ const PersonalSetting = () => {
   const [loading, setLoading] = useState(false);
   const [disableButton, setDisableButton] = useState(false);
   const [countdown, setCountdown] = useState(30);
-  const [systemToken, setSystemToken] = useState('');
   const [passkeyStatus, setPasskeyStatus] = useState({ enabled: false });
   const [passkeyRegisterLoading, setPasskeyRegisterLoading] = useState(false);
   const [passkeyDeleteLoading, setPasskeyDeleteLoading] = useState(false);
@@ -84,7 +83,8 @@ const PersonalSetting = () => {
   ] = useState(null);
   const [notificationSettings, setNotificationSettings] = useState({
     warningType: 'email',
-    warningThreshold: 100000,
+    warningThreshold: 0,
+    quotaWarningEnabled: true,
     webhookUrl: '',
     webhookSecret: '',
     notificationEmail: '',
@@ -184,7 +184,8 @@ const PersonalSetting = () => {
       const settings = JSON.parse(userState.user.setting);
       setNotificationSettings({
         warningType: settings.notify_type || 'email',
-        warningThreshold: settings.quota_warning_threshold || 500000,
+        warningThreshold: settings.quota_warning_threshold ?? 0,
+        quotaWarningEnabled: settings.quota_warning_enabled !== false,
         webhookUrl: settings.webhook_url || '',
         webhookSecret: settings.webhook_secret || '',
         notificationEmail: settings.notification_email || '',
@@ -204,18 +205,6 @@ const PersonalSetting = () => {
 
   const handleInputChange = (name, value) => {
     setInputs((inputs) => ({ ...inputs, [name]: value }));
-  };
-
-  const generateAccessToken = async () => {
-    const res = await API.get('/api/user/token');
-    const { success, message, data } = res.data;
-    if (success) {
-      setSystemToken(data);
-      await copy(data);
-      showSuccess(t('令牌已重置并已复制到剪贴板'));
-    } else {
-      showError(message);
-    }
   };
 
   const loadPasskeyStatus = async () => {
@@ -371,12 +360,6 @@ const PersonalSetting = () => {
     }
   };
 
-  const handleSystemTokenClick = async (e) => {
-    e.target.select();
-    await copy(e.target.value);
-    showSuccess(t('系统令牌已复制到剪切板'));
-  };
-
   const deleteAccount = async () => {
     if (inputs.self_account_deletion_confirmation !== userState.user.username) {
       showError(t('请输入你的账户名以确认删除！'));
@@ -513,6 +496,7 @@ const PersonalSetting = () => {
         : notificationSettings.recordIpLog;
       const res = await API.put('/api/user/setting', {
         notify_type: notificationSettings.warningType,
+        quota_warning_enabled: notificationSettings.quotaWarningEnabled !== false,
         quota_warning_threshold: parseFloat(
           notificationSettings.warningThreshold,
         ),
@@ -571,11 +555,8 @@ const PersonalSetting = () => {
                 t={t}
                 userState={userState}
                 status={status}
-                systemToken={systemToken}
                 setShowEmailBindModal={setShowEmailBindModal}
                 setShowWeChatBindModal={setShowWeChatBindModal}
-                generateAccessToken={generateAccessToken}
-                handleSystemTokenClick={handleSystemTokenClick}
                 setShowChangePasswordModal={setShowChangePasswordModal}
                 setShowAccountDeleteModal={setShowAccountDeleteModal}
                 passkeyStatus={passkeyStatus}
@@ -591,6 +572,23 @@ const PersonalSetting = () => {
             </div>
 
             {/* 右侧：其他设置 */}
+            <div className='flex flex-col gap-4'>
+              <div className='rounded-xl border p-4 flex items-center justify-between gap-3'>
+                <div>
+                  <label htmlFor='quota-warning-enabled'>{t('额度提醒')}</label>
+                  <p className='text-xs text-gray-500 mt-1'>
+                    {status?.quota_remind_enabled === false
+                      ? t('站点已禁用额度提醒')
+                      : t('阈值为 0 时使用站点默认值')}
+                  </p>
+                </div>
+                <Switch
+                  id='quota-warning-enabled'
+                  checked={notificationSettings.quotaWarningEnabled !== false}
+                  disabled={status?.quota_remind_enabled === false}
+                  onChange={(checked) => handleNotificationSettingChange('quotaWarningEnabled', checked)}
+                />
+              </div>
             <NotificationSettings
               t={t}
               notificationSettings={
@@ -606,6 +604,7 @@ const PersonalSetting = () => {
               handleNotificationSettingChange={handleNotificationSettingChange}
               saveNotificationSettings={saveNotificationSettings}
             />
+            </div>
           </div>
         </div>
       </div>

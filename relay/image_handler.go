@@ -143,6 +143,9 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if billingErr := service.PrepareImageBillingForRequest(c, info, imageCount, promptExtend); billingErr != nil {
 		return billingErr
 	}
+	if dispatchErr := service.MarkBillingDispatched(info); dispatchErr != nil {
+		return types.NewError(dispatchErr, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+	}
 
 	statusCodeMappingStr := c.GetString("status_code_mapping")
 

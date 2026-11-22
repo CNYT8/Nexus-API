@@ -91,6 +91,8 @@ type ChatCompletionsStreamResponseChoiceDelta struct {
 	Reasoning        *string            `json:"reasoning,omitempty"`
 	Role             string             `json:"role,omitempty"`
 	ToolCalls        []ToolCallResponse `json:"tool_calls,omitempty"`
+	Annotations      json.RawMessage    `json:"annotations,omitempty"`
+	Refusal          *string            `json:"refusal,omitempty"`
 }
 
 func (c *ChatCompletionsStreamResponseChoiceDelta) SetContentString(s string) {
@@ -227,12 +229,15 @@ type Usage struct {
 	PromptCacheHitTokens int    `json:"prompt_cache_hit_tokens,omitempty"`
 	UsageSemantic        string `json:"usage_semantic,omitempty"`
 	UsageSource          string `json:"usage_source,omitempty"`
+	// ToolUsage counts actual hosted invocations by billing key; not a token count.
+	ToolUsage map[string]int `json:"tool_usage,omitempty"`
 
-	PromptTokensDetails    InputTokenDetails  `json:"prompt_tokens_details"`
-	CompletionTokenDetails OutputTokenDetails `json:"completion_tokens_details"`
-	InputTokens            int                `json:"input_tokens"`
-	OutputTokens           int                `json:"output_tokens"`
-	InputTokensDetails     *InputTokenDetails `json:"input_tokens_details"`
+	PromptTokensDetails    InputTokenDetails   `json:"prompt_tokens_details"`
+	CompletionTokenDetails OutputTokenDetails  `json:"completion_tokens_details"`
+	InputTokens            int                 `json:"input_tokens"`
+	OutputTokens           int                 `json:"output_tokens"`
+	InputTokensDetails     *InputTokenDetails  `json:"input_tokens_details"`
+	OutputTokensDetails    *OutputTokenDetails `json:"output_tokens_details,omitempty"`
 
 	// claude cache 1h
 	ClaudeCacheCreation5mTokens int `json:"claude_cache_creation_5_m_tokens"`
@@ -253,13 +258,14 @@ type OpenAIVideoResponse struct {
 }
 
 type InputTokenDetails struct {
-	CachedTokens             int `json:"cached_tokens"`
-	CachedCreationTokens     int `json:"cached_creation_tokens,omitempty"`
-	CacheWriteTokens         int `json:"cache_write_tokens,omitempty"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	TextTokens               int `json:"text_tokens"`
-	AudioTokens              int `json:"audio_tokens"`
-	ImageTokens              int `json:"image_tokens"`
+	CachedTokens             int                     `json:"cached_tokens"`
+	CachedCreationTokens     int                     `json:"cached_creation_tokens,omitempty"`
+	CacheWriteTokens         int                     `json:"cache_write_tokens,omitempty"`
+	CacheCreationInputTokens int                     `json:"cache_creation_input_tokens,omitempty"`
+	CacheWriteTokensDetails  *CacheWriteTokenDetails `json:"cache_write_tokens_details,omitempty"`
+	TextTokens               int                     `json:"text_tokens"`
+	AudioTokens              int                     `json:"audio_tokens"`
+	ImageTokens              int                     `json:"image_tokens"`
 }
 
 func (d InputTokenDetails) CacheCreationTokensTotal() int {
@@ -268,6 +274,68 @@ func (d InputTokenDetails) CacheCreationTokensTotal() int {
 		return 0
 	}
 	return total
+}
+
+type CacheWriteTokenDetails struct {
+	TTL30mTokens int `json:"ttl_30m_tokens"`
+	TTL12hTokens int `json:"ttl_12h_tokens"`
+}
+
+// CacheWrite12hTokens 返回总写入范围内的实际 12h 写入量。
+func (d InputTokenDetails) CacheWrite12hTokens() int {
+	if d.CacheWriteTokensDetails == nil {
+		return 0
+	}
+	return min(max(d.CacheWriteTokensDetails.TTL12hTokens, 0), d.CacheCreationTokensTotal())
+}
+
+func (d InputTokenDetails) Clone() InputTokenDetails {
+	if d.CacheWriteTokensDetails != nil {
+		details := *d.CacheWriteTokensDetails
+		d.CacheWriteTokensDetails = &details
+	}
+	return d
+}
+
+// MergeNonZero 合并用量快照：正数覆盖，零值或负数不抹掉已知用量，不累加。
+func (d *InputTokenDetails) MergeNonZero(src InputTokenDetails) {
+	if d == nil {
+		return
+	}
+	if src.CachedTokens > 0 {
+		d.CachedTokens = src.CachedTokens
+	}
+	if src.CachedCreationTokens > 0 {
+		d.CachedCreationTokens = src.CachedCreationTokens
+	}
+	if src.CacheWriteTokens > 0 {
+		d.CacheWriteTokens = src.CacheWriteTokens
+	}
+	if src.CacheCreationInputTokens > 0 {
+		d.CacheCreationInputTokens = src.CacheCreationInputTokens
+	}
+	if src.TextTokens > 0 {
+		d.TextTokens = src.TextTokens
+	}
+	if src.AudioTokens > 0 {
+		d.AudioTokens = src.AudioTokens
+	}
+	if src.ImageTokens > 0 {
+		d.ImageTokens = src.ImageTokens
+	}
+	if src.CacheWriteTokensDetails != nil {
+		details := CacheWriteTokenDetails{}
+		if d.CacheWriteTokensDetails != nil {
+			details = *d.CacheWriteTokensDetails
+		}
+		if src.CacheWriteTokensDetails.TTL30mTokens > 0 {
+			details.TTL30mTokens = src.CacheWriteTokensDetails.TTL30mTokens
+		}
+		if src.CacheWriteTokensDetails.TTL12hTokens > 0 {
+			details.TTL12hTokens = src.CacheWriteTokensDetails.TTL12hTokens
+		}
+		d.CacheWriteTokensDetails = &details
+	}
 }
 
 type OutputTokenDetails struct {
@@ -344,20 +412,22 @@ func (o *OpenAIResponsesResponse) GetSize() string {
 }
 
 type IncompleteDetails struct {
-	Reasoning string `json:"reasoning"`
+	Reason    string `json:"reason,omitempty"`
+	Reasoning string `json:"reasoning,omitempty"` // legacy provider alias
 }
 
 type ResponsesOutput struct {
-	Type      string                   `json:"type"`
-	ID        string                   `json:"id"`
-	Status    string                   `json:"status"`
-	Role      string                   `json:"role"`
-	Content   []ResponsesOutputContent `json:"content"`
-	Quality   string                   `json:"quality"`
-	Size      string                   `json:"size"`
-	CallId    string                   `json:"call_id,omitempty"`
-	Name      string                   `json:"name,omitempty"`
-	Arguments json.RawMessage          `json:"arguments,omitempty"`
+	Type      string                          `json:"type"`
+	ID        string                          `json:"id"`
+	Status    string                          `json:"status"`
+	Role      string                          `json:"role"`
+	Content   []ResponsesOutputContent        `json:"content"`
+	Quality   string                          `json:"quality"`
+	Size      string                          `json:"size"`
+	CallId    string                          `json:"call_id,omitempty"`
+	Name      string                          `json:"name,omitempty"`
+	Arguments json.RawMessage                 `json:"arguments,omitempty"`
+	Summary   []ResponsesReasoningSummaryPart `json:"summary,omitempty"`
 }
 
 // ArgumentsString returns function call arguments in the string form expected by Chat Completions.
@@ -377,6 +447,7 @@ type ResponsesOutputContent struct {
 	Type        string        `json:"type"`
 	Text        string        `json:"text"`
 	Annotations []interface{} `json:"annotations"`
+	Refusal     string        `json:"refusal,omitempty"`
 }
 
 type ResponsesReasoningSummaryPart struct {
@@ -410,6 +481,12 @@ type ResponsesStreamResponse struct {
 	ContentIndex *int                           `json:"content_index,omitempty"`
 	SummaryIndex *int                           `json:"summary_index,omitempty"`
 	ItemID       string                         `json:"item_id,omitempty"`
+	Text         string                         `json:"text,omitempty"`
+	Arguments    json.RawMessage                `json:"arguments,omitempty"`
+	Annotation   json.RawMessage                `json:"annotation,omitempty"`
+	Error        any                            `json:"error,omitempty"`
+	Code         string                         `json:"code,omitempty"`
+	Message      string                         `json:"message,omitempty"`
 	Part         *ResponsesReasoningSummaryPart `json:"part,omitempty"`
 }
 

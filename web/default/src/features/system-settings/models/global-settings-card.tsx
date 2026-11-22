@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -45,6 +44,7 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 
 const thinkingBlacklistExample = JSON.stringify(
@@ -149,9 +149,7 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
     defaultValues: defaultValues as GlobalModelSettingsFormInput,
   })
 
-  useEffect(() => {
-    form.reset(defaultValues as GlobalModelSettingsFormInput)
-  }, [defaultValues, form])
+  const submitForm = useResetForm(form, defaultValues as GlobalModelSettingsFormInput)
 
   const pingEnabled = form.watch('general_setting.ping_interval_enabled')
 
@@ -183,20 +181,15 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
       return
     }
 
-    for (const [key, value] of updates) {
-      await updateOption.mutateAsync({
-        key,
-        value,
-      })
-    }
+    await updateOption.saveOptions(updates.map(([key, value]) => ({ key, value })))
   }
 
   return (
     <SettingsSection title={t('Global Model Configuration')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
           />
           <FormField

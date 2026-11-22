@@ -29,6 +29,9 @@ type ClaudeMediaMessage struct {
 	Signature    string               `json:"signature,omitempty"`
 	Delta        string               `json:"delta,omitempty"`
 	CacheControl json.RawMessage      `json:"cache_control,omitempty"`
+	Citations    []json.RawMessage    `json:"citations,omitempty"`
+	Citation     json.RawMessage      `json:"citation,omitempty"`
+	Title        string               `json:"title,omitempty"`
 	// tool_calls
 	Id        string `json:"id,omitempty"`
 	Name      string `json:"name,omitempty"`
@@ -121,8 +124,9 @@ type ClaudeMessageSource struct {
 }
 
 type ClaudeMessage struct {
-	Role    string `json:"role"`
-	Content any    `json:"content"`
+	Role         string          `json:"role"`
+	Content      any             `json:"content"`
+	OutputConfig json.RawMessage `json:"output_config,omitempty"`
 }
 
 func (c *ClaudeMessage) IsStringContent() bool {
@@ -175,6 +179,7 @@ type Tool struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
 	InputSchema map[string]interface{} `json:"input_schema"`
+	Strict      *bool                  `json:"strict,omitempty"`
 }
 
 type InputSchema struct {
@@ -223,6 +228,7 @@ type ClaudeRequest struct {
 	Tools             any             `json:"tools,omitempty"`
 	ContextManagement json.RawMessage `json:"context_management,omitempty"`
 	OutputConfig      json.RawMessage `json:"output_config,omitempty"`
+	Safeguards        json.RawMessage `json:"safeguards,omitempty"`
 	OutputFormat      json.RawMessage `json:"output_format,omitempty"`
 	Container         json.RawMessage `json:"container,omitempty"`
 	ToolChoice        any             `json:"tool_choice,omitempty"`
@@ -234,7 +240,8 @@ type ClaudeRequest struct {
 	Speed json.RawMessage `json:"speed,omitempty"`
 	// ServiceTier specifies upstream service level and may affect billing.
 	// This field is filtered by default and can be enabled via channel setting allow_service_tier.
-	ServiceTier string `json:"service_tier,omitempty"`
+	ServiceTier        string          `json:"service_tier,omitempty"`
+	ChatTemplateKwargs json.RawMessage `json:"chat_template_kwargs,omitempty"`
 }
 
 // OutputConfigForEffort just for extract effort

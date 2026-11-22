@@ -1,7 +1,7 @@
 {
   "name": "new-api-electron",
   "version": "1.0.0",
-  "description": "New API - AI Model Gateway Desktop Application",
+  "description": "Nexus-API - AI Model Gateway Desktop Application (based on new-api)",
   "main": "main.js",
   "scripts": {
     "start-app": "electron .",
@@ -30,7 +30,7 @@
   },
   "build": {
     "appId": "com.newapi.desktop",
-    "productName": "New-API-App",
+    "productName": "Nexus-API-App",
     "publish": null,
     "directories": {
       "output": "dist"
@@ -59,10 +59,6 @@
         {
           "from": "../new-api",
           "to": "bin/new-api"
-        },
-        {
-          "from": "../web/dist",
-          "to": "web/dist"
         },
         {
           "from": "../LICENSE",
@@ -121,6 +117,8 @@
     },
     "linux": {
       "icon": "icon.png",
+      "maintainer": "Nexus-API maintainers",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
       "target": [
         "AppImage",
         "deb"

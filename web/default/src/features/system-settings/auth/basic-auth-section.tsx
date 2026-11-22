@@ -78,7 +78,7 @@ export function BasicAuthSection({ defaultValues }: BasicAuthSectionProps) {
     defaultValues: formDefaults,
   })
 
-  useResetForm(form, formDefaults)
+  const submitForm = useResetForm(form, formDefaults)
 
   const onSubmit = async (data: BasicAuthFormValues) => {
     const updates: Array<{ key: string; value: string | boolean }> = []
@@ -99,17 +99,15 @@ export function BasicAuthSection({ defaultValues }: BasicAuthSectionProps) {
       }
     })
 
-    for (const update of updates) {
-      await updateOption.mutateAsync(update)
-    }
+    await updateOption.saveOptions(updates)
   }
 
   return (
     <SettingsSection title={t('Basic Authentication')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
           />
           <FormField

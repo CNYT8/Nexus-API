@@ -61,8 +61,8 @@ func initCol() {
 			logGroupCol = `"group"`
 			logKeyCol = `"key"`
 		default:
-			logGroupCol = commonGroupCol
-			logKeyCol = commonKeyCol
+			logGroupCol = "`group`"
+			logKeyCol = "`key`"
 		}
 	} else {
 		// LOG_SQL_DSN 为空时，日志数据库与主数据库相同
@@ -81,6 +81,24 @@ func initCol() {
 var DB *gorm.DB
 
 var LOG_DB *gorm.DB
+
+// LogMetaDB stores monitoring samples and transactional log maintenance state.
+// Relational deployments alias LOG_DB; ClickHouse deployments use a SQL DB.
+var LogMetaDB *gorm.DB
+
+func logMetaDB() *gorm.DB {
+	if !IsClickHouseLogDB() {
+		return LOG_DB
+	}
+	return LogMetaDB
+}
+
+func logMetaGroupColumn() string {
+	if db := logMetaDB(); db != nil && db.Dialector.Name() == common.DatabaseTypePostgreSQL {
+		return `"group"`
+	}
+	return "`group`"
+}
 
 func createRootAccountIfNeed() error {
 	var user User
@@ -137,6 +155,12 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 		initCol()
 	}()
 	dsn := os.Getenv(envName)
+	if isClickHouseDSN(dsn) {
+		if !isLog {
+			return nil, errors.New("ClickHouse is supported only for LOG_SQL_DSN")
+		}
+		return openClickHouseLogDB(dsn)
+	}
 	if dsn != "" {
 		if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 			// Use PostgreSQL
@@ -207,7 +231,7 @@ func InitDB() (err error) {
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
 
 		if !common.IsMasterNode {
-			return nil
+			return InitPasswordEncryption()
 		}
 		if common.UsingMySQL {
 			//_, _ = sqlDB.Exec("ALTER TABLE channels MODIFY model_mapping TEXT;") // TODO: delete this line when most users have upgraded
@@ -217,7 +241,10 @@ func InitDB() (err error) {
 		if err != nil {
 			return err
 		}
-		return InitializeStoredUserQuotaLimit()
+		if err := InitializeStoredUserQuotaLimit(); err != nil {
+			return err
+		}
+		return InitPasswordEncryption()
 	} else {
 		common.FatalLog(err)
 	}
@@ -225,8 +252,11 @@ func InitDB() (err error) {
 }
 
 func InitLogDB() (err error) {
+	common.UsingClickHouse = false
 	if os.Getenv("LOG_SQL_DSN") == "" {
-		LOG_DB = DB
+		LOG_DB, LogMetaDB = DB, DB
+		common.LogSqlType = DB.Dialector.Name()
+		initCol()
 		return
 	}
 	db, err := chooseDB("LOG_SQL_DSN", true)
@@ -235,6 +265,13 @@ func InitLogDB() (err error) {
 			db = db.Debug()
 		}
 		LOG_DB = db
+		LogMetaDB = db
+		common.UsingClickHouse = IsClickHouseLogDB()
+		if common.UsingClickHouse {
+			common.LogSqlType = common.DatabaseTypeClickHouse
+			initCol()
+			return initClickHouseLogs()
+		}
 		// If log DB is MySQL, also ensure Chinese-capable charset
 		if common.LogSqlType == common.DatabaseTypeMySQL {
 			if err := checkMySQLChineseSupport(LOG_DB); err != nil {
@@ -262,6 +299,11 @@ func InitLogDB() (err error) {
 }
 
 func migrateDB() error {
+	// Inspect/cut over conflicting layouts before ordinary AutoMigrate can
+	// touch them. Compatibility tables never enter the generic migration list.
+	if err := MigrateSchemaCompatibility(DB); err != nil {
+		return err
+	}
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	// Migrate model_limits column from varchar to text for existing tables
@@ -269,42 +311,10 @@ func migrateDB() error {
 		return err
 	}
 
-	err := DB.AutoMigrate(
-		&Channel{},
-		&Token{},
-		&User{},
-		&PasskeyCredential{},
-		&Option{},
-		&Redemption{},
-		&Ability{},
-		&Log{},
-		&Midjourney{},
-		&TopUp{},
-		&QuotaData{},
-		&Task{},
-		&Model{},
-		&Vendor{},
-		&PrefillGroup{},
-		&Setup{},
-		&TwoFA{},
-		&TwoFABackupCode{},
-		&Checkin{},
-		&SubscriptionOrder{},
-		&UserSubscription{},
-		&SubscriptionPreConsumeRecord{},
-		&CustomOAuthProvider{},
-		&UserOAuthBinding{},
-		&PerfMetric{},
-		&ModelMonitorSample{},
-		&UserMembership{},
-		&MembershipQuotaGrant{},
-		&UserGroupRatioOverride{},
-		&Ticket{},
-		&TicketMessage{},
-		&WebRiskState{},
-		&EmptyResponseRecord{},
-	)
-	if err != nil {
+	if err := migrateAdditive(DB, modelsForMigration(migrationOrdinary)...); err != nil {
+		return err
+	}
+	if err := migrateAdditive(DB, modelsForMigration(migrationAuthentication)...); err != nil {
 		return err
 	}
 	if common.UsingSQLite {
@@ -312,7 +322,7 @@ func migrateDB() error {
 			return err
 		}
 	} else {
-		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
+		if err := migrateAdditive(DB, &SubscriptionPlan{}); err != nil {
 			return err
 		}
 	}
@@ -325,106 +335,21 @@ func migrateAccountingTables(db *gorm.DB) error {
 	}
 	// Keep financial table DDL sequential. Some SQLite and MySQL deployments
 	// do not tolerate concurrent CREATE/ALTER operations on related tables.
-	return db.AutoMigrate(
-		&WalletCreditLot{},
-		&WalletConsumptionSettlement{},
-		&WalletConsumptionAllocation{},
-		&WalletReservation{},
-		&WalletLotHold{},
-		&WalletDebtRepayment{},
-		&RebateCapBucket{},
-		&RebateSystemState{},
-		&RebateRecord{},
-	)
+	return migrateAdditive(db, modelsForMigration(migrationAccounting)...)
 }
 
 func migrateDBFast() error {
-
-	var wg sync.WaitGroup
-
-	migrations := []struct {
-		model interface{}
-		name  string
-	}{
-		{&Channel{}, "Channel"},
-		{&Token{}, "Token"},
-		{&User{}, "User"},
-		{&PasskeyCredential{}, "PasskeyCredential"},
-		{&Option{}, "Option"},
-		{&Redemption{}, "Redemption"},
-		{&Ability{}, "Ability"},
-		{&Log{}, "Log"},
-		{&Midjourney{}, "Midjourney"},
-		{&TopUp{}, "TopUp"},
-		{&QuotaData{}, "QuotaData"},
-		{&Task{}, "Task"},
-		{&Model{}, "Model"},
-		{&Vendor{}, "Vendor"},
-		{&PrefillGroup{}, "PrefillGroup"},
-		{&Setup{}, "Setup"},
-		{&TwoFA{}, "TwoFA"},
-		{&TwoFABackupCode{}, "TwoFABackupCode"},
-		{&Checkin{}, "Checkin"},
-		{&SubscriptionOrder{}, "SubscriptionOrder"},
-		{&UserSubscription{}, "UserSubscription"},
-		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
-		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
-		{&UserOAuthBinding{}, "UserOAuthBinding"},
-		{&PerfMetric{}, "PerfMetric"},
-		{&ModelMonitorSample{}, "ModelMonitorSample"},
-		{&UserMembership{}, "UserMembership"},
-		{&MembershipQuotaGrant{}, "MembershipQuotaGrant"},
-		{&UserGroupRatioOverride{}, "UserGroupRatioOverride"},
-		{&Ticket{}, "Ticket"},
-		{&TicketMessage{}, "TicketMessage"},
-		{&WebRiskState{}, "WebRiskState"},
-		{&EmptyResponseRecord{}, "EmptyResponseRecord"},
-	}
-	// 动态计算migration数量，确保errChan缓冲区足够大
-	errChan := make(chan error, len(migrations))
-
-	for _, m := range migrations {
-		wg.Add(1)
-		go func(model interface{}, name string) {
-			defer wg.Done()
-			if err := DB.AutoMigrate(model); err != nil {
-				errChan <- fmt.Errorf("failed to migrate %s: %v", name, err)
-			}
-		}(m.model, m.name)
-	}
-
-	// Wait for all migrations to complete
-	wg.Wait()
-	close(errChan)
-
-	// Check for any errors
-	for err := range errChan {
-		if err != nil {
-			return err
-		}
-	}
-	if common.UsingSQLite {
-		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
-			return err
-		}
-	} else {
-		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
-			return err
-		}
-	}
-	if err := migrateAccountingTables(DB); err != nil {
-		return err
-	}
-	common.SysLog("database migrated")
-	return nil
+	// DDL is deliberately sequential on every dialect. Sharing the entire
+	// path also preserves price/token/subscription pre-migrations in fast mode.
+	return migrateDB()
 }
 
 func migrateLOGDB() error {
-	var err error
-	if err = LOG_DB.AutoMigrate(&Log{}, &ModelMonitorSample{}); err != nil {
-		return err
+	var models []interface{}
+	for _, spec := range relationalLogDBModelSpecs() {
+		models = append(models, spec.Model)
 	}
-	return nil
+	return migrateAdditive(LOG_DB, models...)
 }
 
 type sqliteColumnDef struct {
@@ -450,6 +375,8 @@ func ensureSubscriptionPlanTableSQLite() error {
 ` + "`enabled`" + ` numeric DEFAULT 1,
 ` + "`sort_order`" + ` integer DEFAULT 0,
 ` + "`allow_balance_pay`" + ` numeric DEFAULT 1,
+` + "`allow_wallet_overflow`" + ` numeric,
+` + "`downgrade_group`" + ` varchar(64) DEFAULT '',
 ` + "`stripe_price_id`" + ` varchar(128) DEFAULT '',
 ` + "`creem_product_id`" + ` varchar(128) DEFAULT '',
 ` + "`waffo_pancake_product_id`" + ` varchar(128) DEFAULT '',
@@ -485,6 +412,8 @@ PRIMARY KEY (` + "`id`" + `)
 		{Name: "enabled", DDL: "`enabled` numeric DEFAULT 1"},
 		{Name: "sort_order", DDL: "`sort_order` integer DEFAULT 0"},
 		{Name: "allow_balance_pay", DDL: "`allow_balance_pay` numeric DEFAULT 1"},
+		{Name: "allow_wallet_overflow", DDL: "`allow_wallet_overflow` numeric"},
+		{Name: "downgrade_group", DDL: "`downgrade_group` varchar(64) DEFAULT ''"},
 		{Name: "stripe_price_id", DDL: "`stripe_price_id` varchar(128) DEFAULT ''"},
 		{Name: "creem_product_id", DDL: "`creem_product_id` varchar(128) DEFAULT ''"},
 		{Name: "waffo_pancake_product_id", DDL: "`waffo_pancake_product_id` varchar(128) DEFAULT ''"},
@@ -630,13 +559,18 @@ func closeDB(db *gorm.DB) error {
 }
 
 func CloseDB() error {
-	if LOG_DB != DB {
-		err := closeDB(LOG_DB)
-		if err != nil {
-			return err
+	seen := make(map[*gorm.DB]bool)
+	var errs []error
+	for _, db := range []*gorm.DB{LogMetaDB, LOG_DB, DB} {
+		if db == nil || seen[db] {
+			continue
+		}
+		seen[db] = true
+		if err := closeDB(db); err != nil {
+			errs = append(errs, err)
 		}
 	}
-	return closeDB(DB)
+	return errors.Join(errs...)
 }
 
 // checkMySQLChineseSupport ensures the MySQL connection and current schema

@@ -16,7 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { useAuthStore } from '@/stores/auth-store'
 import i18next from 'i18next'
 import { toast } from 'sonner'
 import { requestWaffoPayment, isApiSuccess } from '../api'
@@ -27,7 +28,10 @@ function getPaymentUrl(data: unknown): string | null {
   }
 
   if ('payment_url' in data && typeof data.payment_url === 'string') {
-    return data.payment_url
+    try {
+      const url = new URL(data.payment_url)
+      if (url.protocol === 'https:' || url.protocol === 'http:') return url.href
+    } catch { /* invalid checkout URL */ }
   }
 
   return null
@@ -46,9 +50,19 @@ function getErrorMessage(message: string | undefined, data: unknown): string {
  */
 export function useWaffoPayment() {
   const [processing, setProcessing] = useState(false)
+  const busy = useRef(false)
+  const mounted = useRef(false)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
 
   const processWaffoPayment = useCallback(
     async (topupAmount: number, payMethodIndex?: number) => {
+      if (busy.current || !mounted.current) return false
+      const account = useAuthStore.getState().auth.user?.id
+      const isCurrent = () => mounted.current && account === useAuthStore.getState().auth.user?.id
+      busy.current = true
       setProcessing(true)
 
       try {
@@ -57,11 +71,12 @@ export function useWaffoPayment() {
           pay_method_index: payMethodIndex,
         })
 
+        if (!isCurrent()) return false
         if (isApiSuccess(response)) {
           const paymentUrl = getPaymentUrl(response.data)
 
           if (paymentUrl) {
-            window.open(paymentUrl, '_blank')
+            window.location.assign(paymentUrl)
             toast.success(i18next.t('Redirecting to payment page...'))
             return true
           }
@@ -70,10 +85,11 @@ export function useWaffoPayment() {
         toast.error(getErrorMessage(response.message, response.data))
         return false
       } catch (_error) {
-        toast.error(i18next.t('Payment request failed'))
+        if (isCurrent()) toast.error(i18next.t('Payment request failed'))
         return false
       } finally {
-        setProcessing(false)
+        busy.current = false
+        if (mounted.current) setProcessing(false)
       }
     },
     []

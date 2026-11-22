@@ -30,10 +30,11 @@ type FundingSource interface {
 type WalletFunding struct {
 	userId        int
 	consumed      int    // 实际预扣的用户额度
-	settlementKey string // 服务端生成的钱包最终结算身份（为空时走旧差额路径）
+	settlementKey string // 服务端生成的钱包最终结算身份
+	tokenId       int    // 与资金同事务调整；playground 为零
 
-	// reservationActive 表示本次预扣已写入持久 reservation/hold；此时退款、
-	// 增扣和最终结算都必须走账本 API，绝不能直接加减 quota。
+	// reservationActive 表示本次预扣已写入持久 reservation；资金模式在
+	// 首次预扣时固定，此后退款、增扣和结算均通过同一持久身份。
 	reservationActive bool
 	// durableSettlement 表示最终结算拥有持久幂等身份，失败后可安全重试。
 	durableSettlement bool
@@ -49,6 +50,9 @@ func mapWalletReserveError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, model.ErrBillingTokenReserve) {
+		return err
+	}
 	// 统一成上层可识别的余额不足信号，保留其它账务错误原样上报。
 	if errors.Is(err, model.ErrInsufficientQuota) || errors.Is(err, model.ErrWalletInsufficientQuota) {
 		return model.ErrInsufficientQuota
@@ -57,31 +61,15 @@ func mapWalletReserveError(err error) error {
 }
 
 func (w *WalletFunding) PreConsume(amount int) error {
-	if amount <= 0 {
-		return nil
+	if w.settlementKey == "" {
+		return ErrWalletBillingIdentityRequired
 	}
-	active, err := model.WalletCreditLedgerActive(model.DB)
-	if err != nil {
-		return err
-	}
-	if active {
-		// Ledger-backed wallets must reserve through the durable identity; a
-		// direct quota debit here would drift quota away from the source lots.
-		if w.settlementKey == "" {
-			return ErrWalletBillingIdentityRequired
-		}
-		if err := model.ReserveWalletQuota(model.DB, w.settlementKey, w.userId, int64(amount)); err != nil {
-			return mapWalletReserveError(err)
-		}
-		w.consumed = amount
-		w.reservationActive = true
-		w.durableSettlement = true
-		return nil
-	}
-	if err := model.ReserveUserQuota(w.userId, amount); err != nil {
-		return err
+	if err := model.ReserveBillingWalletQuota(model.DB, w.settlementKey, w.userId, w.tokenId, int64(amount)); err != nil {
+		return mapWalletReserveError(err)
 	}
 	w.consumed = amount
+	w.reservationActive = true
+	w.durableSettlement = true
 	return nil
 }
 
@@ -90,31 +78,11 @@ func (w *WalletFunding) ReserveMore(delta int) error {
 	if delta <= 0 {
 		return nil
 	}
-	if w.reservationActive {
-		if err := model.ReserveWalletQuota(model.DB, w.settlementKey, w.userId, int64(w.consumed+delta)); err != nil {
-			return mapWalletReserveError(err)
-		}
-		w.consumed += delta
-		return nil
+	if !w.reservationActive {
+		return ErrWalletBillingIdentityRequired
 	}
-	active, err := model.WalletCreditLedgerActive(model.DB)
-	if err != nil {
-		return err
-	}
-	if active {
-		if w.settlementKey == "" {
-			return ErrWalletBillingIdentityRequired
-		}
-		if err := model.ReserveWalletQuota(model.DB, w.settlementKey, w.userId, int64(w.consumed+delta)); err != nil {
-			return mapWalletReserveError(err)
-		}
-		w.consumed += delta
-		w.reservationActive = true
-		w.durableSettlement = true
-		return nil
-	}
-	if err := model.ReserveUserQuota(w.userId, delta); err != nil {
-		return err
+	if err := model.ResizeBillingReservation(model.DB, w.settlementKey, w.userId, int64(w.consumed), int64(w.consumed)+int64(delta)); err != nil {
+		return mapWalletReserveError(err)
 	}
 	w.consumed += delta
 	return nil
@@ -129,7 +97,7 @@ func (w *WalletFunding) ReleaseReserved(delta int) error {
 		return errors.New("wallet release exceeds reserved quota")
 	}
 	if w.reservationActive {
-		if err := model.ReleaseWalletReservationTo(model.DB, w.settlementKey, w.userId, int64(w.consumed), int64(w.consumed-delta)); err != nil {
+		if err := model.ResizeBillingReservation(model.DB, w.settlementKey, w.userId, int64(w.consumed), int64(w.consumed-delta)); err != nil {
 			return err
 		}
 		w.consumed -= delta
@@ -159,6 +127,19 @@ func (w *WalletFunding) Settle(delta int) error {
 // consumes source lots, and applies the wallet delta atomically; identical
 // retries are idempotent. Otherwise the legacy difference-only path is kept.
 func (w *WalletFunding) SettleUsage(preConsumed, actual int) error {
+	if w.durableSettlement {
+		if err := model.PrepareWalletFinalization(model.DB, w.settlementKey, w.userId, int64(preConsumed), int64(actual)); err != nil {
+			return err
+		}
+		if _, err := model.FinalizeBillingReservation(model.DB, w.settlementKey, w.userId, int64(preConsumed), int64(actual)); err != nil {
+			return err
+		}
+		w.consumed = 0
+		w.reservationActive = false
+		return nil
+	}
+	// Compatibility for callers carrying a pre-upgrade debit without a durable
+	// reservation. New sessions always enter the branch above.
 	active, err := model.WalletCreditLedgerActive(model.DB)
 	if err != nil {
 		return err
@@ -177,13 +158,6 @@ func (w *WalletFunding) SettleUsage(preConsumed, actual int) error {
 	if w.settlementKey == "" {
 		return ErrWalletBillingIdentityRequired
 	}
-	w.durableSettlement = true
-	if w.reservationActive {
-		// 持久屏障必须独立提交：即使随后的最终结算失败，也无法再退款已成功的用量。
-		if err := model.PrepareWalletFinalization(model.DB, w.settlementKey, w.userId, int64(preConsumed), int64(actual)); err != nil {
-			return err
-		}
-	}
 	if _, err := model.FinalizeWalletConsumption(model.DB, w.settlementKey, w.userId, int64(preConsumed), int64(actual)); err != nil {
 		return err
 	}
@@ -193,15 +167,15 @@ func (w *WalletFunding) SettleUsage(preConsumed, actual int) error {
 }
 
 func (w *WalletFunding) Refund() error {
-	if w.consumed <= 0 {
-		return nil
-	}
 	if w.reservationActive {
-		if err := model.RefundWalletReservation(model.DB, w.settlementKey, w.userId); err != nil {
+		if err := model.RefundBillingReservation(model.DB, w.settlementKey, w.userId); err != nil {
 			return err
 		}
 		w.consumed = 0
 		w.reservationActive = false
+		return nil
+	}
+	if w.consumed <= 0 {
 		return nil
 	}
 	// 钱包退款是 quota += N：仅在数据库成功后清零本地预扣状态，
@@ -218,6 +192,8 @@ func (w *WalletFunding) Refund() error {
 // ---------------------------------------------------------------------------
 
 type SubscriptionFunding struct {
+	billingKey        string
+	tokenId           int
 	requestId         string
 	userId            int
 	modelName         string
@@ -238,7 +214,13 @@ func (s *SubscriptionFunding) Source() string { return BillingSourceSubscription
 
 func (s *SubscriptionFunding) PreConsume(_ int) error {
 	// amount 参数被忽略，使用内部 s.amount（已在构造时根据 preConsumedQuota 计算）
-	res, err := model.PreConsumeUserSubscription(s.requestId, s.userId, s.modelName, 0, s.amount)
+	var res *model.SubscriptionPreConsumeResult
+	var err error
+	if s.billingKey != "" {
+		res, err = model.ReserveBillingSubscriptionQuota(model.DB, s.billingKey, s.userId, s.tokenId, s.amount)
+	} else {
+		res, err = model.PreConsumeUserSubscription(s.requestId, s.userId, s.modelName, 0, s.amount)
+	}
 	if err != nil {
 		return err
 	}
@@ -270,6 +252,9 @@ func (s *SubscriptionFunding) Settle(delta int) error {
 }
 
 func (s *SubscriptionFunding) Refund() error {
+	if s.billingKey != "" {
+		return model.RefundBillingReservation(model.DB, s.billingKey, s.userId)
+	}
 	if s.preConsumed <= 0 {
 		return nil
 	}

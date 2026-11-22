@@ -71,7 +71,7 @@ import {
   SettingsSwitchField,
 } from '../components/settings-form-layout'
 import { formatPricingNumber } from './pricing-format'
-import { TieredPricingEditor } from './tiered-pricing-editor'
+import { TieredPricingEditor } from './tiered-pricing-with-simulation'
 
 const createModelPricingSchema = (t: (key: string) => string) =>
   z.object({

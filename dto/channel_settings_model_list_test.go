@@ -48,6 +48,39 @@ func TestAdvancedCustomModelListRouteValidation(t *testing.T) {
 	}
 }
 
+func TestAdvancedCustomRouteModelRulesAndFallback(t *testing.T) {
+	config := &AdvancedCustomConfig{Routes: []AdvancedCustomRoute{
+		{IncomingPath: "/v1/chat/completions", Models: []string{" client-model "}, UpstreamPath: "/exact", PassThroughBodyEnabled: true},
+		{IncomingPath: "/v1/chat/completions", Models: []string{"re:^vendor-.+$"}, UpstreamPath: "/regex"},
+		{IncomingPath: "/v1/chat/completions", UpstreamPath: "/fallback"},
+	}}
+	require.NoError(t, config.Validate())
+	for model, want := range map[string]string{"client-model": "/exact", "vendor-chat": "/regex", "other": "/fallback"} {
+		route, matched := config.MatchPathForModel("/v1/chat/completions", model)
+		require.True(t, matched)
+		assert.Equal(t, want, route.UpstreamPath)
+	}
+	_, matched := config.MatchPathForModel("/v1/messages", "client-model")
+	assert.False(t, matched)
+
+	config.Routes[0].Models = nil
+	require.ErrorContains(t, config.Validate(), "catch-all route must be unique and last")
+	config.Routes[0].Models = []string{"re:["}
+	require.ErrorContains(t, config.Validate(), "regex is empty or invalid")
+	config.Routes[0].Models = []string{"re:^vendor-.+$"}
+	require.ErrorContains(t, config.Validate(), "duplicate rule")
+	config.Routes[0].Models = []string{"client-model"}
+	config.Routes[0].Converter = AdvancedCustomConverterOpenAIChatCompletionsToOpenAIResponses
+	require.ErrorContains(t, config.Validate(), "requires converter none")
+
+	for _, route := range []AdvancedCustomRoute{
+		{IncomingPath: AdvancedCustomModelListPath, UpstreamPath: "/models", Models: []string{"client-model"}},
+		{IncomingPath: AdvancedCustomModelListPath, UpstreamPath: "/models", PassThroughBodyEnabled: true},
+	} {
+		require.ErrorContains(t, (&AdvancedCustomConfig{Routes: []AdvancedCustomRoute{route}}).Validate(), "does not support model rules or body passthrough")
+	}
+}
+
 func TestAdvancedCustomModelListRouteRequiresExactPath(t *testing.T) {
 	config := &AdvancedCustomConfig{Routes: []AdvancedCustomRoute{
 		{IncomingPath: "/v1/{model}", UpstreamPath: "/generic/{model}"},

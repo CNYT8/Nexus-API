@@ -131,9 +131,86 @@ func clampThinkingBudgetByEffort(modelName string, effort string) int {
 	return clampThinkingBudget(modelName, maxBudget)
 }
 
+// parseArgonThinkingSuffix follows the level mapping in upstream 52c173038.
+// Invalid numeric suffixes leave both the model name and configuration intact.
+func parseArgonThinkingSuffix(modelName string) (string, *dto.GeminiThinkingConfig, string) {
+	baseModel := modelName
+	level := ""
+	effort := ""
+	includeThoughts := true
+	switch {
+	case strings.Contains(modelName, "-thinking-"):
+		marker := strings.LastIndex(modelName, "-thinking-")
+		budget, err := strconv.Atoi(modelName[marker+len("-thinking-"):])
+		if err != nil {
+			return modelName, nil, ""
+		}
+		baseModel = modelName[:marker]
+		switch {
+		case budget < 0:
+			level = "high"
+		case budget <= 1024:
+			level = "low"
+		case budget <= 8192:
+			level = "medium"
+		default:
+			level = "high"
+		}
+	case strings.HasSuffix(modelName, "-nothinking"):
+		baseModel = strings.TrimSuffix(modelName, "-nothinking")
+		level = "low"
+		includeThoughts = false
+	case strings.HasSuffix(modelName, "-thinking"):
+		baseModel = strings.TrimSuffix(modelName, "-thinking")
+		// Leave the provider's default level unset on the wire, as upstream does.
+		effort = "medium"
+		if strings.HasPrefix(strings.ToLower(baseModel), "gemini-4-argon-cyber-permissive") {
+			effort = "high"
+		}
+	case strings.HasSuffix(modelName, "-none"):
+		baseModel = strings.TrimSuffix(modelName, "-none")
+		level = "low"
+		includeThoughts = false
+	default:
+		var ok bool
+		baseModel, level, ok = reasoning.TrimEffortSuffix(modelName)
+		if !ok {
+			return modelName, nil, ""
+		}
+		switch level {
+		case "minimal":
+			level = "low"
+		case "xhigh", "max":
+			level = "high"
+		}
+	}
+	if effort == "" {
+		effort = level
+	}
+	return baseModel, &dto.GeminiThinkingConfig{
+		IncludeThoughts: common.GetPointer(includeThoughts),
+		ThinkingLevel:   level,
+	}, effort
+}
+
 func ThinkingAdaptor(geminiRequest *dto.GeminiChatRequest, info *relaycommon.RelayInfo, oaiRequest ...dto.GeneralOpenAIRequest) {
+	// Explicit native/extra_body thinking configuration takes precedence over aliases.
+	if geminiRequest.GenerationConfig.ThinkingConfig != nil {
+		return
+	}
 	if model_setting.GetGeminiSettings().ThinkingAdapterEnabled {
 		modelName := info.UpstreamModelName
+		if strings.HasPrefix(strings.ToLower(modelName), "gemini-4-argon") {
+			if model_setting.ShouldPreserveThinkingSuffix(info.OriginModelName) {
+				return
+			}
+			_, config, effort := parseArgonThinkingSuffix(modelName)
+			geminiRequest.GenerationConfig.ThinkingConfig = config
+			if config != nil {
+				info.ReasoningEffort = effort
+			}
+			return
+		}
 		isNew25Pro := strings.HasPrefix(modelName, "gemini-2.5-pro") &&
 			!strings.HasPrefix(modelName, "gemini-2.5-pro-preview-05-06") &&
 			!strings.HasPrefix(modelName, "gemini-2.5-pro-preview-03-25")
@@ -145,7 +222,7 @@ func ThinkingAdaptor(geminiRequest *dto.GeminiChatRequest, info *relaycommon.Rel
 					clampedBudget := clampThinkingBudget(modelName, budgetTokens)
 					geminiRequest.GenerationConfig.ThinkingConfig = &dto.GeminiThinkingConfig{
 						ThinkingBudget:  common.GetPointer(clampedBudget),
-						IncludeThoughts: true,
+						IncludeThoughts: common.GetPointer(true),
 					}
 				}
 			}
@@ -164,11 +241,11 @@ func ThinkingAdaptor(geminiRequest *dto.GeminiChatRequest, info *relaycommon.Rel
 
 			if isUnsupported {
 				geminiRequest.GenerationConfig.ThinkingConfig = &dto.GeminiThinkingConfig{
-					IncludeThoughts: true,
+					IncludeThoughts: common.GetPointer(true),
 				}
 			} else {
 				geminiRequest.GenerationConfig.ThinkingConfig = &dto.GeminiThinkingConfig{
-					IncludeThoughts: true,
+					IncludeThoughts: common.GetPointer(true),
 				}
 				if geminiRequest.GenerationConfig.MaxOutputTokens != nil && *geminiRequest.GenerationConfig.MaxOutputTokens > 0 {
 					budgetTokens := model_setting.GetGeminiSettings().ThinkingAdapterBudgetTokensPercentage * float64(*geminiRequest.GenerationConfig.MaxOutputTokens)
@@ -189,7 +266,7 @@ func ThinkingAdaptor(geminiRequest *dto.GeminiChatRequest, info *relaycommon.Rel
 			}
 		} else if _, level, ok := reasoning.TrimEffortSuffix(info.UpstreamModelName); ok && level != "" {
 			geminiRequest.GenerationConfig.ThinkingConfig = &dto.GeminiThinkingConfig{
-				IncludeThoughts: true,
+				IncludeThoughts: common.GetPointer(true),
 				ThinkingLevel:   level,
 			}
 			info.ReasoningEffort = level
@@ -199,6 +276,9 @@ func ThinkingAdaptor(geminiRequest *dto.GeminiChatRequest, info *relaycommon.Rel
 
 // Setting safety to the lowest possible values since Gemini is already powerless enough
 func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, info *relaycommon.RelayInfo) (*dto.GeminiChatRequest, error) {
+	if err := helper.ApplyReasoningModelSuffix(c, info, &textRequest); err != nil {
+		return nil, err
+	}
 
 	geminiRequest := dto.GeminiChatRequest{
 		Contents: make([]dto.GeminiChatContent, 0, len(textRequest.Messages)),
@@ -207,15 +287,15 @@ func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 		},
 	}
 
-	if textRequest.TopP != nil && *textRequest.TopP > 0 {
+	if textRequest.TopP != nil {
 		geminiRequest.GenerationConfig.TopP = common.GetPointer(*textRequest.TopP)
 	}
 
-	if maxTokens := textRequest.GetMaxTokens(); maxTokens > 0 {
-		geminiRequest.GenerationConfig.MaxOutputTokens = common.GetPointer(maxTokens)
+	if textRequest.MaxTokens != nil || textRequest.MaxCompletionTokens != nil {
+		geminiRequest.GenerationConfig.MaxOutputTokens = common.GetPointer(textRequest.GetMaxTokens())
 	}
 
-	if textRequest.Seed != nil && *textRequest.Seed != 0 {
+	if textRequest.Seed != nil {
 		geminiSeed := int64(lo.FromPtr(textRequest.Seed))
 		geminiRequest.GenerationConfig.Seed = common.GetPointer(geminiSeed)
 	}
@@ -253,69 +333,69 @@ func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 
 		// eg. {"google":{"thinking_config":{"thinking_budget":5324,"include_thoughts":true}}}
 		if googleBody, ok := extraBody["google"].(map[string]interface{}); ok {
-			if !strings.HasSuffix(info.UpstreamModelName, "-nothinking") {
+			// check error param name like thinkingConfig, should be thinking_config
+			if _, hasErrorParam := googleBody["thinkingConfig"]; hasErrorParam {
+				return nil, errors.New("extra_body.google.thinkingConfig is not supported, use extra_body.google.thinking_config instead")
+			}
+
+			if thinkingConfig, ok := googleBody["thinking_config"].(map[string]interface{}); ok {
 				adaptorWithExtraBody = true
-				// check error param name like thinkingConfig, should be thinking_config
-				if _, hasErrorParam := googleBody["thinkingConfig"]; hasErrorParam {
-					return nil, errors.New("extra_body.google.thinkingConfig is not supported, use extra_body.google.thinking_config instead")
+				// check error param name like thinkingBudget, should be thinking_budget
+				if _, hasErrorParam := thinkingConfig["thinkingBudget"]; hasErrorParam {
+					return nil, errors.New("extra_body.google.thinking_config.thinkingBudget is not supported, use extra_body.google.thinking_config.thinking_budget instead")
+				}
+				var hasThinkingConfig bool
+				var tempThinkingConfig dto.GeminiThinkingConfig
+
+				if thinkingBudget, exists := thinkingConfig["thinking_budget"]; exists {
+					switch v := thinkingBudget.(type) {
+					case float64:
+						budgetInt := int(v)
+						tempThinkingConfig.ThinkingBudget = common.GetPointer(budgetInt)
+						if budgetInt > 0 {
+							// 有正数预算
+							tempThinkingConfig.IncludeThoughts = common.GetPointer(true)
+						} else {
+							// 存在但为0或负数，禁用思考
+							tempThinkingConfig.IncludeThoughts = common.GetPointer(false)
+						}
+						hasThinkingConfig = true
+					default:
+						return nil, errors.New("extra_body.google.thinking_config.thinking_budget must be an integer")
+					}
 				}
 
-				if thinkingConfig, ok := googleBody["thinking_config"].(map[string]interface{}); ok {
-					// check error param name like thinkingBudget, should be thinking_budget
-					if _, hasErrorParam := thinkingConfig["thinkingBudget"]; hasErrorParam {
-						return nil, errors.New("extra_body.google.thinking_config.thinkingBudget is not supported, use extra_body.google.thinking_config.thinking_budget instead")
+				if includeThoughts, exists := thinkingConfig["include_thoughts"]; exists {
+					if v, ok := includeThoughts.(bool); ok {
+						tempThinkingConfig.IncludeThoughts = common.GetPointer(v)
+						hasThinkingConfig = true
+					} else {
+						return nil, errors.New("extra_body.google.thinking_config.include_thoughts must be a boolean")
 					}
-					var hasThinkingConfig bool
-					var tempThinkingConfig dto.GeminiThinkingConfig
+				}
+				if thinkingLevel, exists := thinkingConfig["thinking_level"]; exists {
+					if v, ok := thinkingLevel.(string); ok {
+						tempThinkingConfig.ThinkingLevel = v
+						hasThinkingConfig = true
+					} else {
+						return nil, errors.New("extra_body.google.thinking_config.thinking_level must be a string")
+					}
+				}
 
-					if thinkingBudget, exists := thinkingConfig["thinking_budget"]; exists {
-						switch v := thinkingBudget.(type) {
-						case float64:
-							budgetInt := int(v)
-							tempThinkingConfig.ThinkingBudget = common.GetPointer(budgetInt)
-							if budgetInt > 0 {
-								// 有正数预算
-								tempThinkingConfig.IncludeThoughts = true
-							} else {
-								// 存在但为0或负数，禁用思考
-								tempThinkingConfig.IncludeThoughts = false
-							}
-							hasThinkingConfig = true
-						default:
-							return nil, errors.New("extra_body.google.thinking_config.thinking_budget must be an integer")
+				if hasThinkingConfig {
+					// 避免 panic: 仅在获得配置时分配，防止后续赋值时空指针
+					if geminiRequest.GenerationConfig.ThinkingConfig == nil {
+						geminiRequest.GenerationConfig.ThinkingConfig = &tempThinkingConfig
+					} else {
+						// 如果已分配，则合并内容
+						if tempThinkingConfig.ThinkingBudget != nil {
+							geminiRequest.GenerationConfig.ThinkingConfig.ThinkingBudget = tempThinkingConfig.ThinkingBudget
 						}
-					}
-
-					if includeThoughts, exists := thinkingConfig["include_thoughts"]; exists {
-						if v, ok := includeThoughts.(bool); ok {
-							tempThinkingConfig.IncludeThoughts = v
-							hasThinkingConfig = true
-						} else {
-							return nil, errors.New("extra_body.google.thinking_config.include_thoughts must be a boolean")
-						}
-					}
-					if thinkingLevel, exists := thinkingConfig["thinking_level"]; exists {
-						if v, ok := thinkingLevel.(string); ok {
-							tempThinkingConfig.ThinkingLevel = v
-							hasThinkingConfig = true
-						} else {
-							return nil, errors.New("extra_body.google.thinking_config.thinking_level must be a string")
-						}
-					}
-
-					if hasThinkingConfig {
-						// 避免 panic: 仅在获得配置时分配，防止后续赋值时空指针
-						if geminiRequest.GenerationConfig.ThinkingConfig == nil {
-							geminiRequest.GenerationConfig.ThinkingConfig = &tempThinkingConfig
-						} else {
-							// 如果已分配，则合并内容
-							if tempThinkingConfig.ThinkingBudget != nil {
-								geminiRequest.GenerationConfig.ThinkingConfig.ThinkingBudget = tempThinkingConfig.ThinkingBudget
-							}
+						if tempThinkingConfig.IncludeThoughts != nil {
 							geminiRequest.GenerationConfig.ThinkingConfig.IncludeThoughts = tempThinkingConfig.IncludeThoughts
-							if tempThinkingConfig.ThinkingLevel != "" {
-								geminiRequest.GenerationConfig.ThinkingConfig.ThinkingLevel = tempThinkingConfig.ThinkingLevel
-							}
+						}
+						if tempThinkingConfig.ThinkingLevel != "" {
+							geminiRequest.GenerationConfig.ThinkingConfig.ThinkingLevel = tempThinkingConfig.ThinkingLevel
 						}
 					}
 				}
@@ -359,6 +439,9 @@ func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 	if !adaptorWithExtraBody {
 		ThinkingAdaptor(&geminiRequest, info, textRequest)
 	}
+	if err := helper.ApplyReasoningModelSuffix(c, info, &geminiRequest); err != nil {
+		return nil, err
+	}
 
 	safetySettings := make([]dto.GeminiChatSafetySettings, 0, len(SafetySettingList))
 	for _, category := range SafetySettingList {
@@ -371,11 +454,21 @@ func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 
 	// openaiContent.FuncToToolCalls()
 	if textRequest.Tools != nil {
-		functions := make([]dto.FunctionRequest, 0, len(textRequest.Tools))
+		functions := make([]dto.GeminiFunctionDeclaration, 0, len(textRequest.Tools))
 		googleSearch := false
 		codeExecution := false
 		urlContext := false
-		for _, tool := range textRequest.Tools {
+		for index, tool := range textRequest.Tools {
+			// Gemini has no equivalent guarantee for OpenAI function strictness.
+			// false and omission both permit ordinary Gemini function calling.
+			if tool.Function.Strict != nil && *tool.Function.Strict {
+				return nil, types.WithOpenAIError(types.OpenAIError{
+					Message: "Gemini does not support strict function calling; set strict to false or omit it, or use a provider that supports strict mode",
+					Type:    "invalid_request_error",
+					Param:   fmt.Sprintf("tools[%d].function.strict", index),
+					Code:    "unsupported_function_strict",
+				}, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			}
 			if tool.Function.Name == "googleSearch" {
 				googleSearch = true
 				continue
@@ -399,10 +492,11 @@ func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 					}
 				}
 			}
-			// Clean the parameters before appending
-			cleanedParams := cleanFunctionParameters(tool.Function.Parameters)
-			tool.Function.Parameters = cleanedParams
-			functions = append(functions, tool.Function)
+			functions = append(functions, dto.GeminiFunctionDeclaration{
+				Name:        tool.Function.Name,
+				Description: tool.Function.Description,
+				Parameters:  cleanFunctionParameters(tool.Function.Parameters),
+			})
 		}
 		geminiTools := geminiRequest.GetTools()
 		if codeExecution {
@@ -487,6 +581,9 @@ func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 				Name:     name,
 				Response: contentMap,
 			}
+			if message.ToolCallId != "" {
+				functionResp.ID, _ = json.Marshal(message.ToolCallId)
+			}
 
 			*parts = append(*parts, dto.GeminiPart{
 				FunctionResponse: functionResp,
@@ -512,6 +609,7 @@ func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 				}
 				toolCall := dto.GeminiPart{
 					FunctionCall: &dto.FunctionCall{
+						ID:           call.ID,
 						FunctionName: call.Function.Name,
 						Arguments:    args,
 					},
@@ -1005,8 +1103,12 @@ func getResponseToolCall(item *dto.GeminiPart) *dto.ToolCallResponse {
 	if err != nil {
 		return nil
 	}
+	callID := item.FunctionCall.ID
+	if callID == "" {
+		callID = fmt.Sprintf("call_%s", common.GetUUID())
+	}
 	return &dto.ToolCallResponse{
-		ID:   fmt.Sprintf("call_%s", common.GetUUID()),
+		ID:   callID,
 		Type: "function",
 		Function: dto.FunctionResponse{
 			Arguments: string(argsBytes),
@@ -1054,8 +1156,11 @@ func buildUsageFromGeminiMetadata(metadata dto.GeminiUsageMetadata, fallbackProm
 		}
 	}
 
-	if usage.TotalTokens > 0 && usage.CompletionTokens <= 0 {
+	if usage.TotalTokens > usage.PromptTokens && usage.CompletionTokens <= 0 {
 		usage.CompletionTokens = usage.TotalTokens - usage.PromptTokens
+	}
+	if usage.TotalTokens <= 0 {
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	}
 
 	if usage.PromptTokens > 0 && usage.PromptTokensDetails.TextTokens == 0 && usage.PromptTokensDetails.AudioTokens == 0 {
@@ -1165,7 +1270,8 @@ func responseGeminiChat2OpenAI(c *gin.Context, response *dto.GeminiChatResponse)
 						toolCalls = append(toolCalls, *call)
 					}
 				} else if part.Thought {
-					choice.Message.ReasoningContent = &part.Text
+					text := lo.FromPtr(choice.Message.ReasoningContent) + part.Text
+					choice.Message.ReasoningContent = &text
 				} else {
 					if part.ExecutableCode != nil {
 						writeSep()
@@ -1236,9 +1342,8 @@ func streamResponseGeminiChat2OpenAI(geminiResponse *dto.GeminiChatResponse) (*d
 	choices := make([]dto.ChatCompletionsStreamResponseChoice, 0, len(geminiResponse.Candidates))
 	isStop := false
 	for _, candidate := range geminiResponse.Candidates {
-		if candidate.FinishReason != nil && *candidate.FinishReason == "STOP" {
+		if candidate.FinishReason != nil {
 			isStop = true
-			candidate.FinishReason = nil
 		}
 		choice := dto.ChatCompletionsStreamResponseChoice{
 			Index: int(candidate.Index),
@@ -1346,7 +1451,7 @@ func streamResponseGeminiChat2OpenAI(geminiResponse *dto.GeminiChatResponse) (*d
 		} else {
 			choice.Delta.SetContentString(content.String())
 		}
-		if isTools {
+		if isTools && choice.FinishReason != nil && *choice.FinishReason == constant.FinishReasonStop {
 			choice.FinishReason = &constant.FinishReasonToolCalls
 		}
 		choices = append(choices, choice)
@@ -1381,13 +1486,17 @@ func handleFinalStream(c *gin.Context, info *relaycommon.RelayInfo, resp *dto.Ch
 
 func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, callback func(data string, geminiResponse *dto.GeminiChatResponse) bool) (*dto.Usage, *types.NewAPIError) {
 	var usage = &dto.Usage{}
+	var metadata *dto.GeminiUsageMetadata
+	var streamErr *types.NewAPIError
 	var imageCount int
 	responseText := strings.Builder{}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		var geminiResponse dto.GeminiChatResponse
 		if err := common.UnmarshalJsonStr(data, &geminiResponse); err != nil {
-			sr.Stop(fmt.Errorf("unmarshal: %w", err))
+			streamErr = types.NewOpenAIError(fmt.Errorf("unmarshal: %w", err), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+			sr.Error(streamErr)
+			sr.Stop(streamErr)
 			return
 		}
 
@@ -1407,17 +1516,21 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			}
 		}
 
-		// 更新使用量统计
-		if geminiResponse.UsageMetadata.TotalTokenCount != 0 {
-			mappedUsage := buildUsageFromGeminiMetadata(geminiResponse.UsageMetadata, info.GetEstimatePromptTokens())
-			*usage = mappedUsage
-		}
+		// Each frame is a cumulative snapshot; omitted fields retain prior values.
+		metadata = dto.MergeGeminiUsageMetadataNonZero(metadata, &geminiResponse.UsageMetadata)
+		*usage = buildUsageFromGeminiMetadata(*metadata, info.GetEstimatePromptTokens())
 
 		if !callback(data, &geminiResponse) {
 			sr.Stop(fmt.Errorf("gemini callback stopped"))
 		}
 	})
 
+	if streamErr != nil {
+		return usage, streamErr
+	}
+	if c.Request.Context().Err() != nil || (info.StreamStatus != nil && (!info.StreamStatus.IsNormalEnd() || info.StreamStatus.HasErrors())) {
+		return usage, types.NewOpenAIError(errors.New("Gemini stream interrupted"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+	}
 	if imageCount != 0 {
 		if usage.CompletionTokens == 0 {
 			usage.CompletionTokens = imageCount * 1400
@@ -1426,7 +1539,9 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 
 	if usage.CompletionTokens <= 0 {
 		if info.ReceivedResponseCount > 0 {
-			usage = service.ResponseText2Usage(c, responseText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+			estimated := service.ResponseText2Usage(c, responseText.String(), info.UpstreamModelName, usage.PromptTokens)
+			usage.CompletionTokens = estimated.CompletionTokens
+			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 		} else {
 			usage = &dto.Usage{}
 		}
@@ -1435,25 +1550,52 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	return usage, nil
 }
 
+func stripGeminiConversionThinking(response *dto.GeminiChatResponse) {
+	for index := range response.Candidates {
+		parts := response.Candidates[index].Content.Parts
+		visible := parts[:0]
+		for _, part := range parts {
+			if part.Thought {
+				if part.FunctionCall == nil {
+					continue
+				}
+				part.Text = ""
+				part.Thought = false
+			}
+			visible = append(visible, part)
+		}
+		response.Candidates[index].Content.Parts = visible
+	}
+}
+
 func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	defer helper.FinalizeThinkingStream(c)
 	id := helper.GetResponseID(c)
 	createAt := common.GetTimestamp()
 	finishReason := constant.FinishReasonStop
 	toolCallIndexByChoice := make(map[int]map[string]int)
 	nextToolCallIndexByChoice := make(map[int]int)
+	startedChoices := make(map[int]bool)
+	partialCalls := make(partialFunctionCalls)
+	var conversionErr error
 
 	usage, err := geminiStreamHandler(c, info, resp, func(data string, geminiResponse *dto.GeminiChatResponse) bool {
-		response, isStop := streamResponseGeminiChat2OpenAI(geminiResponse)
+		if conversionErr = partialCalls.prepare(geminiResponse); conversionErr != nil {
+			return false
+		}
+		if info.ThinkingProcessStrip {
+			// 上层已用原始 parts 计量；转换前分离混合帧，防止正文被
+			// 合并进 reasoning_content。工具调用及其签名保留。
+			stripGeminiConversionThinking(geminiResponse)
+		}
+		response, _ := streamResponseGeminiChat2OpenAI(geminiResponse)
 
 		response.Id = id
 		response.Created = createAt
 		response.Model = info.UpstreamModelName
-		if response.IsToolCall() {
-			finishReason = constant.FinishReasonToolCalls
-			if info.RelayFormat == types.RelayFormatClaude {
-				for choiceIdx := range response.Choices {
-					response.Choices[choiceIdx].FinishReason = nil
-				}
+		for _, choice := range response.Choices {
+			if len(choice.Delta.ToolCalls) > 0 {
+				finishReason = constant.FinishReasonToolCalls
 			}
 		}
 		for choiceIdx := range response.Choices {
@@ -1479,52 +1621,38 @@ func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *
 			}
 		}
 
-		logger.LogDebug(c, "info.SendResponseCount = %d", info.SendResponseCount)
-		if info.SendResponseCount == 0 {
-			// send first response
-			emptyResponse := helper.GenerateStartEmptyResponse(id, createAt, info.UpstreamModelName, nil)
-			if response.IsToolCall() {
-				if len(emptyResponse.Choices) > 0 && len(response.Choices) > 0 {
-					toolCalls := response.Choices[0].Delta.ToolCalls
-					copiedToolCalls := make([]dto.ToolCallResponse, len(toolCalls))
-					for idx := range toolCalls {
-						copiedToolCalls[idx] = toolCalls[idx]
-						copiedToolCalls[idx].Function.Arguments = ""
-					}
-					emptyResponse.Choices[0].Delta.ToolCalls = copiedToolCalls
-				}
-				finishReason = constant.FinishReasonToolCalls
-				err := handleStream(c, info, emptyResponse)
-				if err != nil {
-					logger.LogError(c, err.Error())
-				}
-
-				response.ClearToolCalls()
-				if response.IsFinished() {
-					response.Choices[0].FinishReason = nil
-				}
-			} else {
-				err := handleStream(c, info, emptyResponse)
-				if err != nil {
-					logger.LogError(c, err.Error())
-				}
+		for i := range response.Choices {
+			choice := &response.Choices[i]
+			if choice.FinishReason != nil && *choice.FinishReason == constant.FinishReasonStop && nextToolCallIndexByChoice[choice.Index] > 0 {
+				choice.FinishReason = &constant.FinishReasonToolCalls
+			}
+			if info.RelayFormat == types.RelayFormatClaude || partialCalls[int64(choice.Index)] != nil {
+				choice.FinishReason = nil
 			}
 		}
-
-		err := handleStream(c, info, response)
-		if err != nil {
-			logger.LogError(c, err.Error())
-		}
-		if isStop {
-			if info.RelayFormat != types.RelayFormatClaude {
-				_ = handleStream(c, info, helper.GenerateStopResponse(id, createAt, info.UpstreamModelName, finishReason))
+		if start := geminiStreamStartResponse(response, startedChoices); start != nil {
+			if err := handleStream(c, info, start); err != nil {
+				conversionErr = err
+				return false
 			}
+		}
+		// The role frame never consumes metadata: every candidate retains its
+		// complete tool declaration and arguments in this payload frame.
+		if err := handleStream(c, info, response); err != nil {
+			conversionErr = err
+			return false
 		}
 		return true
 	})
 
+	if conversionErr != nil {
+		return usage, types.NewOpenAIError(conversionErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+	}
 	if err != nil {
 		return usage, err
+	}
+	if len(partialCalls) != 0 {
+		return usage, types.NewOpenAIError(errors.New("Gemini stream ended with an incomplete function call"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
 	}
 
 	response := helper.GenerateFinalUsageResponse(id, createAt, info.UpstreamModelName, *usage)
@@ -1546,7 +1674,7 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	}
 	service.CloseResponseBodyGracefully(resp)
 	logger.LogDebug(c, "Gemini response body received: bytes=%d", len(responseBody))
-	if matcher := relaycommon.NewOutputSensitiveMatcherForConfig(info.OutputSensitiveConfig); matcher != nil {
+	if matcher := relaycommon.NewOutputSensitiveMatcherForConfig(info.OutputSensitiveConfig); !info.ThinkingProcessStrip && matcher != nil {
 		cleaned, matched, _, scanErr := relaycommon.SanitizeOutputSensitiveJSONWithThinkingPolicy(responseBody, matcher, info.ThinkingProcessStrip)
 		if scanErr != nil {
 			return nil, types.NewOpenAIError(scanErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -1600,9 +1728,22 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 		}
 		return &usage, nil
 	}
+	usage := buildUsageFromGeminiMetadata(geminiResponse.UsageMetadata, info.GetEstimatePromptTokens())
+	if info.RelayFormat != types.RelayFormatGemini {
+		partialCalls := make(partialFunctionCalls)
+		if err := partialCalls.prepare(&geminiResponse); err != nil {
+			return &usage, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		}
+		if len(partialCalls) != 0 {
+			return &usage, types.NewOpenAIError(errors.New("Gemini response contains an incomplete function call"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		}
+	}
+	if info.ThinkingProcessStrip && info.RelayFormat != types.RelayFormatGemini {
+		// 原始 usage 已提取；转换器会拼接所有 Text，须先移除结构化思考。
+		stripGeminiConversionThinking(&geminiResponse)
+	}
 	fullTextResponse := responseGeminiChat2OpenAI(c, &geminiResponse)
 	fullTextResponse.Model = info.UpstreamModelName
-	usage := buildUsageFromGeminiMetadata(geminiResponse.UsageMetadata, info.GetEstimatePromptTokens())
 
 	fullTextResponse.Usage = usage
 
@@ -1623,7 +1764,9 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 		break
 	}
 
-	service.IOCopyBytesGracefully(c, resp, responseBody)
+	if writeErr := service.WriteRelayJSON(c, resp, responseBody, info); writeErr != nil {
+		return nil, writeErr
+	}
 
 	return &usage, nil
 }

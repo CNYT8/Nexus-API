@@ -21,7 +21,7 @@ import React, { useState } from 'react';
 import MissingModelsModal from './modals/MissingModelsModal';
 import PrefillGroupManagement from './modals/PrefillGroupManagement';
 import EditPrefillGroupModal from './modals/EditPrefillGroupModal';
-import { Button, Modal, Popover, RadioGroup, Radio } from '@douyinfe/semi-ui';
+import { Button, Popover, RadioGroup, Radio } from '@douyinfe/semi-ui';
 import { showSuccess, showError, copy } from '../../../helpers';
 import CompactModeToggle from '../../common/ui/CompactModeToggle';
 import SelectionNotification from './components/SelectionNotification';
@@ -33,7 +33,7 @@ const ModelsActions = ({
   setSelectedKeys,
   setEditingModel,
   setShowEdit,
-  batchDeleteModels,
+  onDelete,
   syncing,
   previewing,
   syncUpstream,
@@ -44,7 +44,6 @@ const ModelsActions = ({
   t,
 }) => {
   // Modal states
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showMissingModal, setShowMissingModal] = useState(false);
   const [showGroupManagement, setShowGroupManagement] = useState(false);
   const [showAddPrefill, setShowAddPrefill] = useState(false);
@@ -65,17 +64,6 @@ const ModelsActions = ({
     }
     // 无冲突，直接同步缺失
     await syncUpstream?.({ locale });
-  };
-
-  // Handle delete selected models with confirmation
-  const handleDeleteSelectedModels = () => {
-    setShowDeleteModal(true);
-  };
-
-  // Handle delete confirmation
-  const handleConfirmDelete = () => {
-    batchDeleteModels();
-    setShowDeleteModal(false);
   };
 
   // Handle clear selection
@@ -182,25 +170,11 @@ const ModelsActions = ({
       <SelectionNotification
         selectedKeys={selectedKeys}
         t={t}
-        onDelete={handleDeleteSelectedModels}
+        onDelete={onDelete}
         onAddPrefill={handleAddToPrefill}
         onClear={handleClearSelected}
         onCopy={handleCopyNames}
       />
-
-      <Modal
-        title={t('批量删除模型')}
-        visible={showDeleteModal}
-        onCancel={() => setShowDeleteModal(false)}
-        onOk={handleConfirmDelete}
-        type='warning'
-      >
-        <div>
-          {t('确定要删除所选的 {{count}} 个模型吗？', {
-            count: selectedKeys.length,
-          })}
-        </div>
-      </Modal>
 
       <SyncWizardModal
         visible={showSyncModal}

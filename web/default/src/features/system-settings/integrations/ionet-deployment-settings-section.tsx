@@ -44,6 +44,7 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 
 const schema = z.object({
@@ -73,6 +74,7 @@ export function IoNetDeploymentSettingsSection({
     },
   })
 
+  const submitForm = useResetForm(form, defaultValues)
   const { isDirty, isSubmitting } = form.formState
   const enabled = form.watch('enabled')
 
@@ -104,11 +106,7 @@ export function IoNetDeploymentSettingsSection({
       return
     }
 
-    for (const update of updates) {
-      await updateOption.mutateAsync(update)
-    }
-
-    form.reset(values)
+    await updateOption.saveOptions(updates)
   }
 
   const handleTestConnection = async () => {
@@ -137,9 +135,9 @@ export function IoNetDeploymentSettingsSection({
   return (
     <SettingsSection title={t('io.net Deployments')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)} autoComplete='off'>
+        <SettingsForm onSubmit={submitForm(onSubmit)} autoComplete='off'>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending || isSubmitting}
             isSaveDisabled={!isDirty}
             saveLabel='Save io.net settings'

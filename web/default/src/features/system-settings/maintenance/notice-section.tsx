@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -34,6 +33,7 @@ import { SettingsForm } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { useResetForm } from '../hooks/use-reset-form'
 
 const noticeSchema = z.object({
   Notice: z.string().optional(),
@@ -55,28 +55,23 @@ export function NoticeSection({ defaultValue }: NoticeSectionProps) {
     },
   })
 
-  useEffect(() => {
-    form.reset({ Notice: defaultValue ?? '' })
-  }, [defaultValue, form])
+  const submitForm = useResetForm(form, { Notice: defaultValue ?? '' })
 
   const onSubmit = async (values: NoticeFormValues) => {
     const normalized = values.Notice ?? ''
     if (normalized === (defaultValue ?? '')) {
       return
     }
-    await updateOption.mutateAsync({
-      key: 'Notice',
-      value: normalized,
-    })
+    await updateOption.saveOptions([{ key: 'Notice', value: normalized }])
   }
 
   return (
     <SettingsSection title={t('System Notice')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
-            isSaving={updateOption.isPending}
+            onSave={submitForm(onSubmit)}
+            isSaving={form.formState.isSubmitting || updateOption.isPending}
             saveLabel='Save notice'
           />
           <FormField

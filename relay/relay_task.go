@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
+	taskjsplugin "github.com/QuantumNous/new-api/relay/channel/task/jsplugin"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -23,10 +25,18 @@ import (
 )
 
 type TaskSubmitResult struct {
-	UpstreamTaskID string
-	TaskData       []byte
-	Platform       constant.TaskPlatform
-	Quota          int
+	UpstreamTaskID         string
+	TaskData               []byte
+	Platform               constant.TaskPlatform
+	Quota                  int
+	UsageSnapshot          *model.TaskUsageSnapshot
+	ResultMetadata         *model.TaskResultMetadata
+	InstantStatus          model.TaskStatus
+	ScriptPluginID         int64
+	ScriptPluginDigest     string
+	ScriptPluginState      string
+	ScriptPluginUsage      string
+	ScriptPluginUsageError string
 	//PerCallPrice   types.PriceData
 }
 
@@ -148,10 +158,26 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 
 // RelayTaskSubmit 完成 task 提交的全部流程（每次尝试调用一次）：
 // 刷新渠道元数据 → 确定 platform/adaptor → 验证请求 →
-// 估算计费(EstimateBilling) → 计算价格 → 预扣费（仅首次）→
+// 估算计费(EstimateBilling) → 计算价格 → 按本次报价补足预扣 →
 // 构建/发送/解析上游请求 → 提交后计费调整(AdjustBillingOnSubmit)。
 // 控制器负责 defer Refund 和成功后 Settle。
 func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitResult, *dto.TaskError) {
+	// Distributor has already enforced token/model/group/channel permissions.
+	// Resolve each attempt independently because retries can select a new channel.
+	info.InitChannelMeta(c)
+	binding, plugin, err := service.ResolveScriptPluginBinding(c.Request.Context(), info.ChannelId, info.OriginModelName)
+	if err != nil {
+		return nil, service.TaskErrorWrapperLocal(errors.New("script plugin binding is unavailable"), "script_plugin_unavailable", http.StatusServiceUnavailable)
+	}
+	if binding != nil {
+		return relayTaskSubmitWithAdaptor(c, info, func(constant.TaskPlatform) channel.TaskAdaptor {
+			return taskjsplugin.New(binding.PluginID, plugin)
+		})
+	}
+	return relayTaskSubmitWithAdaptor(c, info, GetTaskAdaptor)
+}
+
+func relayTaskSubmitWithAdaptor(c *gin.Context, info *relaycommon.RelayInfo, adaptorFactory func(constant.TaskPlatform) channel.TaskAdaptor) (*TaskSubmitResult, *dto.TaskError) {
 	info.InitChannelMeta(c)
 
 	// 1. 确定 platform → 创建适配器 → 验证请求
@@ -159,9 +185,12 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	if platform == "" {
 		platform = GetTaskPlatform(c)
 	}
-	adaptor := GetTaskAdaptor(platform)
+	adaptor := adaptorFactory(platform)
 	if adaptor == nil {
 		return nil, service.TaskErrorWrapperLocal(fmt.Errorf("invalid api platform: %s", platform), "invalid_api_platform", http.StatusBadRequest)
+	}
+	if _, scripted := adaptor.(*taskjsplugin.TaskAdaptor); scripted {
+		platform = constant.TaskPlatform(taskjsplugin.Platform)
 	}
 	adaptor.Init(info)
 	if taskErr := adaptor.ValidateRequestAndSetAction(c, info); taskErr != nil {
@@ -217,58 +246,38 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		info.PriceData.Quota = quota
 	}
 
-	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，或钱包提交身份已保存在请求作用域）
+	usageSnapshot, usageErr := service.FreezeTaskUsageBilling(modelName, info.PriceData.GroupRatioInfo.GroupRatio, info.PriceData.OtherRatios)
+	if usageErr != nil {
+		return nil, service.TaskErrorWrapperLocal(usageErr, "task_usage_plugin_invalid", http.StatusBadRequest)
+	}
+	if script, ok := adaptor.(*taskjsplugin.TaskAdaptor); ok {
+		quote, hasUsage, err := script.FreezeUsageBilling(usageSnapshot)
+		if err != nil {
+			return nil, service.TaskErrorWrapperLocal(err, "script_usage_invalid", http.StatusBadRequest)
+		}
+		if hasUsage {
+			// Keep the host quote as a reservation floor; final zero usage still settles to zero.
+			info.PriceData.Quota = max(info.PriceData.Quota, quote)
+		}
+	}
+	if usageSnapshot != nil && info.PriceData.FreeModel {
+		return nil, service.TaskErrorWrapperLocal(errors.New("usage billing requires a non-free task reservation price"), "task_usage_plugin_invalid", http.StatusBadRequest)
+	}
+
+	// 7. 每次尝试均校验报价；已有会话不能绕过溢出保护。
+	if info.QuotaClamp != nil {
+		taskErr := service.TaskErrorFromAPIError(service.TaskWalletQuotaClampError(info.QuotaClamp))
+		taskErr.LocalError = true
+		return nil, taskErr
+	}
 	if info.Billing == nil && !info.PriceData.FreeModel {
 		info.ForcePreConsume = true
-		ledgerActive, ledgerErr := model.WalletCreditLedgerActive(model.DB)
-		if ledgerErr != nil {
-			return nil, service.TaskErrorWrapper(ledgerErr, "wallet_ledger_check_failed", http.StatusInternalServerError)
-		}
-		switch {
-		case !ledgerActive:
-			// 账本未初始化：完全保持旧路径（PreConsumeBilling + SettleBilling）。
-			if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
-				return nil, service.TaskErrorFromAPIError(apiErr)
-			}
-		case info.QuotaClamp != nil:
-			// 账本任务路径绕过 PreConsumeBilling，必须保留其额度溢出拒绝语义。
-			return nil, service.TaskErrorFromAPIError(service.TaskWalletQuotaClampError(info.QuotaClamp))
-		case c.GetString(service.ContextKeyTaskWalletBillingKey) != "":
-			// 重试轮次：首次已持久化提交身份，绝不能重复预扣。
-		default:
-			usesSubscription, prefErr := service.TaskWalletLedgerUsesSubscription(info)
-			if prefErr != nil {
-				return nil, service.TaskErrorWrapper(prefErr, "billing_preference_check_failed", http.StatusInternalServerError)
-			}
-			if usesSubscription {
-				if taskErr := createLedgerTaskSubscriptionSession(c, info); taskErr != nil {
-					return nil, taskErr
-				}
-			} else {
-				key, reserveErr := service.ReservePendingTaskWalletQuota(info.UserId, info.PriceData.Quota)
-				if reserveErr != nil {
-					// wallet_first 在钱包不足时按 NewBillingSession 的语义回退订阅；
-					// 其它失败保持 fail-closed。
-					pref := common.NormalizeBillingPreference(info.UserSetting.BillingPreference)
-					if pref == "wallet_first" && service.IsTaskWalletInsufficientQuota(reserveErr) {
-						if taskErr := createLedgerTaskSubscriptionSession(c, info); taskErr != nil {
-							return nil, taskErr
-						}
-					} else {
-						return nil, service.TaskErrorFromAPIError(service.TaskWalletReserveError(reserveErr))
-					}
-				} else {
-					if tokenErr := service.PreConsumeTokenQuota(info, info.PriceData.Quota); tokenErr != nil {
-						if refundErr := service.RefundPendingTaskWalletQuota(key, info.UserId); refundErr != nil {
-							common.SysError("refund pending task wallet quota after token failure: " + refundErr.Error())
-						}
-						return nil, service.TaskErrorFromAPIError(service.TaskWalletTokenPreConsumeError(tokenErr))
-					}
-					c.Set(service.ContextKeyTaskWalletBillingKey, key)
-					c.Set(service.ContextKeyTaskWalletBillingQuota, info.PriceData.Quota)
-					info.BillingSource = service.BillingSourceWallet
-					info.FinalPreConsumedQuota = info.PriceData.Quota
-				}
+		// Session pre-consumption persists funding mode and token together,
+		// before upstream I/O or task insertion. Controller refunds through
+		// info.Billing and therefore cannot refund the token a second time.
+		if c.GetString(service.ContextKeyTaskWalletBillingKey) == "" {
+			if taskErr := createLedgerTaskSubscriptionSession(c, info); taskErr != nil {
+				return nil, taskErr
 			}
 		}
 	}
@@ -279,12 +288,29 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		return nil, service.TaskErrorWrapper(err, "build_request_failed", http.StatusInternalServerError)
 	}
 
-	// 9. 发送请求
+	// 9. 自动跨组重试可能涨价，必须先补足资金与令牌，再标记发送。
+	// 降价不会缩减会话预扣；持久化使用真实预扣，最终报价保留在 result。
+	if info.Billing != nil {
+		reserveErr := info.Billing.Reserve(info.PriceData.Quota)
+		reserved := info.Billing.GetPreConsumedQuota()
+		info.FinalPreConsumedQuota = reserved
+		c.Set(service.ContextKeyTaskWalletBillingQuota, reserved)
+		if reserveErr != nil {
+			taskErr := service.TaskErrorFromAPIError(service.TaskWalletReserveError(reserveErr))
+			taskErr.LocalError = true
+			return nil, taskErr
+		}
+	}
+	if dispatchErr := service.MarkBillingDispatched(info); dispatchErr != nil {
+		return nil, service.TaskErrorWrapperLocal(dispatchErr, "billing_dispatch_failed", http.StatusInternalServerError)
+	}
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
 	}
-	if resp != nil && resp.StatusCode != http.StatusOK {
+	_, scripted := adaptor.(*taskjsplugin.TaskAdaptor)
+	// The script adapter accepts all 2xx and bounds/redacts rejected replies.
+	if !scripted && resp != nil && resp.StatusCode != http.StatusOK {
 		responseBody, _ := io.ReadAll(resp.Body)
 		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
 	}
@@ -305,43 +331,100 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 11. 提交后计费调整：让适配器根据上游实际返回调整 OtherRatios
 	finalQuota := info.PriceData.Quota
-	if adjustedRatios := adaptor.AdjustBillingOnSubmit(info, taskData); len(adjustedRatios) > 0 {
-		// 基于调整后的 ratios 重新计算 quota
-		finalQuota = recalcQuotaFromRatios(info, adjustedRatios)
-		info.PriceData.OtherRatios = adjustedRatios
-		info.PriceData.Quota = finalQuota
+	if script, ok := adaptor.(*taskjsplugin.TaskAdaptor); ok {
+		finalQuota = script.UsageQuote(finalQuota)
+		if info.Billing != nil && finalQuota > info.Billing.GetPreConsumedQuota() {
+			// Submission is already accepted. Preserve the task and its target even
+			// if funding cannot grow now; the existing settlement retry owns recovery.
+			if err := info.Billing.Reserve(finalQuota); err != nil {
+				common.SysError("script usage reservation increase failed; retaining settlement target")
+			}
+			info.FinalPreConsumedQuota = info.Billing.GetPreConsumedQuota()
+			c.Set(service.ContextKeyTaskWalletBillingQuota, info.FinalPreConsumedQuota)
+		}
+	} else if usageSnapshot == nil {
+		if adjustedRatios := adaptor.AdjustBillingOnSubmit(info, taskData); len(adjustedRatios) > 0 {
+			// 基于调整后的 ratios 重新计算 quota
+			finalQuota = recalcQuotaFromRatios(info, adjustedRatios)
+			info.PriceData.OtherRatios = adjustedRatios
+			info.PriceData.Quota = finalQuota
+		}
 	}
 
-	return &TaskSubmitResult{
+	result := &TaskSubmitResult{
 		UpstreamTaskID: upstreamTaskID,
 		TaskData:       taskData,
 		Platform:       platform,
 		Quota:          finalQuota,
-	}, nil
+		UsageSnapshot:  usageSnapshot,
+		ResultMetadata: service.CollectTaskResultMetadata(taskData, ""),
+	}
+	if script, ok := adaptor.(*taskjsplugin.TaskAdaptor); ok {
+		result.ScriptPluginID, result.ScriptPluginDigest, result.ScriptPluginState = script.ScriptSnapshot()
+		result.ScriptPluginUsage, result.ScriptPluginUsageError = script.UsageSnapshot()
+	}
+	if instant, parseErr := adaptor.ParseTaskResult(taskData); parseErr == nil && instant != nil {
+		result.ResultMetadata = service.CollectTaskResultMetadata(taskData, instant.Url)
+		if instant.Status == model.TaskStatusSuccess || instant.Status == model.TaskStatusFailure {
+			result.InstantStatus = model.TaskStatus(instant.Status)
+		}
+	}
+	return result, nil
 }
 
-// createLedgerTaskSubscriptionSession builds a subscription/wallet BillingSession
-// without PreConsumeBilling's task wallet-ledger guard. That guard may only
-// block wallet-funded tasks, so subscription tasks must be able to reach
-// NewBillingSession with unchanged subscription behavior. If NewBillingSession
-// falls back to the wallet (subscription shortfall), its server-owned
-// RequestId reservation key is persisted for the task row; otherwise the
-// session settles at submit exactly as before.
+// ApplyTaskSubmitMetadata must run after constructing BillingContext and Data,
+// before task.Insert. It persists the immutable policy and immediate final target
+// in the same insert as the existing funding identity.
+func ApplyTaskSubmitMetadata(task *model.Task, result *TaskSubmitResult) {
+	if task == nil || result == nil {
+		return
+	}
+	if result.ScriptPluginID > 0 {
+		task.PrivateData.ScriptPluginID = result.ScriptPluginID
+		task.PrivateData.ScriptPluginDigest = result.ScriptPluginDigest
+		task.PrivateData.ScriptPluginState = result.ScriptPluginState
+		task.PrivateData.ScriptPluginUsage = result.ScriptPluginUsage
+		task.PrivateData.ScriptPluginUsageError = result.ScriptPluginUsageError
+	}
+	if result.UsageSnapshot != nil {
+		if task.PrivateData.BillingContext == nil {
+			task.PrivateData.BillingContext = &model.TaskBillingContext{}
+		}
+		task.PrivateData.BillingContext.UsageSnapshot = result.UsageSnapshot
+	}
+	if result.ResultMetadata != nil {
+		task.PrivateData.ResultMetadata = result.ResultMetadata
+	}
+	if result.InstantStatus != model.TaskStatusSuccess && result.InstantStatus != model.TaskStatusFailure {
+		return
+	}
+	task.Status, task.Progress, task.FinishTime = result.InstantStatus, "100%", common.GetTimestamp()
+	task.BillingState, task.BillingQuota = model.TaskBillingPending, result.Quota
+	if task.Status == model.TaskStatusFailure {
+		task.BillingQuota = 0
+	} else if quota, _, ok := service.ScriptTaskUsageBillingTarget(task); ok {
+		task.BillingQuota = quota
+	}
+}
+
+// createLedgerTaskSubscriptionSession creates the common atomic submit session.
+// Both funding sources transfer their reservation to task persistence.
+// The factory retains the user's subscription/wallet fallback preference.
 func createLedgerTaskSubscriptionSession(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
 	session, apiErr := service.NewBillingSession(c, info, info.PriceData.Quota)
 	if apiErr != nil {
-		return service.TaskErrorFromAPIError(apiErr)
+		taskErr := service.TaskErrorFromAPIError(apiErr)
+		taskErr.LocalError = true
+		return taskErr
 	}
 	info.Billing = session
-	// preConsume 已通过 syncRelayInfo 写入实际资金来源；非订阅即为钱包回退。
-	if info.BillingSource != service.BillingSourceSubscription {
-		key, err := model.NewWalletFinalSettlementKey(info.UserId, "relay", info.RequestId)
-		if err != nil {
-			return service.TaskErrorWrapper(err, "billing_identity_failed", http.StatusInternalServerError)
-		}
-		c.Set(service.ContextKeyTaskWalletBillingKey, key)
-		c.Set(service.ContextKeyTaskWalletBillingQuota, info.PriceData.Quota)
+	key := session.TaskReservationKey()
+	if key == "" {
+		return service.TaskErrorWrapperLocal(service.ErrWalletBillingIdentityRequired, "billing_identity_failed", http.StatusInternalServerError)
 	}
+	c.Set(service.ContextKeyTaskWalletBillingKey, key)
+	info.FinalPreConsumedQuota = session.GetPreConsumedQuota()
+	c.Set(service.ContextKeyTaskWalletBillingQuota, info.FinalPreConsumedQuota)
 	return nil
 }
 
@@ -509,6 +592,21 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 // 仅当渠道类型为 Gemini 或 Vertex 时触发；其他渠道或出错时返回 nil。
 // 当非 OpenAI Video API 时，还会构建自定义格式的响应体。
 func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
+	return tryRealtimeFetchWithAdaptor(task, isOpenAIVideoAPI, func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
+		return GetTaskAdaptor(platform)
+	})
+}
+
+// The factory parameter keeps provider I/O replaceable in regression tests;
+// production and tests execute the same terminal CAS and billing path.
+func tryRealtimeFetchWithAdaptor(task *model.Task, isOpenAIVideoAPI bool, getAdaptor func(constant.TaskPlatform) service.TaskPollingAdaptor) []byte {
+	if task == nil || task.HasForeignExecutionEvidence() || task.PrivateData.ScriptPluginID > 0 || task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {
+		return nil
+	}
+	// Empty platform is retained for native tasks created before it was stored.
+	if getAdaptor == nil || (task.Platform != "" && getAdaptor(task.Platform) == nil) {
+		return nil
+	}
 	channelModel, err := model.GetChannelById(task.ChannelId, true)
 	if err != nil {
 		return nil
@@ -522,10 +620,13 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		baseURL = channelModel.GetBaseURL()
 	}
 	proxy := channelModel.GetSetting().Proxy
-	adaptor := GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(channelModel.Type)))
+	adaptor := getAdaptor(constant.TaskPlatform(strconv.Itoa(channelModel.Type)))
 	if adaptor == nil {
 		return nil
 	}
+	adaptor.Init(&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+		ChannelType: channelModel.Type, ChannelBaseUrl: baseURL, ApiKey: channelModel.Key,
+	}})
 
 	resp, err := adaptor.FetchTask(baseURL, channelModel.Key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
@@ -546,6 +647,7 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 	}
 
 	snap := task.Snapshot()
+	original := *task
 
 	// 将上游最新状态更新到 task
 	if ti.Status != "" {
@@ -563,8 +665,46 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 	}
 
+	task.Data = body
+	task.PrivateData.PollFailures, task.PrivateData.LastPollClass = 0, "ok"
+	task.PrivateData.ResultMetadata = service.CollectTaskResultMetadata(body, task.GetResultURL())
+	var billingReason string
+	var billingClamp *common.QuotaClamp
+	terminal := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
+	if terminal {
+		task.Progress = taskcommon.ProgressComplete
+		if task.FinishTime == 0 {
+			task.FinishTime = common.GetTimestamp()
+		}
+		if task.Status == model.TaskStatusSuccess {
+			task.BillingQuota, billingReason, billingClamp = service.TaskBillingTarget(adaptor, task, ti)
+		} else {
+			task.BillingQuota = 0
+			task.FailReason = ti.Reason
+		}
+		task.BillingState = model.TaskBillingPending
+	}
 	if !snap.Equal(task.Snapshot()) {
-		_, _ = task.UpdateWithStatus(snap.Status)
+		won, err := task.UpdateWithStatus(snap.Status)
+		if err != nil || !won {
+			// Return the committed state, never an uncommitted or losing
+			// terminal snapshot. Only the CAS winner may adjust billing.
+			*task = original
+			if stored, exists, readErr := model.GetByTaskId(task.UserId, task.TaskID); readErr == nil && exists {
+				*task = *stored
+			}
+			if err != nil && !errors.Is(err, model.ErrTaskExecutionProtected) {
+				common.SysError(fmt.Sprintf("realtime task %s update failed: %v", task.TaskID, err))
+			}
+			return nil
+		}
+		if terminal {
+			if task.Status == model.TaskStatusSuccess {
+				service.RecalculateTaskQuota(context.Background(), task, task.BillingQuota, billingReason, billingClamp)
+			} else {
+				service.RefundTaskQuota(context.Background(), task, task.FailReason)
+			}
+		}
 	}
 
 	// OpenAI Video API 由调用者的 ConvertToOpenAIVideo 分支处理
@@ -629,26 +769,49 @@ func mapTaskStatusToSimple(status model.TaskStatus) string {
 }
 
 func TaskModel2Dto(task *model.Task) *dto.TaskDto {
-	return &dto.TaskDto{
-		ID:         task.ID,
-		CreatedAt:  task.CreatedAt,
-		UpdatedAt:  task.UpdatedAt,
-		TaskID:     task.TaskID,
-		Platform:   string(task.Platform),
-		UserId:     task.UserId,
-		Group:      task.Group,
-		ChannelId:  task.ChannelId,
-		Quota:      task.Quota,
-		Action:     task.Action,
-		Status:     string(task.Status),
-		FailReason: task.FailReason,
-		ResultURL:  task.GetResultURL(),
-		SubmitTime: task.SubmitTime,
-		StartTime:  task.StartTime,
-		FinishTime: task.FinishTime,
-		Progress:   task.Progress,
-		Properties: task.Properties,
-		Username:   task.Username,
-		Data:       task.Data,
+	var usageSnapshot *dto.TaskUsageSnapshot
+	if billing := task.PrivateData.BillingContext; billing != nil && billing.UsageSnapshot != nil {
+		snapshot := billing.UsageSnapshot
+		// Explicitly copy the public definition. Never serialize the private
+		// billing snapshot or share its mutable schema with a response DTO.
+		schema := make(map[string]dto.TaskUsageField, len(snapshot.Schema))
+		for name, field := range snapshot.Schema {
+			schema[name] = dto.TaskUsageField{
+				Path: field.Path, Required: field.Required, Default: field.Default, Max: field.Max,
+			}
+		}
+		usageSnapshot = &dto.TaskUsageSnapshot{
+			Name: snapshot.Name, Version: snapshot.Version, Schema: schema, Expression: snapshot.Expression,
+		}
 	}
+	result := &dto.TaskDto{
+		ID:            task.ID,
+		CreatedAt:     task.CreatedAt,
+		UpdatedAt:     task.UpdatedAt,
+		TaskID:        task.TaskID,
+		Platform:      string(task.Platform),
+		UserId:        task.UserId,
+		Group:         task.Group,
+		ChannelId:     task.ChannelId,
+		Quota:         task.Quota,
+		Action:        task.Action,
+		Status:        string(task.Status),
+		FailReason:    task.FailReason,
+		ResultURL:     task.GetResultURL(),
+		SubmitTime:    task.SubmitTime,
+		StartTime:     task.StartTime,
+		FinishTime:    task.FinishTime,
+		Progress:      task.Progress,
+		Properties:    task.Properties,
+		Username:      task.Username,
+		Data:          task.Data,
+		UsageSnapshot: usageSnapshot,
+	}
+	if !task.ResultRetrievable() {
+		result.ResultDiscarded = true
+		result.Data = nil
+		result.FailReason = ""
+		result.ResultURL = ""
+	}
+	return result
 }

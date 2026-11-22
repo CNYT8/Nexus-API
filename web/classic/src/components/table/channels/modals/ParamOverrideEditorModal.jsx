@@ -78,6 +78,7 @@ const CONDITION_MODE_OPTIONS = [
   { label: '前缀匹配', value: 'prefix' },
   { label: '后缀匹配', value: 'suffix' },
   { label: '包含', value: 'contains' },
+  { label: '正则表达式', value: 'regex' },
   { label: '大于', value: 'gt' },
   { label: '大于等于', value: 'gte' },
   { label: '小于', value: 'lt' },
@@ -738,8 +739,8 @@ const buildPruneObjectsValueText = (draft = {}) => {
         mode: CONDITION_MODE_VALUES.has(rule.mode) ? rule.mode : 'full',
       };
       const valueRaw = String(rule.value_text || '').trim();
-      if (valueRaw !== '') {
-        conditionPayload.value = parseLooseValue(valueRaw);
+      if (valueRaw !== '' || rule.mode === 'regex') {
+        conditionPayload.value = parseConditionValue(rule);
       }
       if (rule.invert) {
         conditionPayload.invert = true;
@@ -789,6 +790,11 @@ const normalizeCondition = (condition = {}) => ({
   pass_missing_key: condition.pass_missing_key === true,
 });
 
+const parseConditionValue = (condition) =>
+  condition.mode === 'regex'
+    ? condition.value_text
+    : parseLooseValue(condition.value_text);
+
 const createDefaultCondition = () => normalizeCondition({});
 
 const normalizeOperation = (operation = {}) => ({
@@ -797,6 +803,9 @@ const normalizeOperation = (operation = {}) => ({
   path: typeof operation.path === 'string' ? operation.path : '',
   mode: OPERATION_MODE_VALUES.has(operation.mode) ? operation.mode : 'set',
   value_text: toValueText(operation.value),
+  prune_draft: operation.mode === 'prune_objects'
+    ? parsePruneObjectsDraft(toValueText(operation.value))
+    : null,
   keep_origin: operation.keep_origin === true,
   from: typeof operation.from === 'string' ? operation.from : '',
   to: typeof operation.to === 'string' ? operation.to : '',
@@ -957,7 +966,7 @@ const buildConditionPayload = (condition) => {
   const payload = {
     path,
     mode: condition.mode || 'full',
-    value: parseLooseValue(condition.value_text),
+    value: parseConditionValue(condition),
   };
   if (condition.invert) payload.invert = true;
   if (condition.pass_missing_key) payload.pass_missing_key = true;
@@ -1018,35 +1027,18 @@ const validateOperations = (operations, t) => {
 
     if (mode === 'prune_objects') {
       const raw = String(op.value_text ?? '').trim();
-      if (!raw) {
+      const draft = op.prune_draft ?? parsePruneObjectsDraft(raw);
+      const hasDraftCondition =
+        draft.typeText.trim() ||
+        (!draft.simpleMode && draft.rules.some((rule) => rule.path.trim()));
+      const parsed = parseLooseValue(raw);
+      const hasExplicitType =
+        parsed !== null &&
+        typeof parsed === 'object' &&
+        !Array.isArray(parsed) &&
+        Object.hasOwn(parsed, 'type');
+      if (!raw || (!hasDraftCondition && !hasExplicitType)) {
         return t('第 {{line}} 条 prune_objects 缺少条件', { line });
-      }
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          const hasType =
-            parsed.type !== undefined &&
-            String(parsed.type).trim() !== '';
-          const hasWhere =
-            parsed.where &&
-            typeof parsed.where === 'object' &&
-            !Array.isArray(parsed.where) &&
-            Object.keys(parsed.where).length > 0;
-          const hasConditionsArray =
-            Array.isArray(parsed.conditions) && parsed.conditions.length > 0;
-          const hasConditionsObject =
-            parsed.conditions &&
-            typeof parsed.conditions === 'object' &&
-            !Array.isArray(parsed.conditions) &&
-            Object.keys(parsed.conditions).length > 0;
-          if (!hasType && !hasWhere && !hasConditionsArray && !hasConditionsObject) {
-            return t('第 {{line}} 条 prune_objects 需要至少一个匹配条件', {
-              line,
-            });
-          }
-        }
-      } catch (error) {
-        // non-JSON string is treated as type string
       }
     }
 
@@ -1192,7 +1184,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     if (!selectedOperation || (selectedOperation.mode || '') !== 'prune_objects') {
       return null;
     }
-    return parsePruneObjectsDraft(selectedOperation.value_text);
+    return selectedOperation.prune_draft ?? parsePruneObjectsDraft(selectedOperation.value_text);
   }, [selectedOperation]);
 
   const topOperationModes = useMemo(() => {
@@ -1543,7 +1535,6 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     [t],
   );
 
-
   const translatedTemplateGroupOptions = useMemo(
     () =>
       TEMPLATE_GROUP_OPTIONS.map((option) => ({
@@ -1616,9 +1607,16 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
 
   const updateOperation = (operationId, patch) => {
     setOperations((prev) =>
-      prev.map((item) =>
-        item.id === operationId ? { ...item, ...patch } : item,
-      ),
+      prev.map((item) => {
+        if (item.id !== operationId) return item;
+        const next = { ...item, ...patch };
+        if ((next.mode !== item.mode || patch.value_text !== undefined) && !patch.prune_draft) {
+          next.prune_draft = next.mode === 'prune_objects'
+            ? parsePruneObjectsDraft(next.value_text)
+            : null;
+        }
+        return next;
+      }),
     );
   };
 
@@ -1653,12 +1651,13 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
   const updatePruneObjectsDraft = (operationId, updater) => {
     const current = operations.find((item) => item.id === operationId);
     if (!current) return;
-    const draft = parsePruneObjectsDraft(current.value_text);
+    const draft = current.prune_draft ?? parsePruneObjectsDraft(current.value_text);
     const nextDraft =
       typeof updater === 'function'
         ? updater(draft)
         : { ...draft, ...(updater || {}) };
     updateOperation(operationId, {
+      prune_draft: nextDraft,
       value_text: buildPruneObjectsValueText(nextDraft),
     });
   };
@@ -1772,11 +1771,17 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
         conditions: (source.conditions || []).map((condition) => ({
           path: condition.path,
           mode: condition.mode,
-          value: parseLooseValue(condition.value_text),
+          value: parseConditionValue(condition),
           invert: condition.invert,
           pass_missing_key: condition.pass_missing_key,
         })),
       });
+      if (source.prune_draft) {
+        cloned.prune_draft = {
+          ...source.prune_draft,
+          rules: source.prune_draft.rules.map((rule) => ({ ...rule, id: nextLocalId() })),
+        };
+      }
       insertedId = cloned.id;
       const next = [...prev];
       next.splice(index + 1, 0, cloned);

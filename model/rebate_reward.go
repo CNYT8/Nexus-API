@@ -59,7 +59,10 @@ func RecordWalletRebateTx(tx *gorm.DB, settlement WalletConsumptionSettlement) (
 
 	// Idempotent retries return the original snapshot even after closure or
 	// changes to rate, caps, schedule, invitation relation or quota valuation.
-	setting := operation_setting.GetRebateSetting()
+	setting, err := GetRebateSettingTx(tx)
+	if err != nil {
+		return nil, err
+	}
 	if (!setting.Enabled && !setting.CountDuringClosure) || setting.RateBasisPoints <= 0 || settlement.EligibleMoneyConsumedMicros <= 0 {
 		return nil, nil
 	}
@@ -79,10 +82,8 @@ func RecordWalletRebateTx(tx *gorm.DB, settlement WalletConsumptionSettlement) (
 	inviterID := invitee.InviterId
 
 	if setting.InviterMinPaidMoneyMicros > 0 {
-		var inviterPaidMoney int64
-		if err := tx.Model(&WalletCreditLot{}).
-			Where("user_id = ? AND eligible = ?", inviterID, true).
-			Select("COALESCE(SUM(eligible_money_micros), 0)").Scan(&inviterPaidMoney).Error; err != nil {
+		inviterPaidMoney, err := WalletNetEligibleMoneyTx(tx, inviterID)
+		if err != nil {
 			return nil, err
 		}
 		if inviterPaidMoney < setting.InviterMinPaidMoneyMicros {
@@ -252,6 +253,10 @@ func RecordWalletRebateTx(tx *gorm.DB, settlement WalletConsumptionSettlement) (
 	if inviterErr != nil && !errors.Is(inviterErr, gorm.ErrRecordNotFound) {
 		return nil, inviterErr
 	}
+	reversalPending, err := walletSettlementReversalPendingTx(tx, settlement.FinalSettlementKey, settlement.UserID)
+	if err != nil {
+		return nil, err
+	}
 	if errors.Is(inviterErr, gorm.ErrRecordNotFound) {
 		record.Status = RebateStatusVoided
 		record.VoidedAt = &now
@@ -265,7 +270,7 @@ func RecordWalletRebateTx(tx *gorm.DB, settlement WalletConsumptionSettlement) (
 		record.HeldByClosure = false // precision hold must survive reopening
 	} else if !setting.Enabled {
 		record.Status = RebateStatusHeld
-	} else if setting.PayoutMode == operation_setting.RebatePayoutImmediate && setting.PayoutHoldHours == 0 {
+	} else if setting.PayoutMode == operation_setting.RebatePayoutImmediate && setting.PayoutHoldHours == 0 && !reversalPending {
 		lotKey, err := NewWalletCreditEventKey(inviterID, WalletCreditSourceRebate, "rebate", settlement.FinalSettlementKey, "payout")
 		if err != nil {
 			return nil, err

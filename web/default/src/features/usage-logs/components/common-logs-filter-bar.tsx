@@ -39,9 +39,10 @@ import {
 } from '@/components/ui/tooltip'
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
 import { buildSearchParams } from '../lib/filter'
-import { getDefaultTimeRange } from '../lib/utils'
+import { buildApiParams, getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters } from '../types'
 import { CommonLogsStats } from './common-logs-stats'
+import { LogExportActions } from './log-export-actions'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
 import {
   LogsFilterField,
@@ -199,6 +200,16 @@ export function CommonLogsFilterBar<TData>(
   const statsBar = (
     <div className='flex flex-wrap items-center gap-2'>
       <CommonLogsStats />
+      <LogExportActions
+        isAdmin={isAdmin}
+        getParams={() => buildApiParams({
+          page: 1,
+          pageSize: 10,
+          searchParams: { ...buildSearchParams(filters, 'common'), type: [logType] },
+          columnFilters: props.table.getState().columnFilters,
+          isAdmin,
+        })}
+      />
       <Tooltip>
         <TooltipTrigger
           render={

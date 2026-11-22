@@ -98,9 +98,11 @@ const AddEditSubscriptionModal = ({
     quota_reset_custom_seconds: 0,
     enabled: true,
     sort_order: 0,
+    allow_wallet_overflow: true,
     max_purchase_per_user: 0,
     total_amount: 0,
     upgrade_group: '',
+    downgrade_group: '',
     stripe_price_id: '',
     creem_product_id: '',
   });
@@ -122,11 +124,13 @@ const AddEditSubscriptionModal = ({
       quota_reset_custom_seconds: Number(p.quota_reset_custom_seconds || 0),
       enabled: p.enabled !== false,
       sort_order: Number(p.sort_order || 0),
+      allow_wallet_overflow: p.allow_wallet_overflow !== false,
       max_purchase_per_user: Number(p.max_purchase_per_user || 0),
       total_amount: Number(
         quotaToDisplayAmount(p.total_amount || 0).toFixed(2),
       ),
       upgrade_group: p.upgrade_group || '',
+      downgrade_group: p.downgrade_group || '',
       stripe_price_id: p.stripe_price_id || '',
       creem_product_id: p.creem_product_id || '',
     };
@@ -170,6 +174,8 @@ const AddEditSubscriptionModal = ({
           max_purchase_per_user: Number(values.max_purchase_per_user || 0),
           total_amount: displayAmountToQuota(values.total_amount),
           upgrade_group: values.upgrade_group || '',
+          downgrade_group: values.downgrade_group || '',
+          allow_wallet_overflow: values.allow_wallet_overflow !== false,
         },
       };
       if (editingPlan?.plan?.id) {
@@ -336,11 +342,39 @@ const AddEditSubscriptionModal = ({
                         loading={groupLoading}
                         placeholder={t('不升级')}
                         extraText={t(
-                          '购买或手动新增订阅会升级到该分组；当套餐失效/过期或手动作废/删除后，将回退到升级前分组。回退不会立即生效，通常会有几分钟延迟。',
+                          '购买或手动新增订阅时升级到此分组；订阅结束后的分组由降级策略决定。',
                         )}
                       >
                         <Select.Option value=''>{t('不升级')}</Select.Option>
                         {(groupOptions || []).map((g) => (
+                          <Select.Option key={g} value={g}>
+                            {g}
+                          </Select.Option>
+                        ))}
+                      </Form.Select>
+                    </Col>
+
+                    <Col span={12}>
+                      <Form.Select
+                        field='downgrade_group'
+                        label={t('降级分组')}
+                        showClear
+                        loading={groupLoading}
+                        placeholder={t('回退到购买前分组')}
+                        extraText={t(
+                          '显式目标会在过期、作废或删除后生效，无需设置升级分组；其他有效升级套餐优先。未指定目标时，仅在当前分组仍匹配本套餐升级分组时回退。',
+                        )}
+                      >
+                        <Select.Option value=''>
+                          {t('回退到购买前分组')}
+                        </Select.Option>
+                        {Array.from(
+                          new Set(
+                            [...groupOptions, values.downgrade_group].filter(
+                              Boolean,
+                            ),
+                          ),
+                        ).map((g) => (
                           <Select.Option key={g} value={g}>
                             {g}
                           </Select.Option>
@@ -381,6 +415,17 @@ const AddEditSubscriptionModal = ({
                       <Form.Switch
                         field='enabled'
                         label={t('启用状态')}
+                        size='large'
+                      />
+                    </Col>
+
+                    <Col span={24}>
+                      <Form.Switch
+                        field='allow_wallet_overflow'
+                        label={t('额度用尽后允许使用钱包余额')}
+                        extraText={t(
+                          '关闭后，超出订阅额度的请求不会回退到钱包。策略变更仅对新发放的订阅生效。',
+                        )}
                         size='large'
                       />
                     </Col>

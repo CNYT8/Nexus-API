@@ -16,8 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
-import { useForm, type SubmitErrorHandler } from 'react-hook-form'
+import { useEffect, useRef, useState } from 'react'
+import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, KeyRound, Settings2, WalletCards } from 'lucide-react'
@@ -80,6 +80,7 @@ import {
   type ApiKeyGroupOption,
 } from './api-key-group-combobox'
 import { useApiKeys } from './api-keys-provider'
+import { AutoGroupsInput } from './auto-groups-input'
 
 type ApiKeyMutateDrawerProps = {
   open: boolean
@@ -87,7 +88,16 @@ type ApiKeyMutateDrawerProps = {
   currentRow?: ApiKey
 }
 
-export function ApiKeysMutateDrawer({
+export function ApiKeysMutateDrawer(props: ApiKeyMutateDrawerProps) {
+  return (
+    <ApiKeysMutateDrawerForm
+      key={`${props.open}-${props.currentRow?.id ?? 'create'}`}
+      {...props}
+    />
+  )
+}
+
+function ApiKeysMutateDrawerForm({
   open,
   onOpenChange,
   currentRow,
@@ -98,6 +108,14 @@ export function ApiKeysMutateDrawer({
   const { status } = useStatus()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [loadedRowId, setLoadedRowId] = useState<number | null>(null)
+  const [detailError, setDetailError] = useState(false)
+  const [detailRetry, setDetailRetry] = useState(0)
+  const detailRequest = useRef(0)
+  const readyRowId = useRef<number | null>(null)
+  const submitPending = useRef(false)
+  const rowId = currentRow?.id
+  const isDetailReady = !isUpdate || loadedRowId === rowId
   const defaultUseAutoGroup = status?.default_use_auto_group === true
 
   // Fetch models
@@ -134,30 +152,55 @@ export function ApiKeysMutateDrawer({
     defaultValues: getApiKeyFormDefaultValues(defaultUseAutoGroup),
   })
 
-  // Load existing data when updating
+  // Group/status refreshes must not reload an edit and overwrite user input.
   useEffect(() => {
-    if (!open) {
+    if (!open || rowId === undefined) {
       form.reset(
         getApiKeyFormDefaultValues(defaultUseAutoGroup && backendHasAuto)
       )
-      return
     }
-    if (isUpdate && currentRow) {
-      getApiKey(currentRow.id).then((result) => {
-        if (result.success && result.data) {
+  }, [open, rowId, form, defaultUseAutoGroup, backendHasAuto])
+
+  useEffect(() => {
+    const request = ++detailRequest.current
+    readyRowId.current = null
+
+    if (open && rowId !== undefined) {
+      form.reset(getApiKeyFormDefaultValues(false))
+      getApiKey(rowId)
+        .then((result) => {
+          if (request !== detailRequest.current) return
+          if (!result.success || !result.data || result.data.id !== rowId) {
+            setDetailError(true)
+            return
+          }
           form.reset(transformApiKeyToFormDefaults(result.data))
-        }
-      })
-    } else if (!isUpdate) {
-      form.reset(
-        getApiKeyFormDefaultValues(defaultUseAutoGroup && backendHasAuto)
-      )
+          readyRowId.current = rowId
+          setLoadedRowId(rowId)
+        })
+        .catch(() => {
+          if (request === detailRequest.current) setDetailError(true)
+        })
     }
-  }, [open, isUpdate, currentRow, form, defaultUseAutoGroup, backendHasAuto])
+
+    return () => {
+      detailRequest.current = request + 1
+      readyRowId.current = null
+    }
+  }, [open, rowId, form, detailRetry])
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      detailRequest.current++
+      readyRowId.current = null
+      setLoadedRowId(null)
+    }
+    onOpenChange(nextOpen)
+  }
 
   // Correct group after groups load: if the form value is not in available groups, fall back
   useEffect(() => {
-    if (groups.length === 0) return
+    if (!open || !isDetailReady || groups.length === 0) return
     const currentGroup = form.getValues('group')
     if (currentGroup && !groups.some((g) => g.value === currentGroup)) {
       const fallback =
@@ -169,22 +212,36 @@ export function ApiKeysMutateDrawer({
         form.setValue('cross_group_retry', false)
       }
     }
-  }, [groups, form])
+  }, [groups, form, open, isDetailReady])
 
   const onSubmit = async (data: ApiKeyFormValues) => {
+    if (
+      !open ||
+      submitPending.current ||
+      !isDetailReady ||
+      (isUpdate && readyRowId.current !== rowId)
+    )
+      return
+    const request = detailRequest.current
+    submitPending.current = true
     setIsSubmitting(true)
     try {
-      const basePayload = transformFormDataToPayload(data)
+      if (data.group === 'auto' && (new Set(data.auto_groups).size !== data.auto_groups.length || data.auto_groups.some((group) => group === 'auto' || !groups.some((option) => option.value === group)))) {
+      form.setError('auto_groups', { message: t('自动分组只能包含可用的非 auto 分组，且不能重复') })
+      return
+    }
+    const basePayload = transformFormDataToPayload(data)
 
       if (isUpdate && currentRow) {
         const result = await updateApiKey({
           ...basePayload,
           id: currentRow.id,
         })
+        if (result.success) triggerRefresh()
+        if (request !== detailRequest.current) return
         if (result.success) {
           toast.success(t(SUCCESS_MESSAGES.API_KEY_UPDATED))
-          onOpenChange(false)
-          triggerRefresh()
+          handleOpenChange(false)
         } else {
           toast.error(result.message || t(ERROR_MESSAGES.UPDATE_FAILED))
         }
@@ -194,6 +251,7 @@ export function ApiKeysMutateDrawer({
         let successCount = 0
 
         for (let i = 0; i < count; i++) {
+          if (request !== detailRequest.current) break
           const result = await createApiKey({
             ...basePayload,
             name:
@@ -204,29 +262,35 @@ export function ApiKeysMutateDrawer({
           if (result.success) {
             successCount++
           } else {
-            toast.error(result.message || t(ERROR_MESSAGES.CREATE_FAILED))
+            if (request === detailRequest.current) {
+              toast.error(result.message || t(ERROR_MESSAGES.CREATE_FAILED))
+            }
             break
           }
         }
 
         if (successCount > 0) {
+          triggerRefresh()
+          if (request !== detailRequest.current) return
           toast.success(
             t('Successfully created {{count}} API Key(s)', {
               count: successCount,
             })
           )
-          onOpenChange(false)
-          triggerRefresh()
+          handleOpenChange(false)
         }
       }
     } catch (_error) {
-      toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+      if (request === detailRequest.current) {
+        toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+      }
     } finally {
+      submitPending.current = false
       setIsSubmitting(false)
     }
   }
 
-  const onInvalid: SubmitErrorHandler<ApiKeyFormValues> = () => {
+  const onInvalid = () => {
     toast.error(t('Please fix the highlighted fields before saving'))
   }
 
@@ -255,7 +319,7 @@ export function ApiKeysMutateDrawer({
   const unlimitedQuota = form.watch('unlimited_quota')
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
         className={sideDrawerContentClassName('max-w-none sm:!max-w-[620px]')}
       >
@@ -269,10 +333,39 @@ export function ApiKeysMutateDrawer({
               : t('Add a new API key by providing necessary info.')}
           </SheetDescription>
         </SheetHeader>
+        {isUpdate && !isDetailReady && (
+          <div className='space-y-2 px-6 py-4 text-sm' role='status'>
+            <p>{t(detailError ? ERROR_MESSAGES.LOAD_FAILED : 'Loading...')}</p>
+            {detailError && (
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => {
+                  setDetailError(false)
+                  setDetailRetry((retry) => retry + 1)
+                }}
+              >
+                {t('Retry')}
+              </Button>
+            )}
+          </div>
+        )}
         <Form {...form}>
           <form
             id='api-key-form'
-            onSubmit={form.handleSubmit(onSubmit, onInvalid)}
+            onSubmit={(event) => {
+              const request = detailRequest.current
+              void form.handleSubmit(
+                (data) => {
+                  if (request === detailRequest.current) return onSubmit(data)
+                },
+                () => {
+                  if (request === detailRequest.current) onInvalid()
+                }
+              )(event)
+            }}
+            inert={!isDetailReady || isSubmitting}
+            aria-busy={!isDetailReady || isSubmitting}
             className={sideDrawerFormClassName('gap-5')}
           >
             <SideDrawerSection>
@@ -314,6 +407,32 @@ export function ApiKeysMutateDrawer({
                 )}
               />
 
+              {selectedGroup === 'auto' && (
+                <FormField
+                  control={form.control}
+                  name='auto_groups'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('自动分组顺序')}</FormLabel>
+                      <FormControl>
+                        <AutoGroupsInput value={field.value} onChange={field.onChange} />
+                      </FormControl>
+                      <FormDescription>{t('每行一个分组，留空继承站点配置；按填写顺序重试。')}</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+              <FormField
+                control={form.control}
+                name='allow_user_quota_query'
+                render={({ field }) => (
+                  <FormItem className={sideDrawerSwitchItemClassName()}>
+                    <FormLabel>{t('允许使用令牌查询账号额度')}</FormLabel>
+                    <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                  </FormItem>
+                )}
+              />
               {selectedGroup === 'auto' && (
                 <FormField
                   control={form.control}
@@ -583,9 +702,9 @@ export function ApiKeysMutateDrawer({
             {t('Close')}
           </SheetClose>
           <Button
-            type='button'
-            onClick={form.handleSubmit(onSubmit, onInvalid)}
-            disabled={isSubmitting}
+            type='submit'
+            form='api-key-form'
+            disabled={isSubmitting || !isDetailReady}
             className='w-full sm:w-auto'
           >
             {isSubmitting ? t('Saving...') : t('Save changes')}

@@ -279,6 +279,26 @@ func TestAdaptorMatchesGeminiIncomingPathTemplate(t *testing.T) {
 	}
 }
 
+func TestAdaptorMatchesOriginalModelBeforeMapping(t *testing.T) {
+	config := &dto.AdvancedCustomConfig{Routes: []dto.AdvancedCustomRoute{
+		{IncomingPath: "/v1/chat/completions", Models: []string{"client-model"}, UpstreamPath: "/selected/{model}"},
+		{IncomingPath: "/v1/chat/completions", UpstreamPath: "/fallback/{model}"},
+	}}
+	require.NoError(t, config.Validate())
+	info := advancedCustomRelayInfo(config)
+	info.OriginModelName = "client-model"
+	info.UpstreamModelName = "mapped-model"
+
+	requestURL, err := (&Adaptor{}).GetRequestURL(info)
+	require.NoError(t, err)
+	assert.Equal(t, "https://fallback.example/selected/mapped-model", requestURL)
+
+	info.OriginModelName = "other-model"
+	requestURL, err = (&Adaptor{}).GetRequestURL(info)
+	require.NoError(t, err)
+	assert.Equal(t, "https://fallback.example/fallback/mapped-model", requestURL)
+}
+
 func advancedCustomRelayInfo(config *dto.AdvancedCustomConfig) *relaycommon.RelayInfo {
 	return &relaycommon.RelayInfo{
 		RelayFormat:    types.RelayFormatOpenAI,

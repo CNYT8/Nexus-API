@@ -252,7 +252,18 @@ export interface TaskLog {
   finish_time?: number // seconds
   progress?: string
   progress_message_en?: string
-  data?: string // JSON string
+  data?: unknown // Provider JSON may be an object, array or string.
+  result_url?: string
+  group?: string
+  quota?: number
+  start_time?: number // seconds
+  properties?: unknown
+  usage_snapshot?: {
+    name: string
+    version: string
+    schema: Record<string, unknown>
+    expression: string
+  }
   fail_reason?: string
   status: string // NOT_START, SUBMITTED, IN_PROGRESS, SUCCESS, FAILURE, QUEUED, UNKNOWN
   other?: string

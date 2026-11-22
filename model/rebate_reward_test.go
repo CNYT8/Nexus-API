@@ -12,13 +12,19 @@ import (
 	"gorm.io/gorm"
 )
 
-func useRebateRewardSetting(t *testing.T, setting operation_setting.RebateSetting) {
+func useRebateRewardSetting(t *testing.T, setting operation_setting.RebateSetting, databases ...*gorm.DB) {
 	t.Helper()
 	original := operation_setting.GetRebateSetting()
 	require.NoError(t, operation_setting.UpdateRebateSetting(setting))
 	t.Cleanup(func() {
 		require.NoError(t, operation_setting.UpdateRebateSetting(original))
 	})
+	for _, db := range databases {
+		previous, err := GetRebateSettingTx(db)
+		require.NoError(t, err)
+		persistRebateTestSetting(t, db, setting)
+		t.Cleanup(func() { persistRebateTestSetting(t, db, previous) })
+	}
 }
 
 func createRebateInvitation(t *testing.T, db *gorm.DB) (*User, *User) {
@@ -218,7 +224,7 @@ func TestRecordWalletRebateSkipsWhenDisabledOrScheduled(t *testing.T) {
 	scheduled.PayoutMode = operation_setting.RebatePayoutScheduled
 	scheduled.PayoutHour = 7
 	scheduled.PayoutMinute = 30
-	useRebateRewardSetting(t, scheduled)
+	useRebateRewardSetting(t, scheduled, db)
 
 	settleRebateEligibleUsage(t, db, invitee.Id, "rebate-scheduled", 200, 100_000_000)
 
@@ -374,7 +380,7 @@ func TestRebateClosureCountsCapsWithoutPayingNewRewards(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, paid)
 	setting.Enabled = true
-	require.NoError(t, operation_setting.UpdateRebateSetting(setting))
+	useRebateRewardSetting(t, setting, db)
 	paid, err = PayDueWalletRebates(db, time.Now().UTC(), 100)
 	require.NoError(t, err)
 	require.Equal(t, 1, paid)
@@ -401,7 +407,7 @@ func TestRebateRetryAndPendingKeepGenerationSnapshot(t *testing.T) {
 	setting.Enabled, setting.RateBasisPoints = false, 9000
 	setting.PayoutMode, setting.PayoutIntervalHours, setting.SiteTimezone = operation_setting.RebatePayoutHalfDay, 12, "Asia/Shanghai"
 	setting.InviterEligibleMoneyLimit = 1
-	require.NoError(t, operation_setting.UpdateRebateSetting(setting))
+	useRebateRewardSetting(t, setting, db)
 	common.QuotaPerUnit = 999_999
 	var retry *RebateRecord
 	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
@@ -441,7 +447,7 @@ func TestRebateDustIsHeldNotDiscarded(t *testing.T) {
 			require.EqualValues(t, money/20, record.RewardMoneyMicros)
 			require.Zero(t, record.DiscardedRewardMoneyMicros)
 			setting.Enabled = true
-			require.NoError(t, operation_setting.UpdateRebateSetting(setting))
+			useRebateRewardSetting(t, setting, db)
 			paid, err := PayDueWalletRebates(db, time.Now().UTC(), 100)
 			require.NoError(t, err)
 			require.Zero(t, paid)

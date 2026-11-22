@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -14,8 +13,8 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
@@ -50,21 +49,16 @@ func TelegramBind(c *gin.Context) {
 		return
 	}
 
-	session := sessions.Default(c)
-	id := session.Get("id")
-	user := model.User{Id: id.(int)}
-	if err := user.FillUserById(); err != nil {
-		c.JSON(200, gin.H{
-			"message": err.Error(),
-			"success": false,
-		})
+	user, _, err := service.CurrentSessionUser(c)
+	if err != nil || !service.HasFreshSessionVerification(c, "", 5*time.Minute) {
+		common.ApiErrorMsg(c, "请先完成安全验证")
 		return
 	}
-	if user.Id == 0 {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "用户已注销",
-		})
+	if !allowAccountSecurityAction(c, user.Id, "telegram_bind") {
+		return
+	}
+	if err := model.ClaimTelegramAssertion(strings.ToLower(params.Get("hash"))); err != nil {
+		common.ApiErrorMsg(c, "无效的请求")
 		return
 	}
 	user.TelegramId = telegramId
@@ -106,7 +100,14 @@ func TelegramLogin(c *gin.Context) {
 		})
 		return
 	}
-	setupLogin(&user, c)
+	if !allowAccountSecurityAction(c, user.Id, "telegram_login") {
+		return
+	}
+	if err := model.ClaimTelegramAssertion(strings.ToLower(params.Get("hash"))); err != nil {
+		common.ApiErrorMsg(c, "无效的请求")
+		return
+	}
+	completePrimaryLogin(&user, c, "telegram")
 }
 
 func verifyTelegramAuthorization(params url.Values, token string, now time.Time) (string, error) {

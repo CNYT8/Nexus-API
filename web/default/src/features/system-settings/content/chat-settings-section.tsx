@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -36,6 +36,7 @@ import { SettingsForm } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { useResetForm } from '../hooks/use-reset-form'
 import { ChatSettingsVisualEditor } from './chat-settings-visual-editor'
 import { formatJsonForEditor, normalizeJsonString } from './utils'
 
@@ -106,32 +107,23 @@ export function ChatSettingsSection({
     },
   })
 
-  const initialNormalizedRef = useRef(normalizeJsonString(defaultValue, '[]'))
-
-  useEffect(() => {
-    form.reset({ Chats: formatJsonForEditor(defaultValue, '[]') })
-    initialNormalizedRef.current = normalizeJsonString(defaultValue, '[]')
-  }, [defaultValue, form])
+  const submitForm = useResetForm(form, { Chats: formatted })
 
   const onSubmit = async (values: ChatSettingsFormValues) => {
     const normalized = normalizeJsonString(values.Chats, '[]')
-    if (normalized === initialNormalizedRef.current) {
+    if (normalized === normalizeJsonString(defaultValue, '[]')) {
       return
     }
 
-    await updateOption.mutateAsync({
-      key: 'Chats',
-      value: normalized,
-    })
+    await updateOption.saveOptions([{ key: 'Chats', value: normalized }])
   }
 
   return (
     <SettingsSection title={t('Chat Presets')}>
       <Form {...form}>
-        {/* eslint-disable-next-line react-hooks/refs */}
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
             saveLabel='Save chat settings'
           />

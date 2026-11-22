@@ -41,10 +41,7 @@ import {
 import { IconChevronDown, IconChevronUp } from '@douyinfe/semi-icons';
 import { IconHelpCircle } from '@douyinfe/semi-icons';
 import {
-  compareObjects,
-  API,
   showError,
-  showSuccess,
   showWarning,
   verifyJSON,
 } from '../../../helpers';
@@ -53,18 +50,9 @@ import GroupTable from './components/GroupTable';
 import AutoGroupList from './components/AutoGroupList';
 import GroupGroupRatioRules from './components/GroupGroupRatioRules';
 import GroupSpecialUsableRules from './components/GroupSpecialUsableRules';
+import { optionValuesEqual, saveOptionBatch, useOptionDrafts } from './hooks/optionSave';
 
 const { Text, Title, Paragraph } = Typography;
-
-const OPTION_KEYS = [
-  'GroupRatio',
-  'UserUsableGroups',
-  'GroupGroupRatio',
-  'group_ratio_setting.group_special_usable_group',
-  'group_ratio_setting.group_descriptions',
-  'AutoGroups',
-  'DefaultUseAutoGroup',
-];
 
 function parseJSONSafe(str, fallback) {
   if (!str || !str.trim()) return fallback;
@@ -81,7 +69,7 @@ export default function GroupRatioSettings(props) {
   const [editMode, setEditMode] = useState('visual');
   const [showGuide, setShowGuide] = useState(false);
 
-  const [inputs, setInputs] = useState({
+  const { inputs, setInputs, baseline: inputsRow, revision, beginSave, finishSave } = useOptionDrafts({
     GroupRatio: '',
     UserUsableGroups: '',
     GroupGroupRatio: '',
@@ -89,10 +77,8 @@ export default function GroupRatioSettings(props) {
     'group_ratio_setting.group_descriptions': '',
     AutoGroups: '',
     DefaultUseAutoGroup: false,
-  });
+  }, props.options, loading);
   const refForm = useRef();
-  const [inputsRow, setInputsRow] = useState(inputs);
-  const dataVersionRef = useRef(0);
 
   const groupNames = useMemo(() => {
     const ratioMap = parseJSONSafe(inputs.GroupRatio, {});
@@ -100,6 +86,7 @@ export default function GroupRatioSettings(props) {
   }, [inputs.GroupRatio]);
 
   async function onSubmit() {
+    if (loading) return;
     if (editMode === 'manual') {
       try {
         await refForm.current.validate();
@@ -109,56 +96,27 @@ export default function GroupRatioSettings(props) {
       }
     }
 
-    const updateArray = compareObjects(inputs, inputsRow);
+    const updateArray = Object.keys(inputs).filter((key) => !optionValuesEqual(inputs[key], inputsRow[key]));
     if (!updateArray.length) {
       return showWarning(t('你似乎并没有修改什么'));
     }
 
-    const requestQueue = updateArray.map((item) => {
-      const value =
-        typeof inputs[item.key] === 'boolean'
-          ? String(inputs[item.key])
-          : inputs[item.key];
-      return API.put('/api/option/', { key: item.key, value });
-    });
-
+    const updates = updateArray.map((key) => ({
+      key,
+      value: typeof inputs[key] === 'boolean' ? String(inputs[key]) : inputs[key],
+    }));
+    beginSave();
     setLoading(true);
     try {
-      const res = await Promise.all(requestQueue);
-      if (res.includes(undefined)) {
-        return showError(
-          requestQueue.length > 1 ? t('部分保存失败，请重试') : t('保存失败'),
-        );
-      }
-      for (let i = 0; i < res.length; i++) {
-        if (!res[i].data.success) {
-          return showError(res[i].data.message);
-        }
-      }
-      showSuccess(t('保存成功'));
-      props.refresh();
-    } catch (error) {
-      console.error('Unexpected error:', error);
-      showError(t('保存失败，请重试'));
+      await saveOptionBatch(updates, props.refresh, t, finishSave);
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    const currentInputs = {};
-    for (let key in props.options) {
-      if (OPTION_KEYS.includes(key)) {
-        currentInputs[key] = props.options[key];
-      }
-    }
-    setInputs(currentInputs);
-    setInputsRow(structuredClone(currentInputs));
-    dataVersionRef.current += 1;
-    if (refForm.current) {
-      refForm.current.setValues(currentInputs);
-    }
-  }, [props.options]);
+    refForm.current?.setValues(inputs);
+  }, [inputs]);
 
   const handleGroupTableChange = useCallback(
     ({ GroupRatio, UserUsableGroups, GroupDescriptions }) => {
@@ -187,7 +145,7 @@ export default function GroupRatioSettings(props) {
     }));
   }, []);
 
-  const dv = dataVersionRef.current;
+  const dv = revision;
 
   const renderVisualMode = () => (
     <Form key='form-visual' values={inputs} style={{ marginBottom: 15 }}>

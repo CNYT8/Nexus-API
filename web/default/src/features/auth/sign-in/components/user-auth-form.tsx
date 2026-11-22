@@ -58,6 +58,7 @@ import { OAuthProviders } from '@/features/auth/components/oauth-providers'
 import { loginFormSchema } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
+import { PasswordEncryptionError } from '@/features/auth/lib/password-encryption'
 import { beginPasskeyLogin, finishPasskeyLogin } from '@/features/auth/passkey'
 import type { AuthFormProps } from '@/features/auth/types'
 
@@ -174,8 +175,9 @@ export function UserAuthForm({
         await handleLoginSuccess(res.data as { id?: number } | null, redirectTo)
         toast.success(t('Welcome back!'))
       }
-    } catch (_error) {
-      // Errors are handled by global interceptor
+    } catch (error) {
+      if (error instanceof PasswordEncryptionError) toast.error(t('Login failed'))
+      // 请求错误由全局拦截器提示；本地加密失败在此单独反馈。
     } finally {
       setIsLoading(false)
     }

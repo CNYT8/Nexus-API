@@ -42,6 +42,7 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import {
   formatJsonForTextarea,
@@ -184,8 +185,8 @@ export function GeminiSettingsCard({ defaultValues }: GeminiSettingsCardProps) {
         defaultValues.gemini.remove_function_response_id_enabled ?? true,
     }
 
-    form.reset(buildFormDefaults(defaultValues))
-  }, [defaultValues, form])
+  }, [defaultValues])
+  const submitForm = useResetForm(form, buildFormDefaults(defaultValues))
 
   const isAdapterEnabled = form.watch('gemini.thinking_adapter_enabled')
 
@@ -218,12 +219,9 @@ export function GeminiSettingsCard({ defaultValues }: GeminiSettingsCardProps) {
       return
     }
 
-    for (const key of updates) {
-      await updateOption.mutateAsync({
-        key,
-        value: normalized[key],
-      })
-    }
+    await updateOption.saveOptions(
+      updates.map((key) => ({ key, value: normalized[key] }))
+    )
   }
 
   const imaginePlaceholder = useMemo(
@@ -234,9 +232,9 @@ export function GeminiSettingsCard({ defaultValues }: GeminiSettingsCardProps) {
   return (
     <SettingsSection title={t('Gemini')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
           />
           <FormField

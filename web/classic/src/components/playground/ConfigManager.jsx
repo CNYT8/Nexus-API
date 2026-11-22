@@ -21,6 +21,7 @@ import React, { useRef } from 'react';
 import { Button, Typography, Toast, Modal, Dropdown } from '@douyinfe/semi-ui';
 import { Download, Upload, RotateCcw, Settings2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { usePlayground } from '../../contexts/PlaygroundContext';
 import {
   saveConfig,
   exportConfig,
@@ -39,13 +40,16 @@ const ConfigManager = ({
 }) => {
   const { t } = useTranslation();
   const fileInputRef = useRef(null);
+  const { session, canSend } = usePlayground();
+  const canChange = () => session?.isCurrent() && canSend?.();
 
   const handleExport = () => {
+    if (!canChange()) return;
     try {
       // 在导出前先保存当前配置，确保导出的是最新内容
-      saveConfig(currentConfig);
+      saveConfig(currentConfig, session.userId);
 
-      exportConfig(currentConfig, messages);
+      exportConfig(currentConfig, messages, session.userId);
       Toast.success({
         content: t('配置已导出到下载文件夹'),
         duration: 3,
@@ -59,15 +63,17 @@ const ConfigManager = ({
   };
 
   const handleImportClick = () => {
+    if (!canChange()) return;
     fileInputRef.current?.click();
   };
 
   const handleFileChange = async (event) => {
     const file = event.target.files[0];
-    if (!file) return;
+    if (!file || !canChange()) return;
 
     try {
       const importedConfig = await importConfig(file);
+      if (!canChange()) return;
 
       Modal.confirm({
         title: t('确认导入配置'),
@@ -75,6 +81,7 @@ const ConfigManager = ({
         okText: t('确定导入'),
         cancelText: t('取消'),
         onOk: () => {
+          if (!canChange()) return;
           onConfigImport(importedConfig);
           Toast.success({
             content: t('配置导入成功'),
@@ -83,6 +90,7 @@ const ConfigManager = ({
         },
       });
     } catch (error) {
+      if (!canChange()) return;
       Toast.error({
         content: t('导入配置失败: ') + error.message,
         duration: 3,
@@ -94,6 +102,7 @@ const ConfigManager = ({
   };
 
   const handleReset = () => {
+    if (!canChange()) return;
     Modal.confirm({
       title: t('重置配置'),
       content: t(
@@ -105,6 +114,7 @@ const ConfigManager = ({
         type: 'danger',
       },
       onOk: () => {
+        if (!canChange()) return;
         // 询问是否同时重置消息
         Modal.confirm({
           title: t('重置选项'),
@@ -117,7 +127,8 @@ const ConfigManager = ({
             type: 'danger',
           },
           onOk: () => {
-            clearConfig();
+            if (!canChange()) return;
+            clearConfig(session.userId);
             onConfigReset({ resetMessages: true });
             Toast.success({
               content: t('配置和消息已全部重置'),
@@ -125,7 +136,8 @@ const ConfigManager = ({
             });
           },
           onCancel: () => {
-            clearConfig();
+            if (!canChange()) return;
+            clearConfig(session.userId);
             onConfigReset({ resetMessages: false });
             Toast.success({
               content: t('配置已重置，对话消息已保留'),
@@ -138,8 +150,8 @@ const ConfigManager = ({
   };
 
   const getConfigStatus = () => {
-    if (hasStoredConfig()) {
-      const timestamp = getConfigTimestamp();
+    if (hasStoredConfig(session?.userId)) {
+      const timestamp = getConfigTimestamp(session?.userId);
       if (timestamp) {
         const date = new Date(timestamp);
         return t('上次保存: ') + date.toLocaleString();

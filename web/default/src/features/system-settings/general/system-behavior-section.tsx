@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useMemo } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -39,11 +40,13 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
+import { useSystemOptions } from '../hooks/use-system-options'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 
 const behaviorSchema = z.object({
   RetryTimes: z.coerce.number().min(0).max(10),
+  MaxUserTokens: z.string(),
   DefaultCollapseSidebar: z.boolean(),
   DefaultRecordIpLogEnabled: z.boolean(),
   DefaultRecordIpLogForced: z.boolean(),
@@ -54,7 +57,7 @@ const behaviorSchema = z.object({
 type BehaviorFormValues = z.infer<typeof behaviorSchema>
 
 type SystemBehaviorSectionProps = {
-  defaultValues: BehaviorFormValues
+  defaultValues: Omit<BehaviorFormValues, 'MaxUserTokens'>
 }
 
 export function SystemBehaviorSection({
@@ -62,30 +65,49 @@ export function SystemBehaviorSection({
 }: SystemBehaviorSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
-
-  const form = useForm({
-    resolver: zodResolver(behaviorSchema),
-    defaultValues,
+  const { data: options } = useSystemOptions()
+  const normalizedDefaults = useMemo(() => {
+    const value = options?.data?.find(
+      (option) => option.key === 'token_setting.max_user_tokens'
+    )?.value
+    return {
+      ...defaultValues,
+      MaxUserTokens: value == null || String(value).trim() === ''
+        ? '1000'
+        : String(value).trim(),
+    }
+  }, [defaultValues, options?.data])
+  const localizedSchema = behaviorSchema.extend({
+    MaxUserTokens: z.string().refine(
+      (value) => value.trim() !== '' && Number.isSafeInteger(Number(value)) && Number(value) > 0,
+      t('用户最大令牌数量必须为正整数')
+    ),
   })
 
-  useResetForm(form, defaultValues)
+  const form = useForm({
+    resolver: zodResolver(localizedSchema),
+    defaultValues: normalizedDefaults,
+  })
+
+  const submitForm = useResetForm(form, normalizedDefaults)
 
   const onSubmit = async (data: BehaviorFormValues) => {
     const updates = Object.entries(data).filter(
-      ([key, value]) => value !== defaultValues[key as keyof BehaviorFormValues]
+      ([key, value]) => value !== normalizedDefaults[key as keyof BehaviorFormValues]
     )
 
-    for (const [key, value] of updates) {
-      await updateOption.mutateAsync({ key, value })
-    }
+    await updateOption.saveOptions(updates.map(([key, value]) => ({
+      key: key === 'MaxUserTokens' ? 'token_setting.max_user_tokens' : key,
+      value: key === 'MaxUserTokens' ? Number(value) : value,
+    })))
   }
 
   return (
     <SettingsSection title={t('System Behavior')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
           />
           <FormField
@@ -104,6 +126,29 @@ export function SystemBehaviorSection({
                 </FormControl>
                 <FormDescription>
                   {t('Number of times to retry failed requests (0-10)')}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='MaxUserTokens'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('用户最大令牌数量')}</FormLabel>
+                <FormControl>
+                  <Input
+                    type='number'
+                    min='1'
+                    step='1'
+                    max={Number.MAX_SAFE_INTEGER}
+                    {...field}
+                  />
+                </FormControl>
+                <FormDescription>
+                  {t('每个用户最多可创建的令牌数量，默认 1000，设置过大可能会影响性能')}
                 </FormDescription>
                 <FormMessage />
               </FormItem>

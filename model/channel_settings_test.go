@@ -60,6 +60,27 @@ func TestChannelProxyValidation(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid channel proxy")
 }
 
+func TestChannelHTTPTransportValidation(t *testing.T) {
+	for _, settings := range []dto.ChannelSettings{
+		{},
+		{HTTPProtocol: dto.HTTPProtocolHTTP1, HTTP2ConnectionShards: 8, TLSInsecureSkipVerify: true},
+		{HTTPProtocol: dto.HTTPProtocolAuto, HTTP2ConnectionShards: 2},
+	} {
+		channel := &Channel{}
+		channel.SetSetting(settings)
+		require.NoError(t, channel.ValidateSettings())
+	}
+	for _, settings := range []dto.ChannelSettings{
+		{HTTPProtocol: "http3"},
+		{HTTP2ConnectionShards: -1},
+		{HTTP2ConnectionShards: 9},
+	} {
+		channel := &Channel{}
+		channel.SetSetting(settings)
+		require.Error(t, channel.ValidateSettings())
+	}
+}
+
 func TestGetSettingDoesNotEraseInvalidStoredValue(t *testing.T) {
 	rawSetting := `{"proxy":"http://proxy.example:8080",`
 	channel := &Channel{Id: 42, Setting: &rawSetting}

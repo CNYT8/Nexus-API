@@ -35,6 +35,7 @@ import {
   type AudioClip,
 } from '../dialogs/audio-preview-dialog'
 import { FailReasonDialog } from '../dialogs/fail-reason-dialog'
+import { TaskResultDialog } from '../dialogs/task-result-dialog'
 import { useUsageLogsContext } from '../usage-logs-provider'
 import {
   createDurationColumn,
@@ -189,6 +190,7 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
             <span className='text-muted-foreground/60 truncate text-[11px]'>
               {t(log.platform)} · {t(taskActionMapper.getLabel(log.action))}
             </span>
+            <TaskResultDialog log={log} />
           </div>
         )
       },
@@ -254,10 +256,12 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
           log.action === TASK_ACTIONS.REFERENCE_GENERATE ||
           log.action === TASK_ACTIONS.REMIX_GENERATE
         const isSuccess = status === TASK_STATUS.SUCCESS
-        const isUrl = failReason?.startsWith('http')
+        const resultUrl = typeof log.result_url === 'string' && /^https?:\/\//i.test(log.result_url)
+          ? log.result_url : undefined
+        const isUrl = resultUrl || /^https?:\/\//i.test(failReason || '')
 
         if (isSuccess && isVideoTask && isUrl) {
-          const videoUrl = `/v1/videos/${log.task_id}/content`
+          const videoUrl = resultUrl || `/v1/videos/${encodeURIComponent(log.task_id)}/content`
           return (
             <a
               href={videoUrl}

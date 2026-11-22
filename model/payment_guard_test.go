@@ -296,7 +296,8 @@ func TestManualCompleteCreemUsesDirectQuota(t *testing.T) {
 	insertUserForPaymentGuardTest(t, 702, 0)
 	insertTopUpForPaymentGuardTest(t, "creem-manual-direct-quota", 702, PaymentProviderCreem)
 
-	require.NoError(t, ManualCompleteTopUp("creem-manual-direct-quota", "127.0.0.1"))
+	operatorID := insertPaymentGuardRoot(t)
+	require.NoError(t, ManualCompleteTopUp("creem-manual-direct-quota", "127.0.0.1", operatorID))
 	assert.Equal(t, 2, getUserQuotaForPaymentGuardTest(t, 702))
 }
 
@@ -312,7 +313,8 @@ func TestManualCompleteLegacyCreemOrderUsesDirectQuota(t *testing.T) {
 		Where("trade_no = ?", "legacy-creem-manual-direct-quota").
 		Update("payment_provider", "").Error)
 
-	require.NoError(t, ManualCompleteTopUp("legacy-creem-manual-direct-quota", "127.0.0.1"))
+	operatorID := insertPaymentGuardRoot(t)
+	require.NoError(t, ManualCompleteTopUp("legacy-creem-manual-direct-quota", "127.0.0.1", operatorID))
 	assert.Equal(t, 2, getUserQuotaForPaymentGuardTest(t, 703))
 }
 
@@ -516,9 +518,13 @@ func TestPaymentQuotaAllSettlementEntrypoints(t *testing.T) {
 					initial := math.MaxInt32 - credit
 					insertUserForPaymentGuardTest(t, userID, initial)
 					insertTopUpForPaymentGuardTest(t, "numeric-settlement", userID, provider)
+					operatorID := 0
+					if manual {
+						operatorID = insertPaymentGuardRoot(t)
+					}
 					recharge := func() error {
 						if manual {
-							return ManualCompleteTopUp("numeric-settlement", "127.0.0.1")
+							return ManualCompleteTopUp("numeric-settlement", "127.0.0.1", operatorID)
 						}
 						switch provider {
 						case PaymentProviderEpay:

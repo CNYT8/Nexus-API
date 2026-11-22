@@ -127,6 +127,7 @@ import { useChannelMutateForm } from '../../hooks/use-channel-mutate-form'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
   CHANNEL_TYPE_ADVANCED_CUSTOM,
+  LEGACY_DOUBAO_CODING_PLAN_BASE_URL,
   channelFormSchema,
   channelsQueryKeys,
   getAdvancedCustomStats,
@@ -148,7 +149,9 @@ import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
 } from '../../lib/status-code-risk-guard'
+import { supportsResponsesWebSocket } from '../../lib/responses-websocket'
 import type { Channel } from '../../types'
+import { ChannelHTTPSettings } from '../channel-http-settings'
 import { useChannels } from '../channels-provider'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
 import { CodexOAuthDialog } from '../dialogs/codex-oauth-dialog'
@@ -218,10 +221,14 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.priority ||
     values.weight ||
     values.proxy?.trim() ||
+    values.http_protocol === 'http1' ||
+    (values.http2_connection_shards || 1) > 1 ||
+    values.tls_insecure_skip_verify ||
     values.system_prompt?.trim() ||
     values.force_format ||
     values.thinking_to_content ||
     values.pass_through_body_enabled ||
+    values.responses_websocket_enabled ||
     values.system_prompt_override ||
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
@@ -362,6 +369,10 @@ export function ChannelMutateDrawer({
   // Check if this is a multi-key channel
   const isMultiKeyChannel =
     isEditing && channelData?.data?.channel_info?.is_multi_key === true
+  const isLegacyDoubaoCodingPlan =
+    isEditing &&
+    channelData?.data?.type === 45 &&
+    channelData.data.base_url?.trim() === LEGACY_DOUBAO_CODING_PLAN_BASE_URL
 
   // Form setup
   const form = useForm<ChannelFormValues>({
@@ -1737,6 +1748,14 @@ export function ChannelMutateDrawer({
                             </FormLabel>
                             <Select
                               items={[
+                                ...(isLegacyDoubaoCodingPlan
+                                  ? [
+                                      {
+                                        value: LEGACY_DOUBAO_CODING_PLAN_BASE_URL,
+                                        label: t('Doubao Coding Plan'),
+                                      },
+                                    ]
+                                  : []),
                                 {
                                   value: 'https://ark.cn-beijing.volces.com',
                                   label: t('https://ark.cn-beijing.volces.com'),
@@ -1747,10 +1766,6 @@ export function ChannelMutateDrawer({
                                   label: t(
                                     'https://ark.ap-southeast.bytepluses.com'
                                   ),
-                                },
-                                {
-                                  value: 'doubao-coding-plan',
-                                  label: t('Doubao Coding Plan'),
                                 },
                               ]}
                               onValueChange={field.onChange}
@@ -1766,6 +1781,13 @@ export function ChannelMutateDrawer({
                               </FormControl>
                               <SelectContent alignItemWithTrigger={false}>
                                 <SelectGroup>
+                                  {isLegacyDoubaoCodingPlan && (
+                                    <SelectItem
+                                      value={LEGACY_DOUBAO_CODING_PLAN_BASE_URL}
+                                    >
+                                      {t('Doubao Coding Plan')}
+                                    </SelectItem>
+                                  )}
                                   <SelectItem value='https://ark.cn-beijing.volces.com'>
                                     {t('https://ark.cn-beijing.volces.com')}
                                   </SelectItem>
@@ -1773,9 +1795,6 @@ export function ChannelMutateDrawer({
                                     {t(
                                       'https://ark.ap-southeast.bytepluses.com'
                                     )}
-                                  </SelectItem>
-                                  <SelectItem value='doubao-coding-plan'>
-                                    {t('Doubao Coding Plan')}
                                   </SelectItem>
                                 </SelectGroup>
                               </SelectContent>
@@ -3382,6 +3401,26 @@ export function ChannelMutateDrawer({
                           )}
                         />
 
+                        {supportsResponsesWebSocket(currentType, currentAdvancedCustom) && (
+                          <FormField
+                            control={form.control}
+                            name='responses_websocket_enabled'
+                            render={({ field }) => (
+                              <FormItem className='flex items-center justify-between gap-4 px-4 py-3'>
+                                <div className='space-y-0.5'>
+                                  <FormLabel>{t('Responses WebSocket')}</FormLabel>
+                                  <FormDescription>
+                                    {t('Allow native Responses WebSocket connections on this channel. Disabled by default.')}
+                                  </FormDescription>
+                                </div>
+                                <FormControl>
+                                  <Switch checked={field.value ?? false} onCheckedChange={field.onChange} />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                        )}
+
                         <FormField
                           control={form.control}
                           name='pass_through_body_enabled'
@@ -3425,6 +3464,8 @@ export function ChannelMutateDrawer({
                           </FormItem>
                         )}
                       />
+
+                      <ChannelHTTPSettings form={form} />
 
                       <FormField
                         control={form.control}

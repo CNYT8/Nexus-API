@@ -13,7 +13,7 @@ import (
 )
 
 var StartTime = time.Now().Unix() // unit: second
-var Version = "v1.1.4-rc.3"       // this hard coding will be replaced automatically when building, no need to manually change
+var Version = "v1.1.5"            // this hard coding will be replaced automatically when building, no need to manually change
 var SystemName = "New API"
 var Footer = ""
 var Logo = ""
@@ -87,6 +87,7 @@ var ItemsPerPage = 10
 var MaxRecentItems = 1000
 
 var PasswordLoginEnabled = true
+var PasswordLoginEncryptionEnabled = false
 var PasswordRegisterEnabled = true
 var EmailVerificationEnabled = false
 var GitHubOAuthEnabled = false
@@ -154,6 +155,14 @@ var QuotaForInvitee = 0
 var ChannelDisableThreshold = 5.0
 var AutomaticDisableChannelEnabled = false
 var AutomaticEnableChannelEnabled = false
+var QuotaRemindEnabled = true
+
+func IsQuotaRemindEnabled() bool {
+	OptionMapRWMutex.RLock()
+	defer OptionMapRWMutex.RUnlock()
+	return QuotaRemindEnabled
+}
+
 var QuotaRemindThreshold = 1000
 var PreConsumedQuota = 500
 

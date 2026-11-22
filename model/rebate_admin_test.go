@@ -21,7 +21,7 @@ func rebateAdminTestSetup(t *testing.T, holdHours int) (*gorm.DB, *User, *User, 
 
 	setting := rebateRewardSetting()
 	setting.PayoutHoldHours = holdHours
-	useRebateRewardSetting(t, setting)
+	useRebateRewardSetting(t, setting, db)
 
 	settleRebateEligibleUsage(t, db, invitee.Id, "rebate-admin", 200, 100_000_000)
 	var record RebateRecord

@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import {
-  Input,
   InputNumber,
   Slider,
   Typography,
@@ -37,6 +36,7 @@ import {
   Check,
   X,
 } from 'lucide-react';
+import { normalizeParameterInteger } from './playgroundParameterValue';
 
 const ParameterControl = ({
   inputs,
@@ -57,7 +57,7 @@ const ParameterControl = ({
           <div className='flex items-center gap-2'>
             <Thermometer size={16} className='text-gray-500' />
             <Typography.Text strong className='text-sm'>
-              Temperature
+              {t('Temperature')}
             </Typography.Text>
             <Tag size='small' shape='circle'>
               {inputs.temperature}
@@ -74,6 +74,10 @@ const ParameterControl = ({
                 <X size={10} />
               )
             }
+            aria-label={t('Enable {{parameter}}', {
+              parameter: t('Temperature'),
+            })}
+            aria-pressed={parameterEnabled.temperature}
             onClick={() => onParameterToggle('temperature')}
             className='!rounded-full !w-4 !h-4 !p-0 !min-w-0'
             disabled={disabled}
@@ -101,7 +105,7 @@ const ParameterControl = ({
           <div className='flex items-center gap-2'>
             <Target size={16} className='text-gray-500' />
             <Typography.Text strong className='text-sm'>
-              Top P
+              {t('Top P')}
             </Typography.Text>
             <Tag size='small' shape='circle'>
               {inputs.top_p}
@@ -114,6 +118,8 @@ const ParameterControl = ({
             icon={
               parameterEnabled.top_p ? <Check size={10} /> : <X size={10} />
             }
+            aria-label={t('Enable {{parameter}}', { parameter: t('Top P') })}
+            aria-pressed={parameterEnabled.top_p}
             onClick={() => onParameterToggle('top_p')}
             className='!rounded-full !w-4 !h-4 !p-0 !min-w-0'
             disabled={disabled}
@@ -141,7 +147,7 @@ const ParameterControl = ({
           <div className='flex items-center gap-2'>
             <Repeat size={16} className='text-gray-500' />
             <Typography.Text strong className='text-sm'>
-              Frequency Penalty
+              {t('Frequency Penalty')}
             </Typography.Text>
             <Tag size='small' shape='circle'>
               {inputs.frequency_penalty}
@@ -158,6 +164,10 @@ const ParameterControl = ({
                 <X size={10} />
               )
             }
+            aria-label={t('Enable {{parameter}}', {
+              parameter: t('Frequency Penalty'),
+            })}
+            aria-pressed={parameterEnabled.frequency_penalty}
             onClick={() => onParameterToggle('frequency_penalty')}
             className='!rounded-full !w-4 !h-4 !p-0 !min-w-0'
             disabled={disabled}
@@ -185,7 +195,7 @@ const ParameterControl = ({
           <div className='flex items-center gap-2'>
             <Ban size={16} className='text-gray-500' />
             <Typography.Text strong className='text-sm'>
-              Presence Penalty
+              {t('Presence Penalty')}
             </Typography.Text>
             <Tag size='small' shape='circle'>
               {inputs.presence_penalty}
@@ -202,6 +212,10 @@ const ParameterControl = ({
                 <X size={10} />
               )
             }
+            aria-label={t('Enable {{parameter}}', {
+              parameter: t('Presence Penalty'),
+            })}
+            aria-pressed={parameterEnabled.presence_penalty}
             onClick={() => onParameterToggle('presence_penalty')}
             className='!rounded-full !w-4 !h-4 !p-0 !min-w-0'
             disabled={disabled}
@@ -229,7 +243,7 @@ const ParameterControl = ({
           <div className='flex items-center gap-2'>
             <Hash size={16} className='text-gray-500' />
             <Typography.Text strong className='text-sm'>
-              Max Tokens
+              {t('Max Tokens')}
             </Typography.Text>
           </div>
           <Button
@@ -243,17 +257,32 @@ const ParameterControl = ({
                 <X size={10} />
               )
             }
+            aria-label={t('Enable {{parameter}}', {
+              parameter: t('Max Tokens'),
+            })}
+            aria-pressed={parameterEnabled.max_tokens}
             onClick={() => onParameterToggle('max_tokens')}
             className='!rounded-full !w-4 !h-4 !p-0 !min-w-0'
             disabled={disabled}
           />
         </div>
+        <Typography.Text className='text-xs text-gray-500 mb-2'>
+          {t('Caps the response length')}
+        </Typography.Text>
         <InputNumber
-          placeholder='MaxTokens'
+          aria-label={t('Max Tokens')}
+          placeholder={t('Max Tokens')}
           name='max_tokens'
           value={inputs.max_tokens}
-          onNumberChange={(value) => onInputChange('max_tokens', value)}
+          onChange={(value) =>
+            onInputChange(
+              'max_tokens',
+              normalizeParameterInteger(value, 200000),
+            )
+          }
           min={0}
+          max={200000}
+          step={1}
           precision={0}
           style={{ width: '100%' }}
           disabled={!parameterEnabled.max_tokens || disabled}
@@ -268,7 +297,7 @@ const ParameterControl = ({
           <div className='flex items-center gap-2'>
             <Shuffle size={16} className='text-gray-500' />
             <Typography.Text strong className='text-sm'>
-              Seed
+              {t('Seed')}
             </Typography.Text>
             <Typography.Text className='text-xs text-gray-400'>
               ({t('可选，用于复现结果')})
@@ -279,19 +308,33 @@ const ParameterControl = ({
             type={parameterEnabled.seed ? 'primary' : 'tertiary'}
             size='small'
             icon={parameterEnabled.seed ? <Check size={10} /> : <X size={10} />}
+            aria-label={t('Enable {{parameter}}', { parameter: t('Seed') })}
+            aria-pressed={parameterEnabled.seed}
             onClick={() => onParameterToggle('seed')}
             className='!rounded-full !w-4 !h-4 !p-0 !min-w-0'
             disabled={disabled}
           />
         </div>
-        <Input
-          placeholder={t('随机种子 (留空为随机)')}
+        <Typography.Text className='text-xs text-gray-500 mb-2'>
+          {t('Keeps compatible responses more repeatable')}
+        </Typography.Text>
+        <InputNumber
+          aria-label={t('Seed')}
+          placeholder={t('Not set')}
           name='seed'
           autoComplete='new-password'
-          value={inputs.seed || ''}
+          value={inputs.seed ?? ''}
           onChange={(value) =>
-            onInputChange('seed', value === '' ? null : value)
+            onInputChange(
+              'seed',
+              normalizeParameterInteger(value, 2147483647, null),
+            )
           }
+          min={0}
+          max={2147483647}
+          step={1}
+          precision={0}
+          style={{ width: '100%' }}
           className='!rounded-lg'
           disabled={!parameterEnabled.seed || disabled}
         />

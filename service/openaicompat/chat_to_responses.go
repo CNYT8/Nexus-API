@@ -250,10 +250,20 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 					"input_audio": part.InputAudio,
 				})
 			case dto.ContentTypeFile:
-				contentParts = append(contentParts, map[string]any{
-					"type": "input_file",
-					"file": part.File,
-				})
+				file := part.GetFile()
+				if file == nil {
+					return nil, errors.New("invalid chat file content")
+				}
+				content := map[string]any{"type": "input_file"}
+				for key, value := range map[string]string{
+					"filename": file.FileName, "file_data": file.FileData,
+					"file_id": file.FileId, "file_url": file.FileUrl,
+				} {
+					if value != "" {
+						content[key] = value
+					}
+				}
+				contentParts = append(contentParts, content)
 			case dto.ContentTypeVideoUrl:
 				contentParts = append(contentParts, map[string]any{
 					"type":      "input_video",
@@ -307,12 +317,16 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 		for _, tool := range req.Tools {
 			switch tool.Type {
 			case "function":
-				tools = append(tools, map[string]any{
+				function := map[string]any{
 					"type":        "function",
 					"name":        tool.Function.Name,
 					"description": tool.Function.Description,
 					"parameters":  tool.Function.Parameters,
-				})
+				}
+				if tool.Function.Strict != nil {
+					function["strict"] = *tool.Function.Strict
+				}
+				tools = append(tools, function)
 			default:
 				// Best-effort: keep original tool shape for unknown types.
 				var m map[string]any
@@ -373,11 +387,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 
 	textRaw := convertChatResponseFormatToResponsesText(req.ResponseFormat)
 
-	maxOutputTokens := lo.FromPtrOr(req.MaxTokens, uint(0))
-	maxCompletionTokens := lo.FromPtrOr(req.MaxCompletionTokens, uint(0))
-	if maxCompletionTokens > maxOutputTokens {
-		maxOutputTokens = maxCompletionTokens
-	}
+	maxOutputTokens := req.GetMaxTokens()
 	// OpenAI Responses API rejects max_output_tokens < 16 when explicitly provided.
 	//if maxOutputTokens > 0 && maxOutputTokens < 16 {
 	//	maxOutputTokens = 16
@@ -388,22 +398,36 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 		topP = common.GetPointer(lo.FromPtr(req.TopP))
 	}
 
+	var promptCacheKeyRaw json.RawMessage
+	if req.PromptCacheKey != "" {
+		promptCacheKeyRaw, _ = common.Marshal(req.PromptCacheKey)
+	}
+
 	out := &dto.OpenAIResponsesRequest{
-		Model:             req.Model,
-		Input:             inputRaw,
-		Instructions:      instructionsRaw,
-		Stream:            req.Stream,
-		Temperature:       req.Temperature,
-		Text:              textRaw,
-		ToolChoice:        toolChoiceRaw,
-		Tools:             toolsRaw,
-		TopP:              topP,
-		User:              req.User,
-		ParallelToolCalls: parallelToolCallsRaw,
-		Store:             req.Store,
-		Metadata:          req.Metadata,
-		EnableThinking:    req.EnableThinking,
-		ThinkingBudget:    req.ThinkingBudget,
+		Model:                req.Model,
+		SafetyIdentifier:     req.SafetyIdentifier,
+		Input:                inputRaw,
+		Instructions:         instructionsRaw,
+		Stream:               req.Stream,
+		Temperature:          req.Temperature,
+		Text:                 textRaw,
+		ToolChoice:           toolChoiceRaw,
+		Tools:                toolsRaw,
+		TopP:                 topP,
+		User:                 req.User,
+		ParallelToolCalls:    parallelToolCallsRaw,
+		Store:                req.Store,
+		Metadata:             req.Metadata,
+		PromptCacheKey:       promptCacheKeyRaw,
+		PromptCacheRetention: req.PromptCacheRetention,
+		PromptCacheOptions:   req.PromptCacheOptions,
+		EnableThinking:       req.EnableThinking,
+		ThinkingBudget:       req.ThinkingBudget,
+	}
+	if len(req.ServiceTier) > 0 {
+		if err := common.Unmarshal(req.ServiceTier, &out.ServiceTier); err != nil {
+			return nil, errors.New("service_tier must be a string")
+		}
 	}
 	if req.MaxTokens != nil || req.MaxCompletionTokens != nil {
 		out.MaxOutputTokens = lo.ToPtr(maxOutputTokens)

@@ -49,6 +49,7 @@ import {
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
 import ChannelSelectorModal from '../../../components/settings/ChannelSelectorModal';
+import { optionValuesEqual, reconcileOptionDrafts, saveOptionBatch } from './hooks/optionSave';
 
 const OFFICIAL_RATIO_PRESET_ID = -100;
 const OFFICIAL_RATIO_PRESET_NAME = '官方倍率预设';
@@ -59,6 +60,15 @@ const MODELS_DEV_PRESET_ID = -101;
 const MODELS_DEV_PRESET_NAME = 'models.dev 价格预设';
 const MODELS_DEV_PRESET_BASE_URL = 'https://models.dev';
 const MODELS_DEV_PRESET_ENDPOINT = 'https://models.dev/api.json';
+
+function parseJsonRecord(value) {
+  try {
+    const parsed = JSON.parse(value || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 function ConflictConfirmModal({ t, visible, items, loading, onOk, onCancel }) {
   const isMobile = useIsMobile();
@@ -116,6 +126,10 @@ export default function UpstreamRatioSync(props) {
   // 差异数据和测试结果
   const [differences, setDifferences] = useState({});
   const [resolutions, setResolutions] = useState({});
+  const [pendingChanges, setPendingChanges] = useState({});
+  const submissionRef = React.useRef(null);
+  const resolutionsRef = React.useRef(resolutions);
+  resolutionsRef.current = resolutions;
 
   // 是否已经执行过同步
   const [hasSynced, setHasSynced] = useState(false);
@@ -249,6 +263,8 @@ export default function UpstreamRatioSync(props) {
 
       setDifferences(differences);
       setResolutions({});
+      setPendingChanges({});
+      submissionRef.current = null;
       setHasSynced(true);
 
       if (Object.keys(differences).length === 0) {
@@ -422,26 +438,80 @@ export default function UpstreamRatioSync(props) {
     [setResolutions, differences],
   );
 
-  const applySync = async () => {
-    const currentRatios = {
-      ModelRatio: JSON.parse(props.options.ModelRatio || '{}'),
-      CompletionRatio: JSON.parse(props.options.CompletionRatio || '{}'),
-      CacheRatio: JSON.parse(props.options.CacheRatio || '{}'),
-      CreateCacheRatio: JSON.parse(props.options.CreateCacheRatio || '{}'),
-      ImageRatio: JSON.parse(props.options.ImageRatio || '{}'),
-      AudioRatio: JSON.parse(props.options.AudioRatio || '{}'),
-      AudioCompletionRatio: JSON.parse(
-        props.options.AudioCompletionRatio || '{}',
-      ),
-      ModelPrice: JSON.parse(props.options.ModelPrice || '{}'),
-      'billing_setting.billing_mode': JSON.parse(
-        props.options['billing_setting.billing_mode'] || '{}',
-      ),
-      'billing_setting.billing_expr': JSON.parse(
-        props.options['billing_setting.billing_expr'] || '{}',
-      ),
-    };
+  const readRatios = () => {
+    const ratios = Object.fromEntries(syncFieldOrder.map((field) => {
+      const key = optionKeyBySyncField(field);
+      const value = parseJsonRecord(props.options[key]);
+      if (!value) throw new Error(t('请检查输入'));
+      return [key, value];
+    }));
+    return ratios;
+  };
 
+  useEffect(() => {
+    if (loading) return;
+    const submission = submissionRef.current;
+    if (!submission || submission.options === props.options) return;
+    const actual = Object.fromEntries(Object.keys(submission.values).map((key) => [
+      key, parseJsonRecord(props.options[key]),
+    ]));
+    if (Object.values(actual).some((value) => value === null)) {
+      showError(t('刷新失败'));
+      return;
+    }
+    const draft = reconcileOptionDrafts(
+      submission.values, submission.previous, actual,
+      submission.values, submission.successfulKeys,
+    );
+    const remainingChanges = {};
+    Object.entries(draft).forEach(([key, values]) => {
+      const changes = {};
+      new Set([...Object.keys(actual[key]), ...Object.keys(values)]).forEach((model) => {
+        const field = syncFieldOrder.find((item) => optionKeyBySyncField(item) === key);
+        const selected = submission.resolutions[model];
+        // Keep choices made during the PUT for the next save.
+        if (selected && field in selected &&
+          !optionValuesEqual(resolutionsRef.current[model]?.[field], selected[field])) return;
+        if (selected && !(field in selected) &&
+          !optionValuesEqual(resolutionsRef.current[model], selected)) return;
+        if (!optionValuesEqual(values[model], actual[key][model])) changes[model] = values[model];
+      });
+      if (Object.keys(changes).length) remainingChanges[key] = changes;
+    });
+    setPendingChanges(remainingChanges);
+    const confirmed = (model, field) => {
+      const key = optionKeyBySyncField(field);
+      return submission.successfulKeys.includes(key) ||
+        optionValuesEqual(actual[key]?.[model], submission.values[key]?.[model]);
+    };
+    const unchanged = (model, field, current) =>
+      Object.hasOwn(submission.resolutions[model] || {}, field) &&
+      optionValuesEqual(current[model]?.[field], submission.resolutions[model][field]);
+    setDifferences((previous) => Object.fromEntries(Object.entries(previous).flatMap(([model, fields]) => {
+      const remaining = Object.fromEntries(Object.entries(fields).flatMap(([field, details]) => {
+        if (unchanged(model, field, resolutionsRef.current) && confirmed(model, field)) return [];
+        return [[field, { ...details, current: actual[optionKeyBySyncField(field)]?.[model] ?? null }]];
+      }));
+      return Object.keys(remaining).length ? [[model, remaining]] : [];
+    })));
+    setResolutions((previous) => Object.fromEntries(Object.entries(previous).flatMap(([model, fields]) => {
+      const remaining = Object.fromEntries(Object.entries(fields).filter(([field]) =>
+        !unchanged(model, field, previous) || !confirmed(model, field),
+      ));
+      return Object.keys(remaining).length ? [[model, remaining]] : [];
+    })));
+    submissionRef.current = null;
+  }, [props.options, loading]);
+
+  const applySync = async () => {
+    if (loading || syncLoading || confirmLoading) return;
+    let currentRatios;
+    try {
+      currentRatios = readRatios();
+    } catch (error) {
+      showError(error.message);
+      return;
+    }
     const conflicts = [];
 
     const getLocalBillingCategory = (model) => {
@@ -534,6 +604,13 @@ export default function UpstreamRatioSync(props) {
         },
       };
 
+      Object.entries(pendingChanges).forEach(([key, changes]) => {
+        Object.entries(changes).forEach(([model, value]) => {
+          if (resolutions[model]) return;
+          if (value === undefined) delete finalRatios[key][model];
+          else finalRatios[key][model] = value;
+        });
+      });
       Object.entries(resolutions).forEach(([model, ratios]) => {
         const selectedTypes = Object.keys(ratios);
         const hasPrice = selectedTypes.includes('model_price');
@@ -553,6 +630,11 @@ export default function UpstreamRatioSync(props) {
         if (hasRatio) {
           delete finalRatios.ModelPrice[model];
         }
+        if ((hasPrice || hasRatio) &&
+          !selectedTypes.includes('billing_mode') && !selectedTypes.includes('billing_expr')) {
+          delete finalRatios['billing_setting.billing_mode'][model];
+          delete finalRatios['billing_setting.billing_expr'][model];
+        }
 
         Object.entries(ratios).forEach(([ratioType, value]) => {
           const optionKey = optionKeyBySyncField(ratioType);
@@ -562,54 +644,27 @@ export default function UpstreamRatioSync(props) {
         });
       });
 
+      const updates = Object.entries(finalRatios)
+        .filter(([key, value]) => !optionValuesEqual(value, currentRatios[key]))
+        .map(([key, value]) => ({ key, value: JSON.stringify(value) }));
+      submissionRef.current = {
+        options: props.options,
+        previous: currentRatios,
+        values: finalRatios,
+        resolutions: structuredClone(resolutions),
+        successfulKeys: [],
+      };
       setLoading(true);
       showInfo(t('正在同步价格，请稍候'));
-      let success = false;
       try {
-        const updates = Object.entries(finalRatios).map(([key, value]) =>
-          API.put('/api/option/', {
-            key,
-            value: JSON.stringify(value, null, 2),
-          }),
-        );
-
-        const results = await Promise.all(updates);
-
-        if (results.every((res) => res.data.success)) {
-          showSuccess(t('同步成功'));
-          props.refresh();
-
-          setDifferences((prevDifferences) => {
-            const newDifferences = { ...prevDifferences };
-
-            Object.entries(resolutions).forEach(([model, ratios]) => {
-              Object.keys(ratios).forEach((ratioType) => {
-                if (newDifferences[model] && newDifferences[model][ratioType]) {
-                  delete newDifferences[model][ratioType];
-
-                  if (Object.keys(newDifferences[model]).length === 0) {
-                    delete newDifferences[model];
-                  }
-                }
-              });
-            });
-
-            return newDifferences;
-          });
-
-          setResolutions({});
-          success = true;
-        } else {
-          showError(t('部分保存失败'));
-        }
-      } catch (error) {
-        showError(t('保存失败'));
+        return await saveOptionBatch(updates, props.refresh, t, ({ successfulKeys }) => {
+          submissionRef.current.successfulKeys = successfulKeys;
+        });
       } finally {
         setLoading(false);
       }
-      return success;
     },
-    [resolutions, props.options, props.refresh],
+    [resolutions, pendingChanges, props.options, props.refresh, t],
   );
 
   const getCurrentPageData = (dataSource) => {
@@ -620,6 +675,9 @@ export default function UpstreamRatioSync(props) {
 
   const renderHeader = () => (
     <div className='flex flex-col w-full'>
+      {Object.keys(pendingChanges).length > 0 && (
+        <div role='status'>{t('部分价格尚未保存，请检查后重试')}</div>
+      )}
       <div className='flex flex-col md:flex-row justify-between items-center gap-4 w-full'>
         <div className='flex flex-col md:flex-row gap-2 w-full md:w-auto order-2 md:order-1'>
           <Button
@@ -637,7 +695,7 @@ export default function UpstreamRatioSync(props) {
           </Button>
 
           {(() => {
-            const hasSelections = Object.keys(resolutions).length > 0;
+            const hasSelections = Object.keys(resolutions).length > 0 || Object.keys(pendingChanges).length > 0;
 
             return (
               <Button
@@ -1082,31 +1140,13 @@ export default function UpstreamRatioSync(props) {
         loading={confirmLoading}
         onOk={async () => {
           setConfirmLoading(true);
-          const curRatios = {
-            ModelRatio: JSON.parse(props.options.ModelRatio || '{}'),
-            CompletionRatio: JSON.parse(props.options.CompletionRatio || '{}'),
-            CacheRatio: JSON.parse(props.options.CacheRatio || '{}'),
-            CreateCacheRatio: JSON.parse(
-              props.options.CreateCacheRatio || '{}',
-            ),
-            ImageRatio: JSON.parse(props.options.ImageRatio || '{}'),
-            AudioRatio: JSON.parse(props.options.AudioRatio || '{}'),
-            AudioCompletionRatio: JSON.parse(
-              props.options.AudioCompletionRatio || '{}',
-            ),
-            ModelPrice: JSON.parse(props.options.ModelPrice || '{}'),
-            'billing_setting.billing_mode': JSON.parse(
-              props.options['billing_setting.billing_mode'] || '{}',
-            ),
-            'billing_setting.billing_expr': JSON.parse(
-              props.options['billing_setting.billing_expr'] || '{}',
-            ),
-          };
           try {
-            const success = await performSync(curRatios);
+            const success = await performSync(readRatios());
             if (success) {
               setConfirmVisible(false);
             }
+          } catch (error) {
+            showError(error.message || t('保存失败'));
           } finally {
             setConfirmLoading(false);
           }

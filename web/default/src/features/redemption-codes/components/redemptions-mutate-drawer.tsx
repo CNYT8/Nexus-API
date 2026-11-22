@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useTranslation } from 'react-i18next'
@@ -52,7 +52,7 @@ import {
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
 import { createRedemption, updateRedemption, getRedemption } from '../api'
-import { SUCCESS_MESSAGES } from '../constants'
+import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
   getRedemptionFormSchema,
   type RedemptionFormValues,
@@ -69,7 +69,16 @@ type RedemptionsMutateDrawerProps = {
   currentRow?: Redemption
 }
 
-export function RedemptionsMutateDrawer({
+export function RedemptionsMutateDrawer(props: RedemptionsMutateDrawerProps) {
+  return (
+    <RedemptionsMutateDrawerForm
+      key={`${props.open}-${props.currentRow?.id ?? 'create'}`}
+      {...props}
+    />
+  )
+}
+
+function RedemptionsMutateDrawerForm({
   open,
   onOpenChange,
   currentRow,
@@ -78,32 +87,67 @@ export function RedemptionsMutateDrawer({
   const isUpdate = !!currentRow
   const { triggerRefresh } = useRedemptions()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [loadedRowId, setLoadedRowId] = useState<number | null>(null)
+  const [detailError, setDetailError] = useState(false)
+  const [detailRetry, setDetailRetry] = useState(0)
+  const detailRequest = useRef(0)
+  const readyRowId = useRef<number | null>(null)
+  const submitPending = useRef(false)
+  const rowId = currentRow?.id
+  const isDetailReady = !isUpdate || loadedRowId === rowId
 
   const form = useForm<RedemptionFormValues>({
     resolver: zodResolver(getRedemptionFormSchema(t)),
     defaultValues: REDEMPTION_FORM_DEFAULT_VALUES,
   })
 
-  // Load existing data when updating
   useEffect(() => {
-    if (!open) {
-      form.reset(REDEMPTION_FORM_DEFAULT_VALUES)
-      return
-    }
-    if (isUpdate && currentRow) {
-      // For update, fetch fresh data
-      getRedemption(currentRow.id).then((result) => {
-        if (result.success && result.data) {
+    const request = ++detailRequest.current
+    readyRowId.current = null
+    form.reset(REDEMPTION_FORM_DEFAULT_VALUES)
+
+    if (open && rowId !== undefined) {
+      getRedemption(rowId)
+        .then((result) => {
+          if (request !== detailRequest.current) return
+          if (!result.success || !result.data || result.data.id !== rowId) {
+            setDetailError(true)
+            return
+          }
           form.reset(transformRedemptionToFormDefaults(result.data))
-        }
-      })
-    } else if (!isUpdate) {
-      // For create, reset to defaults
-      form.reset(REDEMPTION_FORM_DEFAULT_VALUES)
+          readyRowId.current = rowId
+          setLoadedRowId(rowId)
+        })
+        .catch(() => {
+          if (request === detailRequest.current) setDetailError(true)
+        })
     }
-  }, [open, isUpdate, currentRow, form])
+
+    return () => {
+      detailRequest.current = request + 1
+      readyRowId.current = null
+    }
+  }, [open, rowId, form, detailRetry])
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      detailRequest.current++
+      readyRowId.current = null
+      setLoadedRowId(null)
+    }
+    onOpenChange(nextOpen)
+  }
 
   const onSubmit = async (data: RedemptionFormValues) => {
+    if (
+      !open ||
+      submitPending.current ||
+      !isDetailReady ||
+      (isUpdate && readyRowId.current !== rowId)
+    )
+      return
+    const request = detailRequest.current
+    submitPending.current = true
     setIsSubmitting(true)
     try {
       const basePayload = transformFormDataToPayload(data)
@@ -113,14 +157,19 @@ export function RedemptionsMutateDrawer({
           ...basePayload,
           id: currentRow.id,
         })
+        if (result.success) triggerRefresh()
+        if (request !== detailRequest.current) return
         if (result.success) {
           toast.success(t(SUCCESS_MESSAGES.REDEMPTION_UPDATED))
-          onOpenChange(false)
-          triggerRefresh()
+          handleOpenChange(false)
+        } else {
+          toast.error(result.message || t(ERROR_MESSAGES.UPDATE_FAILED))
         }
       } else {
         // Create mode
         const result = await createRedemption(basePayload)
+        if (result.success) triggerRefresh()
+        if (request !== detailRequest.current) return
         if (result.success) {
           const count = result.data?.length || 0
           toast.success(
@@ -130,11 +179,17 @@ export function RedemptionsMutateDrawer({
                 })
               : t(SUCCESS_MESSAGES.REDEMPTION_CREATED)
           )
-          onOpenChange(false)
-          triggerRefresh()
+          handleOpenChange(false)
+        } else {
+          toast.error(result.message || t(ERROR_MESSAGES.CREATE_FAILED))
         }
       }
+    } catch (_error) {
+      if (request === detailRequest.current) {
+        toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+      }
     } finally {
+      submitPending.current = false
       setIsSubmitting(false)
     }
   }
@@ -153,7 +208,7 @@ export function RedemptionsMutateDrawer({
     : t('Enter quota in {{currency}}', { currency: currencyLabel })
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent className={sideDrawerContentClassName('sm:max-w-[600px]')}>
         <SheetHeader className={sideDrawerHeaderClassName()}>
           <SheetTitle>
@@ -170,10 +225,34 @@ export function RedemptionsMutateDrawer({
             {t('Click save when you&apos;re done.')}
           </SheetDescription>
         </SheetHeader>
+        {isUpdate && !isDetailReady && (
+          <div className='space-y-2 px-6 py-4 text-sm' role='status'>
+            <p>{t(detailError ? ERROR_MESSAGES.LOAD_FAILED : 'Loading...')}</p>
+            {detailError && (
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => {
+                  setDetailError(false)
+                  setDetailRetry((retry) => retry + 1)
+                }}
+              >
+                {t('Retry')}
+              </Button>
+            )}
+          </div>
+        )}
         <Form {...form}>
           <form
             id='redemption-form'
-            onSubmit={form.handleSubmit(onSubmit)}
+            onSubmit={(event) => {
+              const request = detailRequest.current
+              void form.handleSubmit((data) => {
+                if (request === detailRequest.current) return onSubmit(data)
+              })(event)
+            }}
+            inert={!isDetailReady || isSubmitting}
+            aria-busy={!isDetailReady || isSubmitting}
             className={sideDrawerFormClassName()}
           >
             <SideDrawerSection>
@@ -314,7 +393,11 @@ export function RedemptionsMutateDrawer({
           <SheetClose render={<Button variant='outline' />}>
             {t('Close')}
           </SheetClose>
-          <Button form='redemption-form' type='submit' disabled={isSubmitting}>
+          <Button
+            form='redemption-form'
+            type='submit'
+            disabled={isSubmitting || !isDetailReady}
+          >
             {isSubmitting ? t('Saving...') : t('Save changes')}
           </Button>
         </SheetFooter>

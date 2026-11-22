@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useRef } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -42,6 +41,7 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import {
   formatJsonForTextarea,
@@ -94,7 +94,7 @@ type ClaudeSettingsCardProps = {
 export function ClaudeSettingsCard({ defaultValues }: ClaudeSettingsCardProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
-  const normalizedDefaultsRef = useRef<FlatClaudeSettings>({
+  const normalizedDefaults: FlatClaudeSettings = {
     'claude.model_headers_settings': normalizeJsonString(
       defaultValues.claude.model_headers_settings
     ),
@@ -106,7 +106,7 @@ export function ClaudeSettingsCard({ defaultValues }: ClaudeSettingsCardProps) {
     'claude.thinking_adapter_budget_tokens_percentage': Number(
       defaultValues.claude.thinking_adapter_budget_tokens_percentage
     ),
-  })
+  }
 
   const buildFormDefaults = (
     values: ClaudeSettingsFormInput
@@ -133,23 +133,7 @@ export function ClaudeSettingsCard({ defaultValues }: ClaudeSettingsCardProps) {
     defaultValues: buildFormDefaults(defaultValues),
   })
 
-  useEffect(() => {
-    normalizedDefaultsRef.current = {
-      'claude.model_headers_settings': normalizeJsonString(
-        defaultValues.claude.model_headers_settings
-      ),
-      'claude.default_max_tokens': normalizeJsonString(
-        defaultValues.claude.default_max_tokens
-      ),
-      'claude.thinking_adapter_enabled':
-        defaultValues.claude.thinking_adapter_enabled,
-      'claude.thinking_adapter_budget_tokens_percentage': Number(
-        defaultValues.claude.thinking_adapter_budget_tokens_percentage
-      ),
-    }
-
-    form.reset(buildFormDefaults(defaultValues))
-  }, [defaultValues, form])
+  const submitForm = useResetForm(form, buildFormDefaults(defaultValues))
 
   const onSubmit = async (values: ClaudeSettingsFormValues) => {
     const normalized: FlatClaudeSettings = {
@@ -166,25 +150,24 @@ export function ClaudeSettingsCard({ defaultValues }: ClaudeSettingsCardProps) {
 
     const updates = (
       Object.keys(normalized) as Array<keyof FlatClaudeSettings>
-    ).filter((key) => normalized[key] !== normalizedDefaultsRef.current[key])
+    ).filter((key) => normalized[key] !== normalizedDefaults[key])
 
     if (updates.length === 0) {
       toast.info(t('No changes to save'))
       return
     }
 
-    for (const key of updates) {
-      await updateOption.mutateAsync({ key, value: normalized[key] })
-    }
+    await updateOption.saveOptions(
+      updates.map((key) => ({ key, value: normalized[key] }))
+    )
   }
 
   return (
     <SettingsSection title={t('Claude')}>
       <Form {...form}>
-        {/* eslint-disable-next-line react-hooks/refs */}
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
           />
           <FormField

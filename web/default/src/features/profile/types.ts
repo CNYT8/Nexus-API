@@ -29,6 +29,62 @@ export interface ApiResponse<T = unknown> {
   data?: T
 }
 
+export interface LoginDevice {
+  id: number
+  current: boolean
+  status: 'active' | 'revoked' | 'expired' | 'invalidated'
+  created_at: number
+  expires_at: number
+  revoked_at: number
+  login_method: string
+  ip: string
+  user_agent: string
+}
+
+export interface LoginDeviceList {
+  items: LoginDevice[]
+  /** Maximum number of displayed records, not the active-session limit. */
+  limit: number
+  has_more: boolean
+  /** Optional only for compatibility with servers predating session limits. */
+  active_count?: number
+  active_limit?: number
+  issuance_count?: number
+  issuance_limit?: number
+  window_seconds?: number
+}
+
+export interface PersonalAccessToken {
+  status: LoginDevice['status']
+  id: number
+  name: string
+  prefix: string
+  scopes: string
+  created_at: number
+  expires_at: number
+  revoked_at: number
+}
+
+export interface PersonalAccessTokenPage {
+  page: number
+  page_size: number
+  total: number
+  active_count: number
+  limit: number
+  items: PersonalAccessToken[]
+}
+
+export interface UpdatePersonalAccessToken {
+  name?: string
+  scopes?: string[]
+}
+
+export interface CreatePersonalAccessToken {
+  name: string
+  scopes: string[]
+  expires_at: number
+}
+
 /**
  * User profile data
  */
@@ -94,8 +150,9 @@ export type NotifyType = 'email' | 'webhook' | 'bark' | 'gotify'
 export interface UserSettings {
   /** Notification type */
   notify_type?: NotifyType
-  /** Quota warning threshold */
+  /** Quota warning threshold; zero uses the site default. */
   quota_warning_threshold?: number
+  quota_warning_enabled?: boolean
   /** Webhook URL */
   webhook_url?: string
   /** Webhook secret */
@@ -135,6 +192,7 @@ export interface UpdateUserRequest {
 export interface UpdateUserSettingsRequest {
   notify_type?: string
   quota_warning_threshold?: number
+  quota_warning_enabled?: boolean
   webhook_url?: string
   webhook_secret?: string
   notification_email?: string

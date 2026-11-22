@@ -2,12 +2,16 @@ package service
 
 import (
 	"errors"
+	"sort"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -92,7 +96,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 		if len(setting.GetAutoGroups()) == 0 {
 			return nil, selectGroup, errors.New("auto groups is not enabled")
 		}
-		autoGroups := GetUserAutoGroup(userGroup)
+		autoGroups := GetRequestAutoGroups(param.Ctx, userGroup)
 
 		// startGroupIndex: the group index to start searching from
 		// startGroupIndex: 开始搜索的分组索引
@@ -117,7 +121,10 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			priorityRetry := max(groupRetry-affinityRetryOffset, 0)
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannel(autoGroup, param.ModelName, priorityRetry, param.RequestPath)
+			channel, err = getRandomChannelForRequest(param, autoGroup, priorityRetry)
+			if err != nil && param.Ctx.GetBool("responses_websocket") {
+				return nil, autoGroup, err
+			}
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -158,10 +165,128 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannel(param.TokenGroup, param.ModelName, max(param.GetRetry()-affinityRetryOffset, 0), param.RequestPath)
+		channel, err = getRandomChannelForRequest(param, param.TokenGroup, max(param.GetRetry()-affinityRetryOffset, 0))
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}
 	}
 	return channel, selectGroup, nil
+}
+
+// ChannelSupportsResponsesWebSocket is shared by selection and the final send
+// guard. Only enabled, native Responses routes with a usable key can carry WS frames.
+func ChannelSupportsResponsesWebSocket(channel *model.Channel) bool {
+	if channel == nil || channel.Status != common.ChannelStatusEnabled || !channel.GetSetting().ResponsesWebSocketEnabled || strings.TrimSpace(channel.Key) == "" {
+		return false
+	}
+	if channel.ChannelInfo.IsMultiKey {
+		usableKey := false
+		for index, key := range channel.GetKeys() {
+			status, exists := channel.ChannelInfo.MultiKeyStatusList[index]
+			if strings.TrimSpace(key) != "" && (!exists || status == common.ChannelStatusEnabled) {
+				usableKey = true
+				break
+			}
+		}
+		if !usableKey {
+			return false
+		}
+	}
+	switch channel.Type {
+	case constant.ChannelTypeOpenAI, constant.ChannelTypeAzure, constant.ChannelTypeCodex:
+		return true
+	case constant.ChannelTypeAdvancedCustom:
+		route, found := channel.GetOtherSettings().AdvancedCustom.MatchPath("/v1/responses")
+		converter := strings.TrimSpace(route.Converter)
+		return found && (converter == "" || converter == dto.AdvancedCustomConverterNone)
+	}
+	return false
+}
+
+func getRandomChannelForRequest(param *RetryParam, group string, retry int) (*model.Channel, error) {
+	if param.Ctx == nil || !param.Ctx.GetBool("responses_websocket") {
+		return model.GetRandomSatisfiedChannel(group, param.ModelName, retry, param.RequestPath)
+	}
+	// Read current channel settings before ranking candidates. Filtering only a
+	// random winner would hide enabled WS channels behind higher HTTP priorities.
+	candidates, err := responsesWSChannelCandidates(group, param.ModelName)
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		normalized := ratio_setting.FormatMatchingModelName(param.ModelName)
+		if normalized != param.ModelName {
+			candidates, err = responsesWSChannelCandidates(group, normalized)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].GetPriority() > candidates[j].GetPriority() })
+	priority := candidates[0].GetPriority()
+	remaining := max(retry, 0)
+	for _, channel := range candidates[1:] {
+		if channel.GetPriority() != priority && remaining > 0 {
+			priority = channel.GetPriority()
+			remaining--
+		}
+	}
+	selected := make([]*model.Channel, 0, len(candidates))
+	sumWeight := 0
+	for _, channel := range candidates {
+		if channel.GetPriority() == priority {
+			selected = append(selected, channel)
+			sumWeight += channel.GetWeight()
+		}
+	}
+	// Preserve the existing cache and DB weighting policies after filtering.
+	factor, adjustment := 1, 10
+	if common.MemoryCacheEnabled {
+		adjustment = 0
+		if sumWeight == 0 {
+			adjustment = 100
+		} else if sumWeight/len(selected) < 10 {
+			factor = 100
+		}
+	}
+	weight := common.GetRandomInt(sumWeight*factor + len(selected)*adjustment)
+	for _, channel := range selected {
+		weight -= channel.GetWeight()*factor + adjustment
+		if weight < 0 {
+			return channel, nil
+		}
+	}
+	return nil, errors.New("no Responses WebSocket channel matched the selected weight")
+}
+
+func responsesWSChannelCandidates(group, modelName string) ([]*model.Channel, error) {
+	if strings.TrimSpace(group) == "" || strings.TrimSpace(modelName) == "" {
+		return nil, nil
+	}
+	var abilities []model.Ability
+	// Struct conditions quote the reserved SQL group column on every DB dialect.
+	if err := model.DB.Where(&model.Ability{Group: group, Model: modelName, Enabled: true}).Find(&abilities).Error; err != nil {
+		return nil, err
+	}
+	ids := make([]int, 0, len(abilities))
+	for _, ability := range abilities {
+		ids = append(ids, ability.ChannelId)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	channels, err := model.GetChannelsByIds(ids)
+	if err != nil {
+		return nil, err
+	}
+	candidates := make([]*model.Channel, 0, len(channels))
+	for _, channel := range channels {
+		if ChannelSupportsResponsesWebSocket(channel) {
+			candidates = append(candidates, channel)
+		}
+	}
+	return candidates, nil
 }

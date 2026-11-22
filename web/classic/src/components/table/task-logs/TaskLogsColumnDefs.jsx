@@ -44,6 +44,7 @@ import {
 import { CHANNEL_OPTIONS } from '../../../constants/channel.constants';
 import { stringToColor } from '../../../helpers/render';
 import { Avatar, Space } from '@douyinfe/semi-ui';
+import TaskResultDetails from './modals/TaskResultDetails';
 
 const colors = [
   'amber',
@@ -336,14 +337,17 @@ export const getTaskLogsColumns = ({
       dataIndex: 'task_id',
       render: (text, record, index) => {
         return (
-          <Typography.Text
-            ellipsis={{ showTooltip: true }}
-            onClick={() => {
-              openContentModal(JSON.stringify(record, null, 2));
-            }}
-          >
-            <div>{text}</div>
-          </Typography.Text>
+          <div className='flex flex-col items-start gap-1'>
+            <Typography.Text
+              ellipsis={{ showTooltip: true }}
+              onClick={() => {
+                openContentModal(JSON.stringify(record, null, 2));
+              }}
+            >
+              <div>{text}</div>
+            </Typography.Text>
+            {text && <TaskResultDetails record={record} />}
+          </div>
         );
       },
     },

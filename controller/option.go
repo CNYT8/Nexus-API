@@ -1,7 +1,10 @@
 package controller
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -97,7 +100,10 @@ func GetOptions(c *gin.Context) {
 			strings.HasSuffix(k, "secret") ||
 			strings.HasSuffix(k, "api_key") ||
 			isOutputSensitiveOptionKey(k)
-		if isSensitiveKey {
+		if k == "TurnstileSecretKeyConfigured" {
+			continue
+		}
+		if isSensitiveKey && k != "TurnstileSiteKey" {
 			continue
 		}
 		options = append(options, &model.Option{
@@ -111,6 +117,10 @@ func GetOptions(c *gin.Context) {
 			}
 		}
 	}
+	options = append(options, &model.Option{
+		Key:   "TurnstileSecretKeyConfigured",
+		Value: strconv.FormatBool(strings.TrimSpace(common.TurnstileSecretKey) != ""),
+	})
 	common.OptionMapRWMutex.Unlock()
 	options = append(options, &model.Option{
 		Key:   "CompletionRatioMeta",
@@ -168,10 +178,56 @@ func UpdateOutputSensitiveConfig(c *gin.Context) {
 	})
 }
 
+type RebateConfigRequest struct {
+	Fields   map[string]string `json:"fields"`
+	Revision string            `json:"revision"`
+}
+
+func GetRebateConfig(c *gin.Context) {
+	snapshot, err := model.GetRebateConfig()
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": snapshot})
+}
+
+func UpdateRebateConfig(c *gin.Context) {
+	if c.Request.Body == nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	var request RebateConfigRequest
+	if err := decoder.Decode(&request); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	snapshot, err := model.UpdateRebateConfig(request.Fields, request.Revision)
+	if err != nil {
+		if errors.Is(err, model.ErrRebateConfigConflict) {
+			c.JSON(http.StatusConflict, gin.H{"success": false, "message": err.Error()})
+		} else {
+			common.ApiErrorMsg(c, err.Error())
+		}
+		return
+	}
+	recordManageAudit(c, "option.update", map[string]interface{}{"key": "RebateConfig"})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": snapshot})
+}
+
 type OptionUpdateRequest struct {
 	Key   string `json:"key"`
 	Value any    `json:"value"`
 }
+
+var turnstileOptionUpdateMu sync.Mutex
 
 func UpdateOption(c *gin.Context) {
 	var option OptionUpdateRequest
@@ -213,6 +269,12 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	}
+	if option.Key == "TurnstileCheckEnabled" || option.Key == "TurnstileSiteKey" || option.Key == "TurnstileSecretKey" {
+		// 同一实例内把凭据校验与保存串行化，避免清空和启用请求交错。
+		turnstileOptionUpdateMu.Lock()
+		defer turnstileOptionUpdateMu.Unlock()
+	}
+
 	switch option.Key {
 	case "GitHubOAuthEnabled":
 		if option.Value == "true" && common.GitHubClientId == "" {
@@ -262,8 +324,23 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "TurnstileSecretKeyConfigured":
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	case "TurnstileSiteKey", "TurnstileSecretKey":
+		option.Value = strings.TrimSpace(option.Value.(string))
+		common.OptionMapRWMutex.RLock()
+		turnstileEnabled := common.TurnstileCheckEnabled
+		common.OptionMapRWMutex.RUnlock()
+		if turnstileEnabled && option.Value == "" {
+			common.ApiErrorMsg(c, "无法启用 Turnstile 校验，请先填入 Turnstile 校验相关配置信息！")
+			return
+		}
 	case "TurnstileCheckEnabled":
-		if option.Value == "true" && common.TurnstileSiteKey == "" {
+		common.OptionMapRWMutex.RLock()
+		turnstileConfigured := strings.TrimSpace(common.TurnstileSiteKey) != "" && strings.TrimSpace(common.TurnstileSecretKey) != ""
+		common.OptionMapRWMutex.RUnlock()
+		if option.Value == "true" && !turnstileConfigured {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法启用 Turnstile 校验，请先填入 Turnstile 校验相关配置信息！",
@@ -492,12 +569,22 @@ func InitializeWalletLedger(c *gin.Context) {
 
 	service.SetRebateMaintenancePaused(true)
 	defer service.SetRebateMaintenancePaused(false)
-	middleware.BeginWalletMaintenanceGate(3 * time.Second)
 	defer middleware.EndWalletMaintenanceGate()
-	service.WaitForRebateTasksIdle(2 * time.Second)
+	if !middleware.BeginWalletMaintenanceGate(3*time.Second) || !service.WaitForRebateTasksIdle(2*time.Second) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"message": "钱包账本初始化已中止：仍有请求或后台账务任务未完成，请稍后重试",
+		})
+		return
+	}
 
 	if err := model.InitializeWalletCreditBaseline(model.DB); err != nil {
-		common.ApiError(c, err)
+		if errors.Is(err, model.ErrWalletBaselineBusy) {
+			c.Header("Retry-After", "5")
+			c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": err.Error()})
+		} else {
+			common.ApiError(c, err)
+		}
 		return
 	}
 

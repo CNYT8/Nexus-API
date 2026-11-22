@@ -29,7 +29,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
-	if matcher := relaycommon.NewOutputSensitiveMatcherForConfig(info.OutputSensitiveConfig); matcher != nil {
+	if matcher := relaycommon.NewOutputSensitiveMatcherForConfig(info.OutputSensitiveConfig); !info.ThinkingProcessStrip && matcher != nil {
 		cleaned, matched, _, scanErr := relaycommon.SanitizeOutputSensitiveJSONWithThinkingPolicy(responseBody, matcher, info.ThinkingProcessStrip)
 		if scanErr != nil {
 			return nil, types.NewOpenAIError(scanErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -46,45 +46,27 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
-		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	usage := dto.Usage{}
+	applyResponsesStreamUsage(&usage, responsesResponse.Usage)
+	var tools relaycommon.ResponsesToolUsageCounter
+	tools.ObserveResponse(c, info, gjson.ParseBytes(responseBody), true)
+	usage.ToolUsage = tools.Commit(c, info)
+	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil {
+		return &usage, types.WithOpenAIError(*oaiError, http.StatusBadGateway)
 	}
-
-	if responsesResponse.HasImageGenerationCall() {
-		c.Set("image_generation_call", true)
-		c.Set("image_generation_call_quality", responsesResponse.GetQuality())
-		c.Set("image_generation_call_size", responsesResponse.GetSize())
+	if responsesStatusIsFailed(responsesResponse.Status) {
+		return &usage, types.NewErrorWithStatusCode(fmt.Errorf("upstream Responses request failed"), types.ErrorCodeBadResponse, http.StatusBadGateway)
 	}
 
 	// 写入新的 response body
-	service.IOCopyBytesGracefully(c, resp, responseBody)
-
-	// compute usage
-	usage := dto.Usage{}
-	if responsesResponse.Usage != nil {
-		usage.PromptTokens = responsesResponse.Usage.InputTokens
-		usage.CompletionTokens = responsesResponse.Usage.OutputTokens
-		usage.TotalTokens = responsesResponse.Usage.TotalTokens
-		if responsesResponse.Usage.InputTokensDetails != nil {
-			usage.PromptTokensDetails.CachedTokens = responsesResponse.Usage.InputTokensDetails.CachedTokens
-		}
-	}
-	if info == nil || info.ResponsesUsageInfo == nil || info.ResponsesUsageInfo.BuiltInTools == nil {
-		return &usage, nil
-	}
-	// 解析 Tools 用量
-	for _, tool := range responsesResponse.Tools {
-		buildToolinfo, ok := info.ResponsesUsageInfo.BuiltInTools[common.Interface2String(tool["type"])]
-		if !ok || buildToolinfo == nil {
-			logger.LogError(c, fmt.Sprintf("BuiltInTools not found for tool type: %v", tool["type"]))
-			continue
-		}
-		buildToolinfo.CallCount++
+	if writeErr := service.WriteRelayJSON(c, resp, responseBody, info); writeErr != nil {
+		return &usage, writeErr
 	}
 	return &usage, nil
 }
 
 func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	defer helper.FinalizeThinkingStream(c)
 	if resp == nil || resp.Body == nil {
 		logger.LogError(c, "invalid response or response body")
 		return nil, types.NewError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse)
@@ -96,8 +78,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var responseTextBuilder strings.Builder
 	var itemTextBuilder strings.Builder
 	terminalOutputTokens := 0
-	toolCounts := map[string]int{}
-	terminalToolCounts := map[string]int{}
+	var toolCalls relaycommon.ResponsesToolUsageCounter
 	started := false
 	explicitFailure := false
 
@@ -115,7 +96,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		// Preserve the distinction between explicit rejection and an empty or
 		// interrupted success. Record a soft error even if the scanner already
 		// saw [DONE], so empty-response compensation cannot treat failure as success.
-		failed := streamResponse.Type == "error" || streamResponse.Type == "response.failed" || streamResponse.Type == "response.error"
+		failed := streamResponse.Type == "error" || streamResponse.Type == "response.failed" || streamResponse.Type == "response.error" || streamResponse.Type == "response.cancelled" || streamResponse.Type == "response.canceled"
 		if streamResponse.Response != nil {
 			failed = failed || responsesStatusIsFailed(streamResponse.Response.Status) || streamResponse.Response.GetOpenAIError() != nil
 		}
@@ -132,26 +113,10 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				// Compare estimates rather than concatenating duplicate output.
 				outputs := gjson.Get(data, "response.output").Array()
 				text := responsesOutputTokenText(outputs)
-				counts := map[string]int{}
-				for _, output := range outputs {
-					kind := output.Get("type").String()
-					if strings.HasSuffix(kind, "_call") {
-						c.Set("responses_tool_call", true)
-					}
-					counts[responsesBuiltInTool(kind)]++
-				}
-				for kind, count := range counts {
-					if count > terminalToolCounts[kind] {
-						terminalToolCounts[kind] = count
-					}
-				}
+				toolCalls.ObserveResponse(c, info, gjson.Get(data, "response"),
+					streamResponse.Type == "response.completed" || streamResponse.Type == "response.done")
 				if tokens := service.CountTextToken(text, info.UpstreamModelName); tokens > terminalOutputTokens {
 					terminalOutputTokens = tokens
-				}
-				if streamResponse.Response.HasImageGenerationCall() {
-					c.Set("image_generation_call", true)
-					c.Set("image_generation_call_quality", streamResponse.Response.GetQuality())
-					c.Set("image_generation_call_size", streamResponse.Response.GetSize())
 				}
 			}
 		case "response.output_text.delta", "response.function_call_arguments.delta",
@@ -164,14 +129,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			responseTextBuilder.WriteString(streamResponse.Delta)
 		case dto.ResponsesOutputTypeItemDone:
 			itemTextBuilder.WriteString(responsesOutputTokenText([]gjson.Result{gjson.Get(data, "item")}))
-			// 函数调用处理
-			if streamResponse.Item != nil {
-				kind := streamResponse.Item.Type
-				if strings.HasSuffix(kind, "_call") {
-					c.Set("responses_tool_call", true)
-				}
-				toolCounts[responsesBuiltInTool(kind)]++
-			}
+			toolCalls.ObserveItem(c, info, gjson.Get(data, "item"), streamResponse.OutputIndex, true)
 		}
 
 		if data != "" {
@@ -180,26 +138,13 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				return
 			}
 		}
-		if (streamResponse.Type == "response.completed" || streamResponse.Type == "response.done") &&
-			streamResponse.Response != nil && responsesStatusIsCompleted(streamResponse.Response.Status) {
+		switch streamResponse.Type {
+		case "response.completed", "response.done", "response.incomplete", "response.failed", "response.cancelled", "response.canceled":
 			sr.Done()
 		}
 	})
 
-	for kind, count := range terminalToolCounts {
-		if count > toolCounts[kind] {
-			toolCounts[kind] = count
-		}
-	}
-	if info.ResponsesUsageInfo != nil {
-		for kind, count := range toolCounts {
-			if kind != "" {
-				if tool := info.ResponsesUsageInfo.BuiltInTools[kind]; tool != nil {
-					tool.CallCount += count
-				}
-			}
-		}
-	}
+	usage.ToolUsage = toolCalls.Commit(c, info)
 
 	reportedUsage := usage.PromptTokens > 0 || usage.CompletionTokens > 0 || usage.TotalTokens > 0
 	if usage.TotalTokens > 0 {
@@ -241,6 +186,21 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 
 	return usage, nil
+}
+
+func applyResponsesToolUsage(info *relaycommon.RelayInfo, counts map[string]int) {
+	if info == nil || info.ResponsesUsageInfo == nil {
+		return
+	}
+	for kind, count := range counts {
+		if tool := info.ResponsesUsageInfo.BuiltInTools[kind]; tool != nil {
+			tool.CallCount += count
+		} else if kind == dto.BuildInToolWebSearchPreview {
+			if tool := info.ResponsesUsageInfo.BuiltInTools["web_search"]; tool != nil {
+				tool.CallCount += count
+			}
+		}
+	}
 }
 
 func responsesBuiltInTool(kind string) string {
@@ -295,9 +255,19 @@ func applyResponsesStreamUsage(dst *dto.Usage, src *dto.Usage) {
 	if src.TotalTokens > 0 {
 		dst.TotalTokens = src.TotalTokens
 	}
-	if src.InputTokensDetails != nil && src.InputTokensDetails.CachedTokens > 0 {
-		dst.PromptTokensDetails.CachedTokens = src.InputTokensDetails.CachedTokens
+	dst.PromptTokensDetails.MergeNonZero(src.PromptTokensDetails)
+	if src.InputTokensDetails != nil {
+		dst.PromptTokensDetails.MergeNonZero(*src.InputTokensDetails)
 	}
+	if src.CompletionTokenDetails.ReasoningTokens > 0 {
+		dst.CompletionTokenDetails.ReasoningTokens = src.CompletionTokenDetails.ReasoningTokens
+	}
+	if src.OutputTokensDetails != nil && src.OutputTokensDetails.ReasoningTokens > 0 {
+		dst.CompletionTokenDetails.ReasoningTokens = src.OutputTokensDetails.ReasoningTokens
+	}
+	dst.InputTokens = dst.PromptTokens
+	dst.OutputTokens = dst.CompletionTokens
+	dst.TotalTokens = max(dst.TotalTokens, dst.PromptTokens+dst.CompletionTokens)
 }
 
 // responsesStatusIsFailed reports whether a Responses API status payload is
@@ -310,7 +280,7 @@ func responsesStatusIsFailed(status json.RawMessage) bool {
 	if err := common.Unmarshal(status, &value); err != nil {
 		return false
 	}
-	return value == "failed"
+	return value == "failed" || value == "cancelled" || value == "canceled"
 }
 
 func responsesStatusIsCompleted(status json.RawMessage) bool {

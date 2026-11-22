@@ -23,7 +23,6 @@ import {
   Space,
   Tag,
   Typography,
-  Modal,
   Tooltip,
 } from '@douyinfe/semi-ui';
 import {
@@ -224,18 +223,7 @@ const renderOperations = (
       <Button
         type='danger'
         size='small'
-        onClick={() => {
-          Modal.confirm({
-            title: t('确定是否要删除此模型？'),
-            content: t('此修改将不可逆'),
-            onOk: () => {
-              (async () => {
-                await manageModel(record.id, 'delete', record);
-                await refresh();
-              })();
-            },
-          });
-        }}
+        onClick={() => manageModel(record.id, 'delete', record)}
       >
         {t('删除')}
       </Button>

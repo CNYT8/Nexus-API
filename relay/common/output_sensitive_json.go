@@ -3,9 +3,6 @@ package common
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"sort"
-	"strings"
 )
 
 type OutputSensitiveTextFragment struct {
@@ -21,186 +18,86 @@ func SanitizeOutputSensitiveJSON(data []byte, matcher *OutputSensitiveMatcher) (
 	return SanitizeOutputSensitiveJSONWithThinkingPolicy(data, matcher, false)
 }
 
-// SanitizeOutputSensitiveJSONWithThinkingPolicy excludes reasoning fields that
-// the relay will strip before returning the response.
+// 剥离和扫描使用同一协议遍历器，正文标签先剥离，工具参数始终作为可见输出检查。
 func SanitizeOutputSensitiveJSONWithThinkingPolicy(data []byte, matcher *OutputSensitiveMatcher, stripThinking bool) ([]byte, bool, string, error) {
+	if !stripThinking {
+		return sanitizeLegacyOutputJSON(data, matcher)
+	}
+	if len(data) > 0 {
+		var err error
+		data, err = StripThinkingJSON(data)
+		if err != nil {
+			return nil, false, "", err
+		}
+	}
 	if matcher == nil || len(data) == 0 {
 		return data, false, "", nil
 	}
-	var value any
-	if err := json.Unmarshal(data, &value); err != nil {
-		return nil, false, "", err
+	if !json.Valid(data) {
+		return nil, false, "", errors.New("invalid response JSON")
 	}
-	matched := sanitizeOutputValue(&value, matcher, true, false, stripThinking)
+	obj := outputMap(data)
+	if obj == nil {
+		return data, false, "", nil
+	}
+	// 完整响应先按逻辑正文路径拼接，跨 content/parts 的匹配也要从首个
+	// 命中字符截断。工具参数的路径独立，不能与另一条 choice 拼接。
+	texts := make(map[string]string)
+	collector := outputJSONWalker{text: func(text string, loc outputTextLocation) string {
+		texts[loc.path] += text
+		return text
+	}}
+	collector.root(obj)
+	limits := make(map[string]int)
+	for path, text := range texts {
+		if index, _ := matcher.MatchIndex(text); index >= 0 {
+			limits[path] = index
+		}
+	}
+	matched := false
+	offsets := make(map[string]int)
+	walker := outputJSONWalker{text: func(text string, loc outputTextLocation) string {
+		if matched {
+			return ""
+		}
+		runes := []rune(text)
+		start := offsets[loc.path]
+		offsets[loc.path] += len(runes)
+		if limit, ok := limits[loc.path]; ok && limit < offsets[loc.path] {
+			matched = true
+			return string(runes[:limit-start])
+		}
+		return text
+	}}
+	walker.root(obj)
 	if !matched {
 		return data, false, "", nil
 	}
-	cleaned, err := json.Marshal(value)
-	if err != nil {
-		return nil, true, outputSensitiveMatchLabel, err
-	}
-	return cleaned, true, outputSensitiveMatchLabel, nil
+	cleaned, err := json.Marshal(obj)
+	return cleaned, true, outputSensitiveMatchLabel, err
 }
 
-// OutputSensitiveTextFragments decodes a streaming JSON payload and returns
-// generated-content fragments keyed by stable output paths. Invalid JSON is
-// treated as plain text because some compatible upstreams emit text-only SSE.
-func OutputSensitiveTextFragments(data string) []OutputSensitiveTextFragment {
+// 流式路径按 choice/candidate/block/item 索引隔离，避免不同输出互相拼接命中。
+func VisibleOutputSensitiveTextFragments(data string) []OutputSensitiveTextFragment {
 	if data == "" {
 		return nil
 	}
-	var value any
-	if err := json.Unmarshal([]byte(data), &value); err != nil {
+	if !json.Valid([]byte(data)) {
 		return []OutputSensitiveTextFragment{{Path: "$text", Text: data}}
 	}
+	obj := outputMap([]byte(data))
+	if obj == nil {
+		return nil
+	}
 	fragments := make([]OutputSensitiveTextFragment, 0, 2)
-	rootPath := "$"
-	if root, ok := value.(map[string]any); ok {
-		if eventType, ok := root["type"].(string); ok && eventType != "" {
-			rootPath = "$event:" + eventType
+	walker := outputJSONWalker{stream: true, text: func(text string, loc outputTextLocation) string {
+		if text != "" {
+			fragments = append(fragments, OutputSensitiveTextFragment{Path: loc.path, Text: text, HiddenThinking: loc.hidden})
 		}
-	}
-	collectOutputTextFragments(value, rootPath, true, false, &fragments)
+		return text
+	}}
+	walker.root(obj)
 	return fragments
-}
-
-type outputSensitiveSanitizeState struct {
-	matcher *OutputSensitiveMatcher
-	matched bool
-	blocked bool
-}
-
-func sanitizeOutputValue(value *any, matcher *OutputSensitiveMatcher, root bool, hiddenThinking bool, stripThinking bool) bool {
-	state := &outputSensitiveSanitizeState{matcher: matcher}
-	sanitizeOutputValueWithState(value, state, root, hiddenThinking, stripThinking)
-	return state.matched
-}
-
-func sanitizeOutputValueWithState(value *any, state *outputSensitiveSanitizeState, root bool, hiddenThinking bool, stripThinking bool) {
-	switch current := (*value).(type) {
-	case string:
-		if !root || (stripThinking && hiddenThinking) {
-			return
-		}
-		if state.blocked {
-			*value = ""
-			return
-		}
-		index, _ := state.matcher.MatchIndex(current)
-		if index < 0 {
-			return
-		}
-		runes := []rune(current)
-		*value = string(runes[:index])
-		state.matched = true
-		state.blocked = true
-	case []any:
-		for index := range current {
-			sanitizeOutputValueWithState(&current[index], state, false, hiddenThinking, stripThinking)
-		}
-	case map[string]any:
-		objectHiddenThinking := hiddenThinking || outputObjectContainsHiddenThinking(current)
-		for _, key := range sortedOutputKeys(current) {
-			item := current[key]
-			fieldHiddenThinking := objectHiddenThinking || isThinkingOutputField(key)
-			switch typed := item.(type) {
-			case string:
-				if !isOutputTextField(key) || (stripThinking && fieldHiddenThinking) {
-					continue
-				}
-				if state.blocked {
-					current[key] = ""
-					continue
-				}
-				index, _ := state.matcher.MatchIndex(typed)
-				if index < 0 {
-					continue
-				}
-				runes := []rune(typed)
-				current[key] = string(runes[:index])
-				state.matched = true
-				state.blocked = true
-			case []any, map[string]any:
-				itemCopy := typed
-				sanitizeOutputValueWithState(&itemCopy, state, false, fieldHiddenThinking, stripThinking)
-				current[key] = itemCopy
-			}
-		}
-	}
-}
-
-func collectOutputTextFragments(value any, path string, root bool, hiddenThinking bool, fragments *[]OutputSensitiveTextFragment) {
-	switch current := value.(type) {
-	case string:
-		if root && current != "" {
-			*fragments = append(*fragments, OutputSensitiveTextFragment{
-				Path:           path,
-				Text:           current,
-				HiddenThinking: hiddenThinking,
-			})
-		}
-	case []any:
-		for index, item := range current {
-			collectOutputTextFragments(item, fmt.Sprintf("%s[%d]", path, index), false, hiddenThinking, fragments)
-		}
-	case map[string]any:
-		objectHiddenThinking := hiddenThinking || outputObjectContainsHiddenThinking(current)
-		for _, key := range sortedOutputKeys(current) {
-			item := current[key]
-			fieldPath := path + "." + key
-			fieldHiddenThinking := objectHiddenThinking || isThinkingOutputField(key)
-			switch typed := item.(type) {
-			case string:
-				if isOutputTextField(key) && typed != "" {
-					*fragments = append(*fragments, OutputSensitiveTextFragment{
-						Path:           fieldPath,
-						Text:           typed,
-						HiddenThinking: fieldHiddenThinking,
-					})
-				}
-			case []any, map[string]any:
-				collectOutputTextFragments(typed, fieldPath, false, fieldHiddenThinking, fragments)
-			}
-		}
-	}
-}
-
-func sortedOutputKeys(value map[string]any) []string {
-	keys := make([]string, 0, len(value))
-	for key := range value {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func isOutputTextField(key string) bool {
-	switch key {
-	case "answer", "arguments", "completion", "content", "delta", "input_json",
-		"message", "output_text", "partial_json", "reasoning", "reasoning_content",
-		"refusal", "response", "text", "thinking":
-		return true
-	default:
-		return false
-	}
-}
-
-func isThinkingOutputField(key string) bool {
-	switch key {
-	case "reasoning", "reasoning_content", "thinking":
-		return true
-	default:
-		return false
-	}
-}
-
-func outputObjectContainsHiddenThinking(value map[string]any) bool {
-	if thought, ok := value["thought"].(bool); ok && thought {
-		return true
-	}
-	outputType, _ := value["type"].(string)
-	outputType = strings.ToLower(outputType)
-	return outputType == "thinking" || outputType == "reasoning" || strings.Contains(outputType, "reasoning")
 }
 
 func OutputSensitiveError() error {

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useState, useEffect, useContext, useCallback, useMemo } from 'react';
+import { useState, useEffect, useContext, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { UserContext } from '../../context/User';
@@ -28,8 +28,9 @@ import {
   useSetTheme,
   useTheme,
 } from '../../context/Theme';
-import { getLogo, getSystemName, API, showSuccess } from '../../helpers';
+import { getLogo, getSystemName, API, showSuccess, showError } from '../../helpers';
 import { normalizeLanguage } from '../../i18n/language';
+import { createLanguageChangeQueue } from '../../../../shared/language-change-queue';
 import { useIsMobile } from './useIsMobile';
 import { useSidebarCollapsed } from './useSidebarCollapsed';
 import { useMinimumLoadingTime } from './useMinimumLoadingTime';
@@ -44,6 +45,20 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
   const navigate = useNavigate();
   const [currentLang, setCurrentLang] = useState(normalizeLanguage(i18n.language));
   const location = useLocation();
+  const userRef = useRef(userState?.user);
+  userRef.current = userState?.user;
+  const languageSaveRef = useRef(null);
+  if (!languageSaveRef.current || languageSaveRef.current.userId !== userState?.user?.id) {
+    languageSaveRef.current = {
+      userId: userState?.user?.id,
+      change: null,
+    };
+  }
+  const languageMountedRef = useRef(true);
+  useEffect(() => {
+    languageMountedRef.current = true;
+    return () => { languageMountedRef.current = false; };
+  }, []);
 
   const loading = statusState?.status === undefined;
   const isLoading = useMinimumLoadingTime(loading, 200);
@@ -154,51 +169,43 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
 
   const handleLanguageChange = useCallback(
     async (lang) => {
-      // Change language immediately for responsive UX
-      const previousLang = normalizeLanguage(i18n.language);
-      i18n.changeLanguage(lang);
-      localStorage.setItem('i18nextLng', lang);
-
-      // If user is logged in, save preference to backend
-      if (userState?.user?.id) {
-        try {
-          const res = await API.put('/api/user/self', {
-            language: lang,
-          });
-          if (res.data.success) {
-            // Keep user preference and local cache in sync so route changes
-            // don't reapply an older remembered language.
-            let settings = {};
-            if (userState?.user?.setting) {
-              try {
-                settings = JSON.parse(userState.user.setting) || {};
-              } catch (e) {
-                settings = {};
-              }
-            }
-
-            settings.language = lang;
-            const nextUser = {
-              ...userState.user,
-              setting: JSON.stringify(settings),
-            };
-
-            userDispatch({
-              type: 'login',
-              payload: nextUser,
-            });
-            localStorage.setItem('user', JSON.stringify(nextUser));
-          }
-        } catch (error) {
-          if (previousLang) {
-            i18n.changeLanguage(previousLang);
-            localStorage.setItem('i18nextLng', previousLang);
-          }
-          console.error('Failed to save language preference:', error);
-        }
-      }
+      const state = languageSaveRef.current;
+      if (!state) return;
+      state.change ??= createLanguageChangeQueue({
+        getLanguage: () => normalizeLanguage(i18n.language),
+        changeLanguage: async (language) => {
+          await i18n.changeLanguage(language);
+          localStorage.setItem('i18nextLng', language);
+        },
+        isCurrent: () => languageMountedRef.current && languageSaveRef.current === state && userRef.current?.id === state.userId,
+        saveLanguage: async (language) => {
+          if (state.userId === undefined) return;
+          const res = await API.put('/api/user/self', { language });
+          if (!res.data.success) throw new Error(res.data.message || t('语言切换失败，请重试'));
+        },
+        onConfirmed: (language) => {
+          const currentUser = userRef.current;
+          if (!currentUser) return;
+          let settings = {};
+          try {
+            const parsed = typeof currentUser.setting === 'string'
+              ? JSON.parse(currentUser.setting)
+              : currentUser.setting;
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) settings = parsed;
+          } catch { /* Keep a malformed settings string from blocking language changes. */ }
+          const nextUser = {
+            ...currentUser,
+            setting: JSON.stringify({ ...settings, language }),
+          };
+          userRef.current = nextUser;
+          userDispatch({ type: 'login', payload: nextUser });
+          localStorage.setItem('user', JSON.stringify(nextUser));
+        },
+        onError: () => showError(t('语言切换失败，请重试')),
+      });
+      await state.change(lang);
     },
-    [i18n, userState, userDispatch],
+    [i18n, t, userDispatch],
   );
 
   const handleThemeToggle = useCallback(

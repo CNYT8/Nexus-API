@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -162,20 +163,88 @@ func UpdateModelMeta(c *gin.Context) {
 	common.ApiSuccess(c, &m)
 }
 
-// DeleteModelMeta 删除模型
+// DeleteModelMeta 删除单个模型，可显式选择同时删除渠道绑定与价格配置。
 func DeleteModelMeta(c *gin.Context) {
-	idStr := c.Param("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "模型 ID 必须为正整数")
+		return
+	}
+	removeChannels, ok := modelDeleteQueryBool(c, "remove_from_channels")
+	if !ok {
+		return
+	}
+	removePricing, ok := modelDeleteQueryBool(c, "remove_pricing")
+	if !ok || !authorizeModelDelete(c, removeChannels, removePricing) {
+		return
+	}
+	result, err := model.DeleteModelMetadata([]int{id}, removeChannels, removePricing)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if err := model.DB.Delete(&model.Model{}, id).Error; err != nil {
+	common.ApiSuccess(c, result)
+}
+
+func BatchDeleteModelMeta(c *gin.Context) {
+	var request struct {
+		ModelIDs           []int `json:"model_ids"`
+		RemoveFromChannels bool  `json:"remove_from_channels"`
+		RemovePricing      bool  `json:"remove_pricing"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	model.RefreshPricing()
-	common.ApiSuccess(c, nil)
+	if !authorizeModelDelete(c, request.RemoveFromChannels, request.RemovePricing) {
+		return
+	}
+	result, err := model.DeleteModelMetadata(request.ModelIDs, request.RemoveFromChannels, request.RemovePricing)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
+func modelDeleteQueryBool(c *gin.Context, key string) (bool, bool) {
+	value, exists := c.GetQuery(key)
+	if !exists {
+		return false, true
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		common.ApiErrorMsg(c, "删除选项必须为布尔值")
+		return false, false
+	}
+	return parsed, true
+}
+
+func authorizeModelDelete(c *gin.Context, removeChannels, removePricing bool) bool {
+	if (removeChannels && !model.AccessTokenAllows(c, "channel", "write")) ||
+		(removePricing && !model.AccessTokenAllows(c, "system", "write")) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "message": "访问令牌没有联动删除所需的权限"})
+		return false
+	}
+	if c.GetInt("role") == common.RoleRootUser {
+		return true
+	}
+	if removePricing {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "message": "只有超级管理员可以删除定价配置"})
+		return false
+	}
+	if removeChannels {
+		allowed, err := model.IsAdminPermissionAllowed(c.GetInt("id"), model.AdminPermissionChannel)
+		if err != nil {
+			common.ApiError(c, err)
+			return false
+		}
+		if !allowed {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "message": "没有渠道管理权限"})
+			return false
+		}
+	}
+	return true
 }
 
 // enrichModels 批量填充附加信息：端点、渠道、分组、计费类型，避免 N+1 查询

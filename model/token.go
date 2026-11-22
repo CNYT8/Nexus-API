@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,23 +15,51 @@ import (
 var ErrTokenQuotaChanged = errors.New("token quota changed during update")
 
 type Token struct {
-	Id                 int            `json:"id"`
-	UserId             int            `json:"user_id" gorm:"index"`
-	Key                string         `json:"key" gorm:"type:varchar(128);uniqueIndex"`
-	Status             int            `json:"status" gorm:"default:1"`
-	Name               string         `json:"name" gorm:"index" `
-	CreatedTime        int64          `json:"created_time" gorm:"bigint"`
-	AccessedTime       int64          `json:"accessed_time" gorm:"bigint"`
-	ExpiredTime        int64          `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
-	RemainQuota        int            `json:"remain_quota" gorm:"default:0"`
-	UnlimitedQuota     bool           `json:"unlimited_quota"`
-	ModelLimitsEnabled bool           `json:"model_limits_enabled"`
-	ModelLimits        string         `json:"model_limits" gorm:"type:text"`
-	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
-	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
-	Group              string         `json:"group" gorm:"default:''"`
-	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
-	DeletedAt          gorm.DeletedAt `gorm:"index"`
+	Id                  int            `json:"id"`
+	UserId              int            `json:"user_id" gorm:"index"`
+	Key                 string         `json:"key" gorm:"type:varchar(128);uniqueIndex"`
+	Status              int            `json:"status" gorm:"default:1"`
+	Name                string         `json:"name" gorm:"index" `
+	CreatedTime         int64          `json:"created_time" gorm:"bigint"`
+	AccessedTime        int64          `json:"accessed_time" gorm:"bigint"`
+	ExpiredTime         int64          `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
+	RemainQuota         int            `json:"remain_quota" gorm:"default:0"`
+	UnlimitedQuota      bool           `json:"unlimited_quota"`
+	ModelLimitsEnabled  bool           `json:"model_limits_enabled"`
+	ModelLimits         string         `json:"model_limits" gorm:"type:text"`
+	AllowIps            *string        `json:"allow_ips" gorm:"default:''"`
+	UsedQuota           int            `json:"used_quota" gorm:"default:0"` // used quota
+	Group               string         `json:"group" gorm:"default:''"`
+	CrossGroupRetry     bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
+	AutoGroups          string         `json:"-" gorm:"type:text"`
+	AllowUserQuotaQuery bool           `json:"allow_user_quota_query" gorm:"default:false"`
+	AuthVersion         int64          `json:"-" gorm:"not null;default:1"`
+	CacheExpiresAt      int64          `json:"-" gorm:"-"`
+	CacheMAC            string         `json:"-" gorm:"-"`
+	DeletedAt           gorm.DeletedAt `gorm:"index"`
+}
+
+func (token *Token) GetAutoGroups() []string {
+	groups := []string{}
+	if token.AutoGroups != "" {
+		if err := json.Unmarshal([]byte(token.AutoGroups), &groups); err != nil {
+			// A corrupt restriction must never broaden to the site's defaults.
+			return []string{""}
+		}
+	}
+	return groups
+}
+
+func (token *Token) SetAutoGroups(groups []string) error {
+	if len(groups) == 0 {
+		token.AutoGroups = ""
+		return nil
+	}
+	encoded, err := json.Marshal(groups)
+	if err == nil {
+		token.AutoGroups = string(encoded)
+	}
+	return err
 }
 
 func (token *Token) Clean() {
@@ -256,7 +285,13 @@ func GetTokenById(id int) (*Token, error) {
 
 func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 	defer func() {
-		// Update Redis cache asynchronously on successful DB read
+		if fromDB && err == nil && token != nil && redisAvailable() {
+			// The cache reader compares metadata with the current DB version;
+			// a delayed writer cannot revive revoked permissions.
+			if cacheErr := cacheSetToken(*token); cacheErr != nil {
+				common.SysLog("failed to update token cache: " + cacheErr.Error())
+			}
+		}
 	}()
 	if !fromDB && common.RedisEnabled {
 		// Try Redis first
@@ -290,15 +325,18 @@ func (token *Token) UpdateWithQuotaSnapshot(expectedUsedQuota int) error {
 
 func (token *Token) updateSettings(expectedUsedQuota *int) error {
 	updates := map[string]interface{}{
-		"name":                 token.Name,
-		"status":               token.Status,
-		"expired_time":         token.ExpiredTime,
-		"unlimited_quota":      token.UnlimitedQuota,
-		"model_limits_enabled": token.ModelLimitsEnabled,
-		"model_limits":         token.ModelLimits,
-		"allow_ips":            token.AllowIps,
-		"group":                token.Group,
-		"cross_group_retry":    token.CrossGroupRetry,
+		"name":                   token.Name,
+		"status":                 token.Status,
+		"expired_time":           token.ExpiredTime,
+		"unlimited_quota":        token.UnlimitedQuota,
+		"model_limits_enabled":   token.ModelLimitsEnabled,
+		"model_limits":           token.ModelLimits,
+		"allow_ips":              token.AllowIps,
+		"group":                  token.Group,
+		"cross_group_retry":      token.CrossGroupRetry,
+		"auto_groups":            token.AutoGroups,
+		"allow_user_quota_query": token.AllowUserQuotaQuery,
+		"auth_version":           gorm.Expr("auth_version + 1"),
 	}
 	query := DB.Model(&Token{}).Where("id = ?", token.Id)
 	if expectedUsedQuota != nil {

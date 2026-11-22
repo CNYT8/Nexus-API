@@ -26,11 +26,11 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/common_handler"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/reasoning"
 	"github.com/QuantumNous/new-api/types"
-	"github.com/samber/lo"
 
 	"github.com/gin-gonic/gin"
 )
@@ -198,19 +198,24 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, header *http.Header, info *
 		}
 	}
 	if info.RelayMode == relayconstant.RelayModeRealtime {
+		isPreview := strings.Contains(info.UpstreamModelName, "-realtime-preview")
 		swp := c.Request.Header.Get("Sec-WebSocket-Protocol")
 		if swp != "" {
 			items := []string{
 				"realtime",
 				"openai-insecure-api-key." + info.ApiKey,
-				"openai-beta.realtime-v1",
+			}
+			if isPreview {
+				items = append(items, "openai-beta.realtime-v1")
 			}
 			header.Set("Sec-WebSocket-Protocol", strings.Join(items, ","))
 			//req.Header.Set("Sec-WebSocket-Key", c.Request.Header.Get("Sec-WebSocket-Key"))
 			//req.Header.Set("Sec-Websocket-Extensions", c.Request.Header.Get("Sec-Websocket-Extensions"))
 			//req.Header.Set("Sec-Websocket-Version", c.Request.Header.Get("Sec-Websocket-Version"))
 		} else {
-			header.Set("openai-beta", "realtime=v1")
+			if isPreview {
+				header.Set("openai-beta", "realtime=v1")
+			}
 			if !hasAuthOverride {
 				header.Set("Authorization", "Bearer "+info.ApiKey)
 			}
@@ -234,6 +239,9 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, header *http.Header, info *
 func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) (any, error) {
 	if request == nil {
 		return nil, errors.New("request is nil")
+	}
+	if err := helper.ApplyReasoningModelSuffix(c, info, request); err != nil {
+		return nil, err
 	}
 	if info.ChannelType != constant.ChannelTypeOpenAI && info.ChannelType != constant.ChannelTypeAzure {
 		request.StreamOptions = nil
@@ -271,12 +279,14 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 					}
 					if request.ReasoningEffort != "none" {
 						reasoning["effort"] = request.ReasoningEffort
-						marshal, err := common.Marshal(reasoning)
-						if err != nil {
-							return nil, fmt.Errorf("error marshalling reasoning: %w", err)
-						}
-						request.Reasoning = marshal
+					} else {
+						reasoning["enabled"] = false
 					}
+					marshal, err := common.Marshal(reasoning)
+					if err != nil {
+						return nil, fmt.Errorf("error marshalling reasoning: %w", err)
+					}
+					request.Reasoning = marshal
 				}
 			}
 			request.ReasoningEffort = ""
@@ -315,42 +325,35 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		}
 
 	}
-	isOModel := dto.IsOpenAIReasoningOModel(info.UpstreamModelName)
-	isGPT5Model := dto.IsOpenAIGPT5Model(info.UpstreamModelName)
-	if isOModel || isGPT5Model {
-		if lo.FromPtrOr(request.MaxCompletionTokens, uint(0)) == 0 && lo.FromPtrOr(request.MaxTokens, uint(0)) != 0 {
-			request.MaxCompletionTokens = request.MaxTokens
-			request.MaxTokens = nil
-		}
-
-		if isOModel {
-			request.Temperature = nil
-		}
-
-		// gpt-5系列模型适配 归零不再支持的参数
-		if isGPT5Model {
-			request.Temperature = nil
-			request.TopP = nil
-			request.LogProbs = nil
-		}
-
-		// 转换模型推理力度后缀
+	// Resolve effort before deciding which sampling parameters the exact model supports.
+	if dto.GetOpenAIChatCapabilities(info.UpstreamModelName, request.ReasoningEffort).UseMaxCompletionTokens || dto.IsOpenAIGPT5Model(info.UpstreamModelName) {
 		effort, originModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.UpstreamModelName)
 		if effort != "" {
 			request.ReasoningEffort = effort
 			info.UpstreamModelName = originModel
 			request.Model = originModel
 		}
-
-		info.ReasoningEffort = request.ReasoningEffort
-
-		// o系列模型developer适配（o1-mini除外）
-		if !strings.HasPrefix(info.UpstreamModelName, "o1-mini") && !strings.HasPrefix(info.UpstreamModelName, "o1-preview") {
-			//修改第一个Message的内容，将system改为developer
-			if len(request.Messages) > 0 && request.Messages[0].Role == "system" {
-				request.Messages[0].Role = "developer"
-			}
+	}
+	caps := dto.GetOpenAIChatCapabilities(info.UpstreamModelName, request.ReasoningEffort)
+	if caps.UseMaxCompletionTokens {
+		if request.MaxCompletionTokens == nil {
+			request.MaxCompletionTokens = request.MaxTokens
 		}
+		request.MaxTokens = nil
+	}
+	if !caps.SupportsTemperature {
+		request.Temperature = nil
+	}
+	if !caps.SupportsTopP {
+		request.TopP = nil
+	}
+	if !caps.SupportsLogProbs {
+		request.LogProbs = nil
+		request.TopLogProbs = nil
+	}
+	info.ReasoningEffort = request.ReasoningEffort
+	if caps.UseDeveloperRole && len(request.Messages) > 0 && request.Messages[0].Role == "system" {
+		request.Messages[0].Role = "developer"
 	}
 
 	return request, nil

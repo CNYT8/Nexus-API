@@ -50,6 +50,7 @@ import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
 import type { UsageLog } from '../../data/schema'
+import { getCacheWriteBreakdown } from '../../lib/cache'
 import {
   parseLogOther,
   getParamOverrideActionLabel,
@@ -345,11 +346,18 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
   const promptTokens = log.prompt_tokens || 0
   const completionTokens = log.completion_tokens || 0
   const cacheRead = other.cache_tokens || 0
-  const cacheWrite = other.cache_creation_tokens || 0
-  const cacheWrite5m = other.cache_creation_tokens_5m || 0
-  const cacheWrite1h = other.cache_creation_tokens_1h || 0
-  const cacheWrite12h = other.cache_creation_tokens_12h || 0
-  const hasTokens = promptTokens > 0 || completionTokens > 0
+  const {
+    ordinary: cacheWrite,
+    fiveMinutes: cacheWrite5m,
+    oneHour: cacheWrite1h,
+    twelveHours: cacheWrite12h,
+    total: cacheWriteTotal,
+  } = getCacheWriteBreakdown(other)
+  const hasTokens =
+    promptTokens > 0 ||
+    completionTokens > 0 ||
+    cacheRead > 0 ||
+    cacheWriteTotal > 0
 
   if (!hasTokens) return null
 
@@ -368,12 +376,7 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
     })
   }
 
-  if (
-    cacheWrite > 0 &&
-    cacheWrite5m === 0 &&
-    cacheWrite1h === 0 &&
-    cacheWrite12h === 0
-  ) {
+  if (cacheWrite > 0) {
     rows.push({
       label: t('Cache Write'),
       value: cacheWrite.toLocaleString(),
@@ -722,17 +725,20 @@ export function DetailsDialog(props: DetailsDialogProps) {
             )}
 
             {/* Reject reason (admin only) */}
-            {props.isAdmin && (other?.admin_info?.reject_reason ?? other?.reject_reason) && (
-              <DetailSection
-                icon={<AlertTriangle className='size-3.5' aria-hidden='true' />}
-                label={t('Reject Reason')}
-                variant='danger'
-              >
-                <p className='text-xs break-words'>
-                  {other?.admin_info?.reject_reason ?? other?.reject_reason}
-                </p>
-              </DetailSection>
-            )}
+            {props.isAdmin &&
+              (other?.admin_info?.reject_reason ?? other?.reject_reason) && (
+                <DetailSection
+                  icon={
+                    <AlertTriangle className='size-3.5' aria-hidden='true' />
+                  }
+                  label={t('Reject Reason')}
+                  variant='danger'
+                >
+                  <p className='text-xs break-words'>
+                    {other?.admin_info?.reject_reason ?? other?.reject_reason}
+                  </p>
+                </DetailSection>
+              )}
 
             {/* Violation fee info */}
             {isViolation && other && (

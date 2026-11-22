@@ -38,6 +38,7 @@ import {
 import { IconHelpCircle } from '@douyinfe/semi-icons';
 import { CircleAlert, Route, Sparkles } from 'lucide-react';
 import { getModelGroupIcon } from '../../common/ModelGroupIcon';
+import { getCacheWriteBreakdown } from './cacheTokens';
 
 const colors = [
   'amber',
@@ -151,10 +152,7 @@ function renderType(type, t) {
 
 function buildStreamStatusTooltip(ss, t) {
   if (!ss) return null;
-  const lines = [
-    t('流状态') + '：' + t('异常'),
-    (ss.end_reason || 'unknown'),
-  ];
+  const lines = [t('流状态') + '：' + t('异常'), ss.end_reason || 'unknown'];
   if (ss.error_count > 0) {
     lines.push(`${t('软错误')}: ${ss.error_count}`);
   }
@@ -192,11 +190,7 @@ function renderIsStream(bool, t, streamStatus) {
                 userSelect: 'none',
               }}
             >
-              <CircleAlert
-                size={14}
-                strokeWidth={2.5}
-                color='currentColor'
-              />
+              <CircleAlert size={14} strokeWidth={2.5} color='currentColor' />
             </span>
           </Tooltip>
         )}
@@ -367,15 +361,7 @@ function getPromptCacheSummary(other) {
   }
 
   const cacheReadTokens = toTokenNumber(other.cache_tokens);
-  const cacheCreationTokens = toTokenNumber(other.cache_creation_tokens);
-  const cacheCreationTokens5m = toTokenNumber(other.cache_creation_tokens_5m);
-  const cacheCreationTokens1h = toTokenNumber(other.cache_creation_tokens_1h);
-
-  const hasSplitCacheCreation =
-    cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
-  const cacheWriteTokens = hasSplitCacheCreation
-    ? cacheCreationTokens5m + cacheCreationTokens1h
-    : cacheCreationTokens;
+  const cacheWriteTokens = getCacheWriteBreakdown(other).total;
 
   if (cacheReadTokens <= 0 && cacheWriteTokens <= 0) {
     return null;
@@ -478,7 +464,11 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
     };
   }
 
-  const summaryOpts = { ...other, displayMode: billingDisplayMode, outputMode: 'segments' };
+  const summaryOpts = {
+    ...other,
+    displayMode: billingDisplayMode,
+    outputMode: 'segments',
+  };
 
   if (other?.billing_mode === 'tiered_expr') {
     return { segments: renderTieredModelPriceSimple(summaryOpts) };
@@ -512,8 +502,7 @@ export const getLogsColumns = ({
       dataIndex: 'channel',
       render: (text, record, index) => {
         const channelNumber = Number(text);
-        const hasChannel =
-          Number.isFinite(channelNumber) && channelNumber > 0;
+        const hasChannel = Number.isFinite(channelNumber) && channelNumber > 0;
         let isMultiKey = false;
         let multiKeyIndex = -1;
         let content = t('渠道') + `：${hasChannel ? record.channel : '-'}`;
@@ -942,8 +931,7 @@ export const getLogsColumns = ({
           return <></>;
         }
         const channelNumber = Number(record.channel);
-        const hasChannel =
-          Number.isFinite(channelNumber) && channelNumber > 0;
+        const hasChannel = Number.isFinite(channelNumber) && channelNumber > 0;
         let content = t('渠道') + `：${hasChannel ? record.channel : '-'}`;
         if (record.other !== '') {
           let other = JSON.parse(record.other);

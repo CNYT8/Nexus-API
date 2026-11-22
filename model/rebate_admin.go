@@ -3,11 +3,58 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
+	sqlitedriver "github.com/glebarez/go-sqlite"
+	"github.com/go-sql-driver/mysql"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
+
+// walletAdminTransaction retries only complete, rolled-back transactions. The
+// active baseline fast path does not serialize writers on MySQL/PostgreSQL, and
+// consumption locks invitee -> inviter, which can cross administrative locks.
+func walletAdminTransaction(db *gorm.DB, fn func(*gorm.DB) error) error {
+	if _, nested := db.Statement.ConnPool.(gorm.TxCommitter); nested {
+		// A deadlock can abort the outer transaction; a savepoint is not a retry.
+		return db.Transaction(fn)
+	}
+	const maxAttempts = 3
+	for attempt := 0; ; attempt++ {
+		err := db.Transaction(fn)
+		if err == nil || attempt+1 == maxAttempts || !isRetryableWalletAdminLockError(err) {
+			return err
+		}
+		// Wait outside the rolled-back transaction and honor caller cancellation.
+		timer := time.NewTimer(time.Duration(attempt+1) * 10 * time.Millisecond)
+		select {
+		case <-db.Statement.Context.Done():
+			timer.Stop()
+			return db.Statement.Context.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func isRetryableWalletAdminLockError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlErr.Number == 1213 || mysqlErr.Number == 1205 // deadlock / lock wait timeout
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "40P01" || pgErr.Code == "40001" || pgErr.Code == "55P03"
+	}
+	var sqliteErr *sqlitedriver.Error
+	if errors.As(err, &sqliteErr) {
+		// BUSY (including BUSY_SNAPSHOT) and LOCKED_SHAREDCACHE can clear after
+		// restarting the transaction. Generic SQLITE_LOCKED may be a usage bug.
+		return sqliteErr.Code()&0xff == 5 || sqliteErr.Code() == 262
+	}
+	return false
+}
 
 // maxRebateAdminRecords bounds one administrative rebate mutation so a single
 // request cannot hold locks on an unbounded number of financial rows.
@@ -36,6 +83,8 @@ func normalizeRebateAdminInput(recordIDs []int64, operatorID int, reason string)
 		seen[id] = struct{}{}
 		unique = append(unique, id)
 	}
+	// 所有批量操作按相同顺序获取记录锁，避免交叉批次反向等待。
+	sort.Slice(unique, func(i, j int) bool { return unique[i] < unique[j] })
 	return unique, reason, nil
 }
 
@@ -112,19 +161,37 @@ func ClawbackPaidWalletRebates(db *gorm.DB, recordIDs []int64, operatorID int, r
 	if err != nil {
 		return 0, nil, err
 	}
+	// 审计前缀也占用数据库列宽；在任何扣款之前拒绝过长输入。
+	if len(reason) > 128-len("clawback:") {
+		return 0, nil, fmt.Errorf("rebate clawback reason exceeds %d bytes", 128-len("clawback:"))
+	}
 	now := time.Now().UTC()
 	clawed := 0
 	blocked := make([]int64, 0)
 	affectedUsers := make(map[int]struct{})
-	err = db.Transaction(func(tx *gorm.DB) error {
-		for _, id := range ids {
-			var record RebateRecord
-			if err := lockForUpdate(tx).Where("id = ?", id).First(&record).Error; err != nil {
+	err = walletAdminTransaction(db, func(tx *gorm.DB) error {
+		clawed = 0
+		blocked = blocked[:0]
+		affectedUsers = make(map[int]struct{})
+		if _, err := LockWalletCreditBaselineTx(tx); err != nil {
+			return err
+		}
+		// Lock the entire sorted batch before touching any wallet. Interleaving
+		// record -> wallet -> next record can deadlock even with sorted IDs.
+		records := make([]RebateRecord, len(ids))
+		for i, id := range ids {
+			if err := lockForUpdate(tx).Where("id = ?", id).First(&records[i]).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
-					blocked = append(blocked, id)
 					continue
 				}
 				return err
+			}
+		}
+		for i, id := range ids {
+			record := &records[i]
+			if record.ID == 0 {
+				blocked = append(blocked, id)
+				continue
 			}
 			if record.Status == RebateStatusVoided && strings.HasPrefix(record.VoidReason, "clawback:") {
 				clawed++

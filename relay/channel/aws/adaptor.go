@@ -6,8 +6,10 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/claude"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -29,6 +31,15 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 }
 
 func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) (any, error) {
+	if request == nil {
+		return nil, errors.New("request is nil")
+	}
+	if err := helper.ApplyReasoningModelSuffix(c, info, request); err != nil {
+		return nil, err
+	}
+	if info.ChannelOtherSettings.AwsApiType == dto.AwsApiTypeMantle {
+		return request, nil
+	}
 	for i, message := range request.Messages {
 		updated := false
 		if !message.IsStringContent() {
@@ -79,6 +90,9 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	if info.ChannelOtherSettings.AwsApiType == dto.AwsApiTypeMantle {
+		return mantleRequestURL(info)
+	}
 	// InvokeModel goes through the AWS SDK, which builds the URL from the region
 	// in the key. Both key types work there: "<api-key>|<region>" and
 	// "<ak>|<sk>|<region>".
@@ -94,8 +108,13 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	if request == nil {
 		return nil, errors.New("request is nil")
 	}
-	// 检查是否为Nova模型
-	if isNovaModel(request.Model) {
+	if err := helper.ApplyReasoningModelSuffix(c, info, request); err != nil {
+		return nil, err
+	}
+	// Mantle always accepts native Messages, even when the model name also
+	// matches a legacy Nova alias. Reset per-request state before dispatch.
+	a.IsNova = false
+	if info.ChannelOtherSettings.AwsApiType != dto.AwsApiTypeMantle && isNovaModel(request.Model) {
 		novaReq := convertToNovaRequest(request)
 		a.IsNova = true
 		return novaReq, nil
@@ -125,10 +144,25 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
-	return doAwsClientRequest(c, info, a, requestBody)
+	switch info.ChannelOtherSettings.AwsApiType {
+	case dto.AwsApiTypeMantle:
+		req, err := a.newMantleRequest(c, info, requestBody)
+		if err != nil {
+			return nil, err
+		}
+		return channel.DoRequest(c, req, info)
+	case "", dto.AwsApiTypeInvokeModel:
+		return doAwsClientRequest(c, info, a, requestBody)
+	default:
+		return nil, errors.New("invalid AWS API type")
+	}
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
+	if info.ChannelOtherSettings.AwsApiType == dto.AwsApiTypeMantle {
+		adaptor := claude.Adaptor{}
+		return adaptor.DoResponse(c, resp, info)
+	}
 	if a.IsNova {
 		err, usage = handleNovaRequest(c, info, a)
 	} else {

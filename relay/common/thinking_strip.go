@@ -1,70 +1,14 @@
 package common
 
 import (
-	"encoding/json"
 	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
 )
 
-// StripThinkingJSON removes reasoning payloads from an upstream response while
-// preserving usage fields such as reasoning_tokens. It is used as a final
-// defense for pass-through and vendor-specific response shapes.
+// StripThinkingJSON 只处理协议声明的输出位置；工具参数、签名和 usage 保持原值。
 func StripThinkingJSON(data []byte) ([]byte, error) {
-	var value any
-	if err := json.Unmarshal(data, &value); err != nil {
-		return nil, err
-	}
-	cleaned, keep := stripThinkingValue(value)
-	if !keep {
-		return []byte("null"), nil
-	}
-	return json.Marshal(cleaned)
-}
-
-func stripThinkingValue(value any) (any, bool) {
-	switch current := value.(type) {
-	case []any:
-		result := make([]any, 0, len(current))
-		for _, item := range current {
-			cleaned, keep := stripThinkingValue(item)
-			if keep {
-				result = append(result, cleaned)
-			}
-		}
-		return result, true
-	case map[string]any:
-		if responseType, ok := current["type"].(string); ok && isThinkingObjectType(responseType) {
-			return nil, false
-		}
-		if thought, ok := current["thought"].(bool); ok && thought {
-			return nil, false
-		}
-		for key, item := range current {
-			if isThinkingPayloadKey(key) {
-				delete(current, key)
-				continue
-			}
-			cleaned, keep := stripThinkingValue(item)
-			if keep {
-				current[key] = cleaned
-			} else {
-				delete(current, key)
-			}
-		}
-		return current, true
-	default:
-		return value, true
-	}
-}
-
-func isThinkingPayloadKey(key string) bool {
-	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "reasoning_content", "reasoning", "thinking", "thought", "thoughts", "signature", "thought_signature", "thoughtsignature", "thinking_delta", "reasoning_summary", "reasoningsummary", "reasoning_summary_text":
-		return true
-	default:
-		return false
-	}
+	return (&ThinkingResponseFilter{}).filterJSON(data, false)
 }
 
 func isThinkingObjectType(value string) bool {

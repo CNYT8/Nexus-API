@@ -205,10 +205,7 @@ const SubscriptionPlansCard = ({
   const isSubscriptionPreference =
     billingPreference === 'subscription_first' ||
     billingPreference === 'subscription_only';
-  const displayBillingPreference =
-    disableSubscriptionPreference && isSubscriptionPreference
-      ? 'wallet_first'
-      : billingPreference;
+  const displayBillingPreference = billingPreference;
   const subscriptionPreferenceLabel =
     billingPreference === 'subscription_only' ? t('仅用订阅') : t('优先订阅');
 
@@ -366,7 +363,12 @@ const SubscriptionPlansCard = ({
                 />
               </div>
             </div>
-            {disableSubscriptionPreference && isSubscriptionPreference && (
+            {billingPreference === 'subscription_only' && (
+              <Text type='tertiary' size='small'>
+                {t('仅使用订阅额度，订阅不可用时请求将失败，不会使用钱包余额。')}
+              </Text>
+            )}
+            {disableSubscriptionPreference && isSubscriptionPreference && billingPreference !== 'subscription_only' && (
               <Text type='tertiary' size='small'>
                 {t('已保存偏好为')}
                 {subscriptionPreferenceLabel}

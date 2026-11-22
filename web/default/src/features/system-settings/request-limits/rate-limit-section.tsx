@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -42,6 +42,7 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { RateLimitVisualEditor } from './rate-limit-visual-editor'
 
@@ -97,9 +98,7 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
     defaultValues,
   })
 
-  useEffect(() => {
-    form.reset(defaultValues)
-  }, [defaultValues, form])
+  const submitForm = useResetForm(form, defaultValues)
 
   const onSubmit = async (values: RateLimitFormValues) => {
     const updates = Object.entries(values).filter(
@@ -107,17 +106,17 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
         value !== defaultValues[key as keyof RateLimitFormValues]
     )
 
-    for (const [key, value] of updates) {
-      await updateOption.mutateAsync({ key, value: value ?? '' })
-    }
+    await updateOption.saveOptions(
+      updates.map(([key, value]) => ({ key, value: value ?? '' }))
+    )
   }
 
   return (
     <SettingsSection title={t('Rate Limiting')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             isSaving={updateOption.isPending}
             saveLabel='Save rate limits'
           />

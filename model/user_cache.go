@@ -15,14 +15,17 @@ import (
 
 // UserBase struct remains the same as it represents the cached data structure
 type UserBase struct {
-	Id       int    `json:"id"`
-	Role     int    `json:"role"`
-	Group    string `json:"group"`
-	Email    string `json:"email"`
-	Quota    int    `json:"quota"`
-	Status   int    `json:"status"`
-	Username string `json:"username"`
-	Setting  string `json:"setting"`
+	Id             int    `json:"id"`
+	Role           int    `json:"role"`
+	Group          string `json:"group"`
+	Email          string `json:"email"`
+	Quota          int    `json:"quota"`
+	Status         int    `json:"status"`
+	Username       string `json:"username"`
+	Setting        string `json:"setting"`
+	AuthVersion    int64  `json:"-"`
+	CacheExpiresAt int64  `json:"-"`
+	CacheMAC       string `json:"-"`
 }
 
 func (user *UserBase) WriteContext(c *gin.Context) {
@@ -70,11 +73,14 @@ func updateUserCache(user User) error {
 		return nil
 	}
 
-	return common.RedisHSetObj(
-		getUserCacheKey(user.Id),
-		user.ToBaseUser(),
-		time.Duration(common.RedisKeyCacheSeconds())*time.Second,
-	)
+	cache := user.ToBaseUser()
+	cache.CacheExpiresAt = time.Now().Add(authCacheTTL()).Unix()
+	mac, err := cache.cacheMAC()
+	if err != nil {
+		return err
+	}
+	cache.CacheMAC = mac
+	return storeAuthCache(getUserCacheKey(user.Id), cache, map[string]bool{"Quota": true})
 }
 
 // GetUserCache gets complete user cache from hash
@@ -108,17 +114,7 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 		return nil, err // Return nil and error if DB lookup fails
 	}
 
-	// Create cache object from user data
-	userCache = &UserBase{
-		Id:       user.Id,
-		Role:     user.Role,
-		Group:    user.Group,
-		Quota:    user.Quota,
-		Status:   user.Status,
-		Username: user.Username,
-		Setting:  user.Setting,
-		Email:    user.Email,
-	}
+	userCache = user.ToBaseUser()
 
 	return userCache, nil
 }
@@ -132,6 +128,23 @@ func cacheGetUserBase(userId int) (*UserBase, error) {
 	err := common.RedisHGetObj(getUserCacheKey(userId), &userCache)
 	if err != nil {
 		return nil, err
+	}
+	mac, err := userCache.cacheMAC()
+	if err != nil || userCache.Id != userId || !validAuthCacheMAC(mac, userCache.CacheMAC, userCache.CacheExpiresAt) {
+		return nil, fmt.Errorf("user cache integrity check failed")
+	}
+	// Compare against the authoritative version AND permission projection.
+	// This also fences writers predating a change to role/group/setting and
+	// callers that update settings without incrementing the security version.
+	user, err := GetUserById(userId, false)
+	if err != nil {
+		return nil, err
+	}
+	current := user.ToBaseUser()
+	current.CacheExpiresAt = userCache.CacheExpiresAt
+	currentMAC, err := current.cacheMAC()
+	if err != nil || !validAuthCacheMAC(currentMAC, userCache.CacheMAC, userCache.CacheExpiresAt) {
+		return nil, fmt.Errorf("user cache version fence rejected stale metadata")
 	}
 	return &userCache, nil
 }

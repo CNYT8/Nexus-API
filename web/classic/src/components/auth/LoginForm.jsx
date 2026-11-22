@@ -40,6 +40,7 @@ import {
   buildAssertionResult,
   isPasskeySupported,
 } from '../../helpers';
+import { preparePasswordLogin } from '../../helpers/password-encryption';
 import Turnstile from 'react-turnstile';
 import {
   Button,
@@ -249,11 +250,12 @@ const LoginForm = () => {
     setLoginLoading(true);
     try {
       if (username && password) {
+        const passwordFields = await preparePasswordLogin(password);
         const res = await API.post(
           `/api/user/login?turnstile=${turnstileToken}`,
           {
             username,
-            password,
+            ...passwordFields,
           },
         );
         const { success, message, data } = res.data;

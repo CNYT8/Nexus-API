@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { type QueryClient } from '@tanstack/react-query'
 import i18next from 'i18next'
 import { toast } from 'sonner'
-import { updateModelStatus, deleteModel as deleteModelAPI } from '../api'
+import { updateModelStatus, batchDeleteModels, type ModelDeleteOptions } from '../api'
 import { modelsQueryKeys } from './query-keys'
 
 // ============================================================================
@@ -101,21 +101,8 @@ export async function handleDeleteModel(
   id: number,
   queryClient?: QueryClient,
   onSuccess?: () => void
-): Promise<void> {
-  try {
-    const response = await deleteModelAPI(id)
-    if (response.success) {
-      toast.success(i18next.t('Model deleted successfully'))
-      queryClient?.invalidateQueries({ queryKey: modelsQueryKeys.lists() })
-      onSuccess?.()
-    } else {
-      toast.error(response.message || i18next.t('Failed to delete model'))
-    }
-  } catch (error: unknown) {
-    toast.error(
-      (error as Error)?.message || i18next.t('Failed to delete model')
-    )
-  }
+): Promise<boolean> {
+  return handleBatchDeleteModels([id], queryClient, onSuccess)
 }
 
 /**
@@ -124,47 +111,37 @@ export async function handleDeleteModel(
 export async function handleBatchDeleteModels(
   ids: number[],
   queryClient?: QueryClient,
-  onSuccess?: (deletedCount: number) => void
-): Promise<void> {
-  if (ids.length === 0) {
+  onSuccess?: (deletedIds: number[]) => void,
+  options: ModelDeleteOptions = { remove_from_channels: false, remove_pricing: false }
+): Promise<boolean> {
+  const uniqueIds = [...new Set(ids)]
+  if (uniqueIds.length === 0) {
     toast.error(i18next.t('Please select at least one model'))
-    return
+    return false
   }
-
   try {
-    const deletePromises = ids.map((id) => deleteModelAPI(id))
-    const results = await Promise.all(deletePromises)
-
-    let successCount = 0
-    let failedCount = 0
-
-    results.forEach((res, index) => {
-      if (res.success) {
-        successCount++
-      } else {
-        failedCount++
-        // eslint-disable-next-line no-console
-        console.error(`Failed to delete model ${ids[index]}:`, res.message)
-      }
-    })
-
-    if (successCount > 0) {
-      toast.success(
-        i18next.t('Successfully deleted {{count}} model(s)', {
-          count: successCount,
-        })
-      )
-      queryClient?.invalidateQueries({ queryKey: modelsQueryKeys.lists() })
-      onSuccess?.(successCount)
+    const response = await batchDeleteModels(uniqueIds, options)
+    if (!response.success) throw new Error(response.message || i18next.t('Batch delete failed'))
+    const deleted = response.data?.deleted_count ?? 0
+    if (deleted > 0) toast.success(i18next.t('Successfully deleted {{count}} model(s)', { count: deleted }))
+    if (response.data?.updated_channels) {
+      toast.success(i18next.t('Updated {{count}} channel(s)', { count: response.data.updated_channels }))
     }
-
-    if (failedCount > 0) {
-      toast.error(
-        i18next.t('Failed to delete {{count}} model(s)', { count: failedCount })
-      )
+    // The endpoint is transactional. Never infer successful IDs from a partial count.
+    if (deleted !== uniqueIds.length) {
+      toast.error(i18next.t('Failed to delete {{count}} model(s)', { count: Math.max(0, uniqueIds.length - deleted) }))
+      return false
     }
+    onSuccess?.(uniqueIds)
+    return true
   } catch (error: unknown) {
     toast.error((error as Error)?.message || i18next.t('Batch delete failed'))
+    return false
+  } finally {
+    await queryClient?.invalidateQueries({ queryKey: modelsQueryKeys.lists() })
+    await queryClient?.invalidateQueries({ queryKey: ['pricing'] })
+    if (options.remove_from_channels) await queryClient?.invalidateQueries({ queryKey: ['channels'] })
+    if (options.remove_pricing) await queryClient?.invalidateQueries({ queryKey: ['system-options'] })
   }
 }
 

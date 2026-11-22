@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -37,6 +38,10 @@ const relayErrorLogRecordedKey = "nexus_error_log_recorded"
 func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	var err *types.NewAPIError
 	switch info.RelayMode {
+	case relayconstant.RelayModeAlphaSearch:
+		err = relay.AlphaSearchHelper(c, info)
+	case relayconstant.RelayModeDeepSeekSearch, relayconstant.RelayModeDeepSeekFetch:
+		err = relay.DeepSeekToolsHelper(c, info)
 	case relayconstant.RelayModeImagesGenerations, relayconstant.RelayModeImagesEdits:
 		err = relay.ImageHelper(c, info)
 	case relayconstant.RelayModeAudioSpeech:
@@ -80,6 +85,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	)
 
 	if relayFormat == types.RelayFormatOpenAIRealtime {
+		stopping, done, ok := common.ShutdownRequests.Register()
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"message": "server is shutting down", "type": "server_error"}})
+			return
+		}
+		// Registered first, so completion follows every later settlement,
+		// synchronous refund/log and reader/watcher cleanup defer.
+		defer done()
 		var err error
 		ws, err = upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
@@ -88,7 +101,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			helper.WssError(c, ws, newAPIError.ToOpenAIError())
 			return
 		}
-		defer ws.Close()
+		defer watchRealtimeShutdown(c, ws, stopping)()
+		if c.Request.Context().Err() != nil {
+			return
+		}
 	}
 
 	defer func() {
@@ -99,6 +115,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			if relayInfo != nil && !c.GetBool(relayErrorLogRecordedKey) {
 				recordRelayErrorLog(c, relayInfo, nil, newAPIError)
+			}
+			if c.GetBool(channel.ResponsesBridgeErrorWritten) {
+				return
 			}
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
 			service.ApplyErrorMask(c, newAPIError)
@@ -118,7 +137,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 	}()
 
-	request, err := helper.GetAndValidateRequest(c, relayFormat)
+	request, err := getRelayRequestWithSearch(c, relayFormat)
 	if err != nil {
 		// Map "request body too large" to 413 so clients can handle it correctly
 		if common.IsRequestBodyTooLargeError(err) || errors.Is(err, common.ErrRequestBodyTooLarge) {
@@ -129,7 +148,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	relayInfo, err = relaycommon.GenRelayInfo(c, relayFormat, request, ws)
+	relayInfo, err = genRelayInfoWithSearch(c, relayFormat, request, ws)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
@@ -162,7 +181,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	relayInfo.SetEstimatePromptTokens(tokens)
 
-	priceData, err := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
+	priceData, err := relayPriceWithSearch(c, relayInfo, tokens, meta)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest))
 		return
@@ -183,8 +202,23 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		// Only return quota if downstream failed and quota was actually pre-consumed
 		if newAPIError != nil {
 			newAPIError = service.NormalizeViolationFeeError(newAPIError)
-			if relayInfo.Billing != nil {
-				relayInfo.Billing.Refund(c)
+			if relayFormat == types.RelayFormatOpenAIRealtime {
+				// Channel selection is over. Reuse the synchronous quota-log
+				// contract only during finalization, since it also gates routing.
+				c.Set(relay.ResponsesWebSocketContextKey, true)
+			}
+			if _, search := relayInfo.Request.(*dto.SearchRequest); search {
+				if err := service.RefundSearchBilling(c, relayInfo); err != nil {
+					logger.LogError(c, "error finalizing search refund: "+err.Error())
+				}
+			} else if relayInfo.Billing != nil {
+				if relayFormat == types.RelayFormatOpenAIRealtime {
+					if err := refundRealtimeBilling(c, relayInfo.Billing); err != nil {
+						logger.LogError(c, "error refunding realtime billing: "+err.Error())
+					}
+				} else {
+					relayInfo.Billing.Refund(c)
+				}
 			}
 			service.ChargeViolationFeeIfNeeded(c, relayInfo, newAPIError)
 		}
@@ -210,6 +244,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		addUsedChannel(c, channel.Id)
+		if billingErr := prepareSearchBillingForSelectedGroup(c, relayInfo); billingErr != nil {
+			newAPIError = billingErr
+			break
+		}
 		if billingErr := service.PrepareTieredBillingForSelectedGroup(c, relayInfo); billingErr != nil {
 			newAPIError = billingErr
 			break
@@ -225,6 +263,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+
+		if dispatchErr := service.MarkBillingDispatched(relayInfo); dispatchErr != nil {
+			newAPIError = types.NewErrorWithStatusCode(dispatchErr, types.ErrorCodeUpdateDataError, http.StatusInternalServerError, types.ErrOptionWithSkipRetry())
+			break
+		}
 
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:
@@ -286,13 +329,7 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 	}
 	switch r := request.(type) {
 	case *dto.GeneralOpenAIRequest:
-		maxCompletionTokens := lo.FromPtrOr(r.MaxCompletionTokens, uint(0))
-		maxTokens := lo.FromPtrOr(r.MaxTokens, uint(0))
-		if maxCompletionTokens > maxTokens {
-			meta.MaxTokens = int(maxCompletionTokens)
-		} else {
-			meta.MaxTokens = int(maxTokens)
-		}
+		meta.MaxTokens = int(r.GetMaxTokens())
 	case *dto.OpenAIResponsesRequest:
 		meta.MaxTokens = int(lo.FromPtrOr(r.MaxOutputTokens, uint(0)))
 	case *dto.ClaudeRequest:
@@ -683,26 +720,29 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 	taskWalletKey := c.GetString(service.ContextKeyTaskWalletBillingKey)
 	task.PrivateData.BillingKey = taskWalletKey
 	task.Quota = result.Quota
-	if taskWalletKey != "" {
-		// 预扣身份在提交前创建，任务行必须以预扣额度写入，才能通过
-		// ReserveTaskWalletQuota 的 CAS 对齐最终额度。
+	if taskWalletKey != "" && relayInfo.BillingSource != service.BillingSourceSubscription {
+		// 钱包以真实预扣写入，才能通过 ReserveTaskWalletQuota 的 CAS。
+		// 订阅由 Task.Insert 在同一事务内按 result.Quota 对齐资金与令牌；
+		// 不得为此把请求上下文的真实预扣改成最终报价。
 		task.Quota = c.GetInt(service.ContextKeyTaskWalletBillingQuota)
 	}
 	task.Data = result.TaskData
 	task.Action = relayInfo.Action
+	relay.ApplyTaskSubmitMetadata(task, result)
+	// Freeze the terminal billing target before discarding the persisted result.
+	// The adapter has already written the immediate response to the caller.
+	service.ApplyImmediateTaskResultRetention(task)
 	if insertErr := task.Insert(); insertErr != nil {
 		common.SysError("insert task error: " + insertErr.Error())
 		refundTaskWalletSubmit(c, relayInfo)
 		return nil
 	}
-	if taskWalletKey == "" {
-		return task
-	}
-	if task.Quota != result.Quota {
+	if taskWalletKey != "" && task.Quota != result.Quota && task.Status != model.TaskStatusSuccess && task.Status != model.TaskStatusFailure {
 		if alignErr := service.ReserveTaskWalletQuota(task, result.Quota); alignErr != nil {
 			common.SysError("align task wallet quota error: " + alignErr.Error())
 		}
 	}
+	service.NotifySubmittedSubscriptionTask(task, relayInfo)
 	settleTerminalSubmittedTask(c, task)
 	return task
 }
@@ -715,12 +755,16 @@ func settleTerminalSubmittedTask(c *gin.Context, task *model.Task) {
 	}
 	status := task.Status
 	var stored model.Task
-	if err := model.DB.Select("id", "status").First(&stored, task.ID).Error; err == nil {
+	if err := model.DB.Select("id", "status", "billing_state", "billing_quota").First(&stored, task.ID).Error; err == nil {
 		status = stored.Status
 	}
 	switch status {
 	case model.TaskStatusSuccess:
-		service.RecalculateTaskQuota(c, task, task.Quota, "提交即终态结算")
+		quota := task.Quota
+		if stored.BillingState == model.TaskBillingPending {
+			quota = stored.BillingQuota
+		}
+		service.RecalculateTaskQuota(c, task, quota, "提交即终态结算")
 	case model.TaskStatusFailure:
 		service.RefundTaskQuota(c, task, "提交即终态退款")
 	}
@@ -732,46 +776,4 @@ func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
 		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
 	}
 	c.JSON(taskErr.StatusCode, taskErr)
-}
-
-func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError, retryTimes int) bool {
-	if taskErr == nil {
-		return false
-	}
-	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
-		return false
-	}
-	if retryTimes <= 0 {
-		return false
-	}
-	if _, ok := c.Get("specific_channel_id"); ok {
-		return false
-	}
-	if taskErr.StatusCode == http.StatusTooManyRequests {
-		return true
-	}
-	if taskErr.StatusCode == 307 {
-		return true
-	}
-	if taskErr.StatusCode/100 == 5 {
-		// 超时不重试
-		if operation_setting.IsAlwaysSkipRetryStatusCode(taskErr.StatusCode) {
-			return false
-		}
-		return true
-	}
-	if taskErr.StatusCode == http.StatusBadRequest {
-		return false
-	}
-	if taskErr.StatusCode == 408 {
-		// azure处理超时不重试
-		return false
-	}
-	if taskErr.LocalError {
-		return false
-	}
-	if taskErr.StatusCode/100 == 2 {
-		return false
-	}
-	return true
 }

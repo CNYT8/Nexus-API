@@ -32,6 +32,10 @@ export const ADVANCED_CUSTOM_CONVERTER_OPTIONS: Array<{
   label: string
 }> = [
   { value: 'none', label: 'Native forwarding' },
+  { value: 'claude_messages_to_openai_responses', label: 'Claude Messages 转 OpenAI Responses' },
+  { value: 'openai_responses_to_openai_chat_completions', label: 'OpenAI Responses 转 OpenAI Chat' },
+  { value: 'openai_responses_to_gemini_generate_content', label: 'OpenAI Responses 转 Gemini Generate Content' },
+  { value: 'gemini_generate_content_to_openai_responses', label: 'Gemini Generate Content 转 OpenAI Responses' },
   {
     value: 'anthropic_messages_to_openai_chat_completions',
     label: 'Anthropic Messages to OpenAI Chat',
@@ -330,8 +334,11 @@ export function createAdvancedCustomConfig(): AdvancedCustomConfig {
 export function getAdvancedCustomUpstreamPathPlaceholder(
   converter: AdvancedCustomConverter
 ): string {
-  if (converter === 'openai_chat_completions_to_gemini_generate_content') {
+  if (converter === 'openai_chat_completions_to_gemini_generate_content' || converter === 'openai_responses_to_gemini_generate_content') {
     return '/v1beta/models/{model}:generateContent'
+  }
+  if (converter === 'openai_chat_completions_to_openai_responses' || converter === 'claude_messages_to_openai_responses' || converter === 'gemini_generate_content_to_openai_responses') {
+    return '/v1/responses'
   }
   if (converter === 'openai_chat_completions_to_anthropic_messages') {
     return '/v1/messages'
@@ -411,6 +418,7 @@ export function normalizeAdvancedCustomConfig(
     : []
 
   return {
+    ...config,
     advanced_routes: routes,
   }
 }
@@ -430,12 +438,14 @@ export function validateAdvancedCustomConfig(
     }
   }
 
-  const seenPaths = new Set<string>()
+  const modelsByPath = new Map<string, Set<string>>()
+  const fallbackPaths = new Set<string>()
   for (let index = 0; index < routes.length; index += 1) {
     const route = routes[index]
     const incomingPath = route.incoming_path?.trim() || ''
     const upstreamPath = getAdvancedCustomRouteUpstreamPath(route)
     const converter = route.converter || 'none'
+    const models = (route.models || []).map((model) => model.trim()).filter(Boolean)
 
     if (!incomingPath) {
       return { routeIndex: index, message: 'Incoming path is required' }
@@ -450,6 +460,12 @@ export function validateAdvancedCustomConfig(
       }
     }
     if (incomingPath === ADVANCED_CUSTOM_MODEL_LIST_PATH) {
+      if (models.length > 0 || route.pass_through_body_enabled) {
+        return {
+          routeIndex: index,
+          message: 'OpenAI Models route does not support model rules or body passthrough',
+        }
+      }
       if (converter !== 'none') {
         return {
           routeIndex: index,
@@ -463,10 +479,34 @@ export function validateAdvancedCustomConfig(
         }
       }
     }
-    if (seenPaths.has(incomingPath)) {
-      return { routeIndex: index, message: 'Incoming path must be unique' }
+    if (fallbackPaths.has(incomingPath)) {
+      return {
+        routeIndex: index,
+        message: 'Catch-all route must be unique and last for the same incoming path',
+      }
     }
-    seenPaths.add(incomingPath)
+    if (models.length === 0) fallbackPaths.add(incomingPath)
+    const seenModels = modelsByPath.get(incomingPath) || new Set<string>()
+    for (const model of models) {
+      if (seenModels.has(model)) {
+        return {
+          routeIndex: index,
+          message: 'Route models must be unique for the same incoming path',
+        }
+      }
+      if (model.startsWith('re:') && model.slice(3).trim() === '') {
+        return { routeIndex: index, message: 'Model regex cannot be empty' }
+      }
+      // Go validates the regex syntax on save; JavaScript has different semantics.
+      seenModels.add(model)
+    }
+    modelsByPath.set(incomingPath, seenModels)
+    if (route.pass_through_body_enabled && converter !== 'none') {
+      return {
+        routeIndex: index,
+        message: 'Only native forwarding supports route body passthrough.',
+      }
+    }
 
     if (!upstreamPath) {
       return { routeIndex: index, message: 'Upstream path is required' }
@@ -573,13 +613,27 @@ export function buildAdvancedCustomAuth(
 function normalizeAdvancedCustomRoute(
   route: AdvancedCustomRoute
 ): AdvancedCustomRoute {
+  if (
+    route.models !== undefined &&
+    (!Array.isArray(route.models) || route.models.some((model) => typeof model !== 'string'))
+  ) {
+    throw new Error('Route models must be an array of strings')
+  }
+  if (
+    route.pass_through_body_enabled !== undefined &&
+    typeof route.pass_through_body_enabled !== 'boolean'
+  ) {
+    throw new Error('Route body passthrough must be a boolean')
+  }
   const nextRoute: AdvancedCustomRoute = {
+    ...route,
     incoming_path: route.incoming_path || '',
     upstream_path: getAdvancedCustomRouteUpstreamPath(route),
     converter: route.converter || 'none',
   }
   if (route.auth) {
     nextRoute.auth = {
+      ...route.auth,
       type: route.auth.type,
       name: route.auth.name || '',
       value: route.auth.value || '',
@@ -630,7 +684,10 @@ function isConverterPathAllowed(
   converter: AdvancedCustomConverter
 ): boolean {
   if (converter === 'none') return true
-  if (converter === 'anthropic_messages_to_openai_chat_completions') {
+  if (converter === 'openai_responses_to_openai_chat_completions' || converter === 'openai_responses_to_gemini_generate_content') {
+    return incomingPath === '/v1/responses'
+  }
+  if (converter === 'anthropic_messages_to_openai_chat_completions' || converter === 'claude_messages_to_openai_responses') {
     return incomingPath === '/v1/messages'
   }
   if (

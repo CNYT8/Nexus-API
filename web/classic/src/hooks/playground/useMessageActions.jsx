@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useCallback } from 'react';
-import { Toast, Modal } from '@douyinfe/semi-ui';
+import { Toast } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { getTextContent } from '../../helpers';
 import { ERROR_MESSAGES } from '../../constants/playground.constants';
@@ -27,7 +27,9 @@ export const useMessageActions = (
   message,
   setMessage,
   onMessageSend,
-  saveMessages,
+  canSend,
+  getMessages,
+  requestAction,
 ) => {
   const { t } = useTranslation();
 
@@ -118,168 +120,75 @@ export const useMessageActions = (
   // 重新生成消息
   const handleMessageReset = useCallback(
     (targetMessage) => {
-      setMessage((prevMessages) => {
-        // 使用引用查找索引，防止重复 id 造成误匹配
-        let messageIndex = prevMessages.findIndex(
-          (msg) => msg === targetMessage,
+      if (!canSend()) return;
+      return requestAction(() => {
+        if (!canSend()) return false;
+        const previous = getMessages();
+        let index = previous.findIndex((msg) => msg.id === targetMessage.id);
+        if (index === -1) return false;
+        while (index >= 0 && previous[index].role !== 'user') index--;
+        if (index < 0) return false;
+        // Preserve the original user's images and attachment text.
+        return onMessageSend(
+          getTextContent(previous[index]),
+          undefined,
+          previous.slice(0, index + 1),
         );
-
-        // 回退到 id 匹配（兼容不同引用场景）
-        if (messageIndex === -1) {
-          messageIndex = prevMessages.findIndex(
-            (msg) => msg.id === targetMessage.id,
-          );
-        }
-
-        if (messageIndex === -1) return prevMessages;
-
-        if (targetMessage.role === 'user') {
-          const newMessages = prevMessages.slice(0, messageIndex);
-          const contentToSend = getTextContent(targetMessage);
-
-          setTimeout(() => {
-            onMessageSend(contentToSend);
-          }, 100);
-
-          return newMessages;
-        } else if (
-          targetMessage.role === 'assistant' ||
-          targetMessage.role === 'system'
-        ) {
-          let userMessageIndex = messageIndex - 1;
-          while (
-            userMessageIndex >= 0 &&
-            prevMessages[userMessageIndex].role !== 'user'
-          ) {
-            userMessageIndex--;
-          }
-
-          if (userMessageIndex >= 0) {
-            const userMessage = prevMessages[userMessageIndex];
-            const newMessages = prevMessages.slice(0, userMessageIndex);
-            const contentToSend = getTextContent(userMessage);
-
-            setTimeout(() => {
-              onMessageSend(contentToSend);
-            }, 100);
-
-            return newMessages;
-          }
-        }
-
-        return prevMessages;
       });
     },
-    [setMessage, onMessageSend],
+    [canSend, getMessages, onMessageSend, requestAction],
   );
 
   // 删除消息
   const handleMessageDelete = useCallback(
     (targetMessage) => {
-      Modal.confirm({
+      if (!canSend()) return;
+      return requestAction(() => {
+        if (!canSend()) return false;
+        const previous = getMessages();
+        const index = previous.findIndex((msg) => msg.id === targetMessage.id);
+        if (index === -1) return false;
+        const withReply = previous[index].role === 'user' &&
+          previous[index + 1]?.role === 'assistant';
+        setMessage(previous.filter((_, i) => i !== index && (!withReply || i !== index + 1)));
+        Toast.success({
+          content: t(withReply ? '已删除消息及其回复' : '消息已删除'),
+          duration: 2,
+        });
+        return true;
+      }, {
         title: t('确认删除'),
         content: t('确定要删除这条消息吗？'),
-        okText: t('确定'),
-        cancelText: t('取消'),
-        okButtonProps: {
-          type: 'danger',
-        },
-        onOk: () => {
-          setMessage((prevMessages) => {
-            // 使用引用查找索引，防止重复 id 造成误匹配
-            let messageIndex = prevMessages.findIndex(
-              (msg) => msg === targetMessage,
-            );
-
-            // 回退到 id 匹配（兼容不同引用场景）
-            if (messageIndex === -1) {
-              messageIndex = prevMessages.findIndex(
-                (msg) => msg.id === targetMessage.id,
-              );
-            }
-
-            if (messageIndex === -1) return prevMessages;
-
-            let updatedMessages;
-            if (
-              targetMessage.role === 'user' &&
-              messageIndex < prevMessages.length - 1
-            ) {
-              const nextMessage = prevMessages[messageIndex + 1];
-              if (nextMessage.role === 'assistant') {
-                Toast.success({
-                  content: t('已删除消息及其回复'),
-                  duration: 2,
-                });
-                updatedMessages = prevMessages.filter(
-                  (_, index) =>
-                    index !== messageIndex && index !== messageIndex + 1,
-                );
-              } else {
-                Toast.success({
-                  content: t('消息已删除'),
-                  duration: 2,
-                });
-                updatedMessages = prevMessages.filter(
-                  (msg) => msg.id !== targetMessage.id,
-                );
-              }
-            } else {
-              Toast.success({
-                content: t('消息已删除'),
-                duration: 2,
-              });
-              updatedMessages = prevMessages.filter(
-                (msg) => msg.id !== targetMessage.id,
-              );
-            }
-
-            // 删除消息后保存，传入更新后的消息列表
-            setTimeout(() => saveMessages(updatedMessages), 0);
-            return updatedMessages;
-          });
-        },
       });
     },
-    [setMessage, t, saveMessages],
+    [setMessage, t, canSend, getMessages, requestAction],
   );
 
   // 切换角色
   const handleRoleToggle = useCallback(
     (targetMessage) => {
+      if (!canSend()) return;
       if (
         !(targetMessage.role === 'assistant' || targetMessage.role === 'system')
       ) {
         return;
       }
 
-      const newRole =
-        targetMessage.role === 'assistant' ? 'system' : 'assistant';
-
-      setMessage((prevMessages) => {
-        const updatedMessages = prevMessages.map((msg) => {
-          if (
-            msg.id === targetMessage.id &&
-            (msg.role === 'assistant' || msg.role === 'system')
-          ) {
-            return { ...msg, role: newRole };
-          }
-          return msg;
+      return requestAction(() => {
+        if (!canSend()) return false;
+        const previous = getMessages();
+        const target = previous.find((msg) => msg.id === targetMessage.id);
+        if (!target || !['assistant', 'system'].includes(target.role)) return false;
+        const newRole = target.role === 'assistant' ? 'system' : 'assistant';
+        setMessage(previous.map((msg) => msg.id === target.id ? { ...msg, role: newRole } : msg));
+        Toast.success({
+          content: t(newRole === 'system' ? '已切换为System角色' : '已切换为Assistant角色'),
+          duration: 2,
         });
-
-        // 切换角色后保存，传入更新后的消息列表
-        setTimeout(() => saveMessages(updatedMessages), 0);
-        return updatedMessages;
-      });
-
-      Toast.success({
-        content: t(
-          `已切换为${newRole === 'system' ? 'System' : 'Assistant'}角色`,
-        ),
-        duration: 2,
+        return true;
       });
     },
-    [setMessage, t, saveMessages],
+    [setMessage, t, canSend, getMessages, requestAction],
   );
 
   return {

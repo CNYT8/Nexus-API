@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -40,6 +40,7 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { useResetForm } from '../hooks/use-reset-form'
 import {
   HEADER_NAV_DEFAULT,
   type HeaderNavModulesConfig,
@@ -108,9 +109,7 @@ export function HeaderNavigationSection({
     defaultValues: formDefaults,
   })
 
-  useEffect(() => {
-    form.reset(formDefaults)
-  }, [formDefaults, form])
+  const submitForm = useResetForm(form, formDefaults)
 
   const onSubmit = async (values: HeaderNavFormValues) => {
     const payload: HeaderNavModulesConfig = {
@@ -136,10 +135,7 @@ export function HeaderNavigationSection({
       return
     }
 
-    await updateOption.mutateAsync({
-      key: 'HeaderNavModules',
-      value: serialized,
-    })
+    await updateOption.saveOptions([{ key: 'HeaderNavModules', value: serialized }])
   }
 
   const resetToDefault = () => {
@@ -209,9 +205,9 @@ export function HeaderNavigationSection({
   return (
     <SettingsSection title={t('Header navigation')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm(onSubmit)}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={submitForm(onSubmit)}
             onReset={resetToDefault}
             isSaving={updateOption.isPending}
             resetLabel='Reset to default'

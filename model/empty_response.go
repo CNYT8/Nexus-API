@@ -392,6 +392,10 @@ func ClaimEmptyResponseCompensation(userId int, now int64) (int, int, error) {
 	refundTotal := 0
 
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		// Source credits share the initializer's gate-before-user lock order.
+		if _, err := LockWalletCreditBaselineTx(tx); err != nil {
+			return err
+		}
 		var user User
 		if err := lockForUpdate(tx).Where("id = ?", userId).First(&user).Error; err != nil {
 			return err
@@ -404,7 +408,9 @@ func ClaimEmptyResponseCompensation(userId int, now int64) (int, int, error) {
 		}
 
 		var pending []EmptyResponseRecord
-		if err := tx.Select("id", "request_id", "refund_quota").
+		// The gate can establish an older MySQL snapshot before the user lock
+		// waits for another claim. Read current statuses under that lock.
+		if err := walletCurrentTx(tx).Select("id", "request_id", "refund_quota").
 			Where("user_id = ? AND status = ? AND log_created_at >= ?", userId, "pending", cycleStart).
 			Order("id").
 			Find(&pending).Error; err != nil {

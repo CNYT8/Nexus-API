@@ -115,7 +115,7 @@ func RecordModelMonitorSamples(params RecordModelMonitorSampleParams, groups []s
 			ErrorMessage:     truncateModelMonitorSampleError(params.ErrorMessage),
 		})
 	}
-	if err := LOG_DB.Create(&samples).Error; err != nil {
+	if err := logMetaDB().Create(&samples).Error; err != nil {
 		return err
 	}
 	InvalidateModelMonitorCache()

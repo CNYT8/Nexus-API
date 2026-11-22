@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/gin-gonic/gin"
 )
 
 type UserGroupRatioDetail struct {
@@ -63,6 +64,28 @@ func GetUserAutoGroup(userGroup string) []string {
 		}
 	}
 	return autoGroups
+}
+
+// GetRequestAutoGroups intersects a token's ordered restriction with the
+// current site and account permissions. Empty restrictions use site defaults.
+func GetRequestAutoGroups(c *gin.Context, userGroup string) []string {
+	defaults := GetUserAutoGroup(userGroup)
+	requested := c.GetStringSlice("token_auto_groups")
+	if len(requested) == 0 {
+		return defaults
+	}
+	allowed := make(map[string]bool, len(defaults))
+	for _, group := range defaults {
+		allowed[group] = true
+	}
+	groups := make([]string, 0, len(requested))
+	for _, group := range requested {
+		if allowed[group] {
+			groups = append(groups, group)
+			delete(allowed, group)
+		}
+	}
+	return groups
 }
 
 // GetGroupsEnabledModels returns enabled models in group order without duplicates.

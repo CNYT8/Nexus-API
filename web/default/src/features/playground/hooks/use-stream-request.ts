@@ -16,18 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { SSE } from 'sse.js'
-import { getCommonHeaders } from '@/lib/api'
 import { API_ENDPOINTS, ERROR_MESSAGES } from '../constants'
 import type { ChatCompletionRequest, ChatCompletionChunk } from '../types'
+import { createStreamTextAccumulator } from '../lib/stream-text'
 
 /**
  * Hook for handling streaming chat completion requests
  */
-export function useStreamRequest() {
+export function useStreamRequest(userId: string | null) {
   const sseSourceRef = useRef<SSE | null>(null)
-  const isStreamCompleteRef = useRef(false)
+  const pendingRef = useRef<{ flush: () => void; cancel: () => void } | null>(null)
 
   const sendStreamRequest = useCallback(
     (
@@ -36,46 +36,76 @@ export function useStreamRequest() {
       onComplete: () => void,
       onError: (error: string, errorCode?: string) => void
     ) => {
+      if (sseSourceRef.current || !userId) return false
       const source = new SSE(API_ENDPOINTS.CHAT_COMPLETIONS, {
-        headers: getCommonHeaders(),
+        start: false,
+        headers: { 'Content-Type': 'application/json', 'New-Api-User': userId },
         method: 'POST',
         payload: JSON.stringify(payload),
       })
 
       sseSourceRef.current = source
-      isStreamCompleteRef.current = false
-
+      let settled = false
+      const isActive = () => !settled && sseSourceRef.current === source
+      const accumulate = createStreamTextAccumulator()
+      let pending = { reasoning: '', content: '' }
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const cancel = () => {
+        clearTimeout(timer)
+        timer = undefined
+        pending = { reasoning: '', content: '' }
+      }
+      const flush = () => {
+        clearTimeout(timer)
+        timer = undefined
+        if (!isActive()) return cancel()
+        const batch = pending
+        pending = { reasoning: '', content: '' }
+        if (batch.reasoning) onUpdate('reasoning', batch.reasoning)
+        if (batch.content) onUpdate('content', batch.content)
+      }
+      pendingRef.current = { flush, cancel }
       const closeSource = () => {
+        cancel()
+        pendingRef.current = null
+        settled = true
+        if (sseSourceRef.current === source) sseSourceRef.current = null
         source.close()
-        sseSourceRef.current = null
       }
 
       const handleError = (errorMessage: string, errorCode?: string) => {
-        if (!isStreamCompleteRef.current) {
-          onError(errorMessage, errorCode)
-          closeSource()
-        }
+        if (!isActive()) return
+        flush()
+        closeSource()
+        onError(errorMessage, errorCode)
       }
 
       source.addEventListener('message', (e: MessageEvent) => {
+        if (!isActive()) return
         if (e.data === '[DONE]') {
-          isStreamCompleteRef.current = true
+          flush()
           closeSource()
           onComplete()
           return
         }
 
         try {
-          const chunk: ChatCompletionChunk = JSON.parse(e.data)
-          const delta = chunk.choices?.[0]?.delta
-
-          if (delta) {
-            if (delta.reasoning_content) {
-              onUpdate('reasoning', delta.reasoning_content)
-            }
-            if (delta.content) {
-              onUpdate('content', delta.content)
-            }
+          const chunk: ChatCompletionChunk & {
+            error?: { message?: string; code?: string }
+          } = JSON.parse(e.data)
+          if (chunk.error) {
+            handleError(
+              chunk.error.message || ERROR_MESSAGES.API_REQUEST_ERROR,
+              chunk.error.code
+            )
+            return
+          }
+          const choice = chunk.choices?.[0]
+          const updates = accumulate(choice?.delta ?? choice?.message ?? choice, !choice?.delta)
+          pending.reasoning += updates.reasoning
+          pending.content += updates.content
+          if (!timer && (pending.reasoning || pending.content)) {
+            timer = setTimeout(flush, 50)
           }
         } catch (error) {
           // eslint-disable-next-line no-console
@@ -85,8 +115,7 @@ export function useStreamRequest() {
       })
 
       source.addEventListener('error', (e: Event & { data?: string }) => {
-        // Only handle errors if stream didn't complete normally
-        if (source.readyState !== 2) {
+        if (isActive()) {
           // eslint-disable-next-line no-console
           console.error('SSE Error:', e)
           let errorMessage = e.data || ERROR_MESSAGES.API_REQUEST_ERROR
@@ -112,13 +141,12 @@ export function useStreamRequest() {
         'readystatechange',
         (e: Event & { readyState?: number }) => {
           const status = (source as unknown as { status?: number }).status
-          if (
-            e.readyState !== undefined &&
-            e.readyState >= 2 &&
-            status !== undefined &&
-            status !== 200
-          ) {
-            handleError(`HTTP ${status}: ${ERROR_MESSAGES.CONNECTION_CLOSED}`)
+          if (e.readyState !== undefined && e.readyState >= 2) {
+            handleError(
+              status && status >= 400
+                ? `HTTP ${status}: ${ERROR_MESSAGES.CONNECTION_CLOSED}`
+                : ERROR_MESSAGES.CONNECTION_CLOSED
+            )
           }
         }
       )
@@ -128,27 +156,23 @@ export function useStreamRequest() {
       } catch (error: unknown) {
         // eslint-disable-next-line no-console
         console.error('Failed to start SSE stream:', error)
-        onError(ERROR_MESSAGES.STREAM_START_ERROR)
-        sseSourceRef.current = null
+        handleError(ERROR_MESSAGES.STREAM_START_ERROR)
       }
+      return true
     },
-    []
+    [userId]
   )
 
+  const flushStream = useCallback(() => pendingRef.current?.flush(), [])
   const stopStream = useCallback(() => {
-    if (sseSourceRef.current) {
-      sseSourceRef.current.close()
-      sseSourceRef.current = null
-    }
+    pendingRef.current?.cancel()
+    pendingRef.current = null
+    const source = sseSourceRef.current
+    sseSourceRef.current = null
+    source?.close()
   }, [])
 
-  // eslint-disable-next-line react-hooks/refs
-  const isStreaming = sseSourceRef.current !== null
+  useEffect(() => stopStream, [stopStream])
 
-  return {
-    sendStreamRequest,
-    stopStream,
-    // eslint-disable-next-line react-hooks/refs
-    isStreaming,
-  }
+  return { sendStreamRequest, stopStream, flushStream }
 }

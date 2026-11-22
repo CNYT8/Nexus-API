@@ -4,21 +4,37 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Docker image tag, for example latest or v1.0.0'
+        description: 'Release image tag matching VERSION, for example v1.1.4-rc.3'
         required: true
         type: string
 
 concurrency:
-  group: docker-${{ github.event.inputs.image_tag }}
-  cancel-in-progress: true
+  # Serialize updates to latest, including requests for different release tags.
+  group: docker-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  IMAGE: ghcr.io/cnyt8/nexus-api
 
 jobs:
   build:
-    name: Build and push Docker image
-    runs-on: ubuntu-latest
+    name: Build and attest (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
@@ -26,76 +42,122 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
-      - name: Check version sync
-        run: bash bin/check-version-sync.sh "${{ github.event.inputs.image_tag }}"
+      - name: Validate release version
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]
+          bash bin/check-version-sync.sh "$IMAGE_TAG"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image
-        uses: docker/build-push-action@v6
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ghcr.io/cnyt8/nexus-api:${{ github.event.inputs.image_tag }}
-            ghcr.io/cnyt8/nexus-api:latest
+          platforms: ${{ matrix.platform }}
+          # Carry immutable digests to the merge job, including attestation manifests.
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           labels: |
             org.opencontainers.image.title=Nexus-API
             org.opencontainers.image.description=An AGPLv3 downstream project based on new-api.
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=AGPL-3.0-or-later
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: false
-          sbom: false
+          cache-from: type=gha,scope=release-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.arch }}
+          provenance: mode=max
+          sbom: true
 
-      - name: Image summary
-        run: |
-          echo "### Nexus-API Docker image" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "ghcr.io/cnyt8/nexus-api:${{ github.event.inputs.image_tag }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "ghcr.io/cnyt8/nexus-api:latest" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
-      - name: Prune old GHCR image versions
+      - name: Sign architecture digest
         env:
-          GH_TOKEN: ${{ github.token }}
-          PACKAGE_OWNER: CNYT8
-          PACKAGE_NAME: nexus-api
+          DIGEST: ${{ steps.build.outputs.digest }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          cosign sign --yes "$IMAGE@$DIGEST"
+          mkdir -p digests
+          printf '%s\n' "$DIGEST" > "digests/$ARCH"
 
-          versions_file="$(mktemp)"
-          gh api "/users/${PACKAGE_OWNER}/packages/container/${PACKAGE_NAME}/versions?per_page=100" --paginate --slurp > "$versions_file"
+      - name: Upload architecture digest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digest-${{ matrix.arch }}
+          path: digests/${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 1
 
-          keep_id="$(jq -r '[.[][]?] | sort_by(.created_at) | reverse | .[0].id // empty' "$versions_file")"
-          if [ -z "$keep_id" ]; then
-            echo "No GHCR package versions found."
-            exit 0
-          fi
+  manifests:
+    name: Publish and sign release index
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Download architecture digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: digest-*
+          merge-multiple: true
+          path: digests
 
-          keep_summary="$(jq -r --argjson keep_id "$keep_id" '[.[][]?] | map(select(.id == $keep_id)) | .[0] | "Keeping version \(.id), created at \(.created_at), tags: \((.metadata.container.tags // []) | join(", "))"' "$versions_file")"
-          echo "$keep_summary"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-          delete_ids="$(jq -r --argjson keep_id "$keep_id" '[.[][]?] | sort_by(.created_at) | reverse | .[1:][] | .id' "$versions_file")"
-          if [ -z "$delete_ids" ]; then
-            echo "No old GHCR package versions to delete."
-            exit 0
-          fi
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-          while IFS= read -r version_id; do
-            [ -n "$version_id" ] || continue
-            echo "Deleting old GHCR package version ${version_id}"
-            gh api --method DELETE "/users/${PACKAGE_OWNER}/packages/container/${PACKAGE_NAME}/versions/${version_id}"
-          done <<< "$delete_ids"
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: Verify children and publish index
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]
+          sources=()
+          for arch in amd64 arm64; do
+            digest="$(<"digests/$arch")"
+            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+            cosign verify --certificate-identity "$GITHUB_SERVER_URL/$GITHUB_WORKFLOW_REF" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE@$digest"
+            sources+=("$IMAGE@$digest")
+          done
+          docker buildx imagetools create -t "$IMAGE:$IMAGE_TAG" "${sources[@]}"
+          digest="$(docker buildx imagetools inspect "$IMAGE:$IMAGE_TAG" --format '{{json .Manifest}}' | jq -er '.digest')"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          docker buildx imagetools inspect "$IMAGE@$digest" --raw | jq -e \
+            '[.manifests[].platform | select(.os == "linux") | .architecture] | sort | unique == ["amd64", "arm64"]'
+          cosign sign --yes "$IMAGE@$digest"
+          cosign verify --certificate-identity "$GITHUB_SERVER_URL/$GITHUB_WORKFLOW_REF" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE@$digest"
+          docker buildx imagetools create -t "$IMAGE:latest" "$IMAGE@$digest"
+          printf 'Release: `%s:%s`\n\nDigest: `%s`\n\nPlatforms: linux/amd64, linux/arm64\n' \
+            "$IMAGE" "$IMAGE_TAG" "$digest" >> "$GITHUB_STEP_SUMMARY"
+          # Keep child manifests, SBOM/provenance and cosign artifacts reachable.
+          # A "keep newest version only" GHCR prune would break this release.

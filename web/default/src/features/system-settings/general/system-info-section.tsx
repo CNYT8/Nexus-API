@@ -50,6 +50,8 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useSettingsForm } from '../hooks/use-settings-form'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { useSystemOptions, getOptionValue } from '../hooks/use-system-options'
+import { isValidTaskPublicAddress } from './task-public-address'
 
 const _systemInfoSchema = z.object({
   theme: z.object({
@@ -57,6 +59,7 @@ const _systemInfoSchema = z.object({
   }),
   SystemName: z.string().min(1),
   ServerAddress: z.string().optional(),
+  TaskPublicAddress: z.string().optional(),
   Logo: z.string().url().optional().or(z.literal('')),
   Footer: z.string().optional(),
   About: z.string().optional(),
@@ -81,6 +84,7 @@ function normalizeValue(value: unknown): string {
 export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const { data: options } = useSystemOptions()
 
   const normalizedDefaults: SystemInfoFormValues = {
     theme: {
@@ -89,6 +93,7 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
     },
     SystemName: normalizeValue(defaultValues.SystemName),
     ServerAddress: normalizeValue(defaultValues.ServerAddress),
+    TaskPublicAddress: getOptionValue(options?.data, { TaskPublicAddress: '' }).TaskPublicAddress,
     Logo: normalizeValue(defaultValues.Logo),
     Footer: normalizeValue(defaultValues.Footer),
     About: normalizeValue(defaultValues.About),
@@ -107,6 +112,9 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
       error: () => t('System name is required'),
     }),
     ServerAddress: z.string().optional(),
+    TaskPublicAddress: z.string().refine(isValidTaskPublicAddress, {
+      message: t('任务公开地址须为完整的 HTTP(S) 地址，不能包含凭据、空白、查询参数或片段'),
+    }),
     Logo: z.string().url().optional().or(z.literal('')),
     Footer: z.string().optional(),
     About: z.string().optional(),
@@ -126,16 +134,15 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
       >,
       defaultValues: normalizedDefaults,
       onSubmit: async (_data, changedFields) => {
-        for (const [key, value] of Object.entries(changedFields)) {
-          let v = normalizeValue(value)
-          if (key === 'ServerAddress') {
-            v = v.replace(/\/+$/, '')
-          }
-          await updateOption.mutateAsync({
-            key,
-            value: v,
+        await updateOption.saveOptions(
+          Object.entries(changedFields).map(([key, value]) => {
+            let v = normalizeValue(value)
+            if (key === 'ServerAddress' || key === 'TaskPublicAddress') {
+              v = v.replace(/\/+$/, '')
+            }
+            return { key, value: v }
           })
-        }
+        )
       },
     })
 
@@ -230,6 +237,23 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
                       {t(
                         'The public URL of your server, used for OAuth callbacks, webhooks, and other external integrations'
                       )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='TaskPublicAddress'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('任务公开地址')}</FormLabel>
+                    <FormControl>
+                      <Input placeholder='https://tasks.example.com' {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      {t('用于生成任务文件和回调的公开链接；留空时回退到服务器地址，可包含路径前缀')}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
