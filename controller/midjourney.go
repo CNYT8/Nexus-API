@@ -70,21 +70,26 @@ func UpdateMidjourneyTaskBulk() {
 			}
 			// 设置超时时间
 			timeout := time.Second * 15
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			requestCtx, cancel := context.WithTimeout(ctx, timeout)
 			// 使用带有超时的 context 创建新的请求
-			req = req.WithContext(ctx)
+			req = req.WithContext(requestCtx)
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("mj-api-secret", midjourneyChannel.Key)
 			resp, err := service.GetHttpClient().Do(req)
 			if err != nil {
+				cancel()
 				logger.LogError(ctx, fmt.Sprintf("Get Task Do req error: %v", err))
 				continue
 			}
 			if resp.StatusCode != http.StatusOK {
+				resp.Body.Close()
+				cancel()
 				logger.LogError(ctx, fmt.Sprintf("Get Task status code: %d", resp.StatusCode))
 				continue
 			}
 			responseBody, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			cancel()
 			if err != nil {
 				logger.LogError(ctx, fmt.Sprintf("Get Mjp Task parse body error: %v", err))
 				continue
@@ -95,9 +100,6 @@ func UpdateMidjourneyTaskBulk() {
 				logger.LogError(ctx, fmt.Sprintf("Get Mjp Task parse body error2: %v, body: %s", err, string(responseBody)))
 				continue
 			}
-			resp.Body.Close()
-			req.Body.Close()
-			cancel()
 
 			for _, responseItem := range responseItems {
 				task := taskM[responseItem.MjId]

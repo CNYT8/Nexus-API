@@ -57,7 +57,7 @@ func injectGlobals(runtime *moejs.Runtime, now func() time.Time, logOutput func(
 			}
 			node, err := makeJSONNode(moejs.Arg(args, 0), 0, &jsonBudget{ctx: ctx, realm: r, bytes: MaxJSONToolBytes, nodes: maxJSONToolNodes})
 			if err != nil {
-				return moejs.Undefined(), r.TypeError(err.Error())
+				return moejs.Undefined(), r.TypeError("%s", err.Error())
 			}
 			return node.jsValue(r)
 		})},
