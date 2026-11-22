@@ -226,10 +226,24 @@ func migrationHasDefault(field *schema.Field) bool {
 	return explicit && field.HasDefaultValue && !strings.EqualFold(strings.TrimSpace(field.DefaultValue), "null") && field.DefaultValue != "(-)"
 }
 
+// Earlier upstream versions created this ordinary index as (id, created_at).
+// AutoMigrate left existing indexes untouched when the priorities were corrected.
+// Its order affects query performance, not data integrity. Preserve this exact
+// historical definition: rebuilding a large log index during startup is unsafe.
+func migrationLegacyLogIndexMatches(table string, actual, expected migrationIndex) bool {
+	if table != "logs" || expected.Name != "idx_created_at_id" || actual.Name != expected.Name || expected.Unique || actual.Unique || migrationPredicate(expected.Predicate) != "" {
+		return false
+	}
+	if len(expected.Columns) != 2 || expected.Columns[0] != "created_at" || expected.Columns[1] != "id" {
+		return false
+	}
+	return migrationIndexMatches(actual, migrationIndex{Columns: []string{"id", "created_at"}})
+}
+
 func requireMigrationIndex(table string, expected migrationIndex, indexes map[string]migrationIndex) error {
 	actual, exists := indexes[expected.Name]
-	if !exists || !migrationIndexMatches(actual, expected) {
-		return fmt.Errorf("index %s.%s has an unexpected definition (want unique=%t columns=%v predicate=%q); preserve it and reconcile explicitly", table, expected.Name, expected.Unique, expected.Columns, expected.Predicate)
+	if !exists || (!migrationIndexMatches(actual, expected) && !migrationLegacyLogIndexMatches(table, actual, expected)) {
+		return fmt.Errorf("index %s.%s has an unexpected definition (want unique=%t columns=%v predicate=%q; actual exists=%t unique=%t valid=%t unsupported=%t columns=%v predicate=%q); preserve it and reconcile explicitly", table, expected.Name, expected.Unique, expected.Columns, expected.Predicate, exists, actual.Unique, actual.Valid, actual.Unsupported, actual.Columns, actual.Predicate)
 	}
 	return nil
 }

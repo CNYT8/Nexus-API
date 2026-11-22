@@ -18,6 +18,20 @@ jobs:
     name: Dual frontend and Go checks
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: nexus_test
+          POSTGRES_PASSWORD: nexus_test
+          POSTGRES_DB: nexus_schema_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nexus_test -d nexus_schema_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       GOMAXPROCS: '2'
       GOFLAGS: '-p=2'
@@ -120,6 +134,11 @@ jobs:
 
       - name: Go vet
         run: go vet ./...
+
+      - name: PostgreSQL historical log index upgrade regression
+        env:
+          SCHEMA_MIGRATION_TEST_POSTGRES_DSN: 'host=127.0.0.1 port=5432 user=nexus_test password=nexus_test dbname=nexus_schema_test sslmode=disable'
+        run: go test -p 2 -count=1 -timeout=5m ./model -run '^TestSchemaLegacyLogIndexPostgres$' -v
 
       - name: Go tests
         run: go test -p 2 -count=1 -timeout=15m ./...
