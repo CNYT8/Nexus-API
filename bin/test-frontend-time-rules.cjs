@@ -391,7 +391,7 @@ for (const kind of ['default', 'classic']) {
     for (const key of newKeys) assert.ok(current[key], `${file}: required time-rule key ${key}`);
   }
 }
-assert.equal(localeCount, 14);
+assert.equal(localeCount, 15);
 console.log(`PASS: ${localeCount} locale JSONs, unique translation/keys, ${changedKeyCount} changed translations, no new missing keys or Chinese/English residue`);
 console.log(`BASELINE AUDIT (not a full i18n pass): ${missingCount} pre-existing missing page keys, ${residueCount} Chinese-locale English candidates; --i18n-details lists all`);
 if (process.argv.includes('--i18n-details')) console.log(JSON.stringify(details, null, 2));

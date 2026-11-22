@@ -2,8 +2,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { CircleDollarSign, FileWarning } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-
-import { SectionPageLayout } from '@/components/layout'
 import { api } from '@/lib/api'
 import { formatQuota } from '@/lib/format'
 import { Badge } from '@/components/ui/badge'
@@ -23,6 +21,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { SectionPageLayout } from '@/components/layout'
+import type { ApiResponse } from './types'
 
 type EmptyResponseStatus = {
   enabled: boolean
@@ -199,75 +199,75 @@ export function EmptyResponsePage() {
             </CardHeader>
             <CardContent className='p-0 sm:p-6'>
               <div className='hidden overflow-x-auto sm:block'>
-              <Table className='min-w-[720px]'>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t('Time')}</TableHead>
-                    <TableHead>{t('Model')}</TableHead>
-                    <TableHead className='text-right'>
-                      {t('Input Tokens')}
-                    </TableHead>
-                    <TableHead className='text-right'>
-                      {t('Original Charge')}
-                    </TableHead>
-                    <TableHead className='text-right'>{t('Rate')}</TableHead>
-                    <TableHead className='text-right'>
-                      {t('Compensation')}
-                    </TableHead>
-                    <TableHead>{t('Status')}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {records.length === 0 ? (
+                <Table className='min-w-[720px]'>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell
-                        colSpan={7}
-                        className='text-muted-foreground py-8 text-center'
-                      >
-                        {t('No empty response records')}
-                      </TableCell>
+                      <TableHead>{t('Time')}</TableHead>
+                      <TableHead>{t('Model')}</TableHead>
+                      <TableHead className='text-right'>
+                        {t('Input Tokens')}
+                      </TableHead>
+                      <TableHead className='text-right'>
+                        {t('Original Charge')}
+                      </TableHead>
+                      <TableHead className='text-right'>{t('Rate')}</TableHead>
+                      <TableHead className='text-right'>
+                        {t('Compensation')}
+                      </TableHead>
+                      <TableHead>{t('Status')}</TableHead>
                     </TableRow>
-                  ) : (
-                    records.map((record) => (
-                      <TableRow key={record.id}>
-                        <TableCell>
-                          {formatTimestamp(record.log_created_at)}
-                        </TableCell>
-                        <TableCell>{record.model_name || '-'}</TableCell>
-                        <TableCell className='text-right'>
-                          {record.prompt_tokens}
-                        </TableCell>
-                        <TableCell className='text-right'>
-                          {formatQuota(record.quota)}
-                        </TableCell>
-                        <TableCell className='text-right'>
-                          {record.refund_percent}%
-                        </TableCell>
-                        <TableCell className='text-right'>
-                          {formatQuota(record.refund_quota)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={
-                              record.status === 'refunded'
-                                ? 'default'
-                                : record.status === 'expired'
-                                  ? 'outline'
-                                  : 'secondary'
-                            }
-                          >
-                            {record.status === 'refunded'
-                              ? t('Claimed')
-                              : record.status === 'expired'
-                                ? t('Expired')
-                                : t('Pending')}
-                          </Badge>
+                  </TableHeader>
+                  <TableBody>
+                    {records.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={7}
+                          className='text-muted-foreground py-8 text-center'
+                        >
+                          {t('No empty response records')}
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                    ) : (
+                      records.map((record) => (
+                        <TableRow key={record.id}>
+                          <TableCell>
+                            {formatTimestamp(record.log_created_at)}
+                          </TableCell>
+                          <TableCell>{record.model_name || '-'}</TableCell>
+                          <TableCell className='text-right'>
+                            {record.prompt_tokens}
+                          </TableCell>
+                          <TableCell className='text-right'>
+                            {formatQuota(record.quota)}
+                          </TableCell>
+                          <TableCell className='text-right'>
+                            {record.refund_percent}%
+                          </TableCell>
+                          <TableCell className='text-right'>
+                            {formatQuota(record.refund_quota)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                record.status === 'refunded'
+                                  ? 'default'
+                                  : record.status === 'expired'
+                                    ? 'outline'
+                                    : 'secondary'
+                              }
+                            >
+                              {record.status === 'refunded'
+                                ? t('Claimed')
+                                : record.status === 'expired'
+                                  ? t('Expired')
+                                  : t('Pending')}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
               </div>
               <div className='divide-border divide-y sm:hidden'>
                 {records.length === 0 ? (
@@ -279,7 +279,9 @@ export function EmptyResponsePage() {
                     <div key={record.id} className='space-y-3 px-4 py-4'>
                       <div className='flex items-start justify-between gap-3'>
                         <div className='min-w-0'>
-                          <p className='truncate font-medium'>{record.model_name || '-'}</p>
+                          <p className='truncate font-medium'>
+                            {record.model_name || '-'}
+                          </p>
                           <p className='text-muted-foreground text-xs'>
                             {formatTimestamp(record.log_created_at)}
                           </p>
@@ -302,19 +304,27 @@ export function EmptyResponsePage() {
                       </div>
                       <div className='grid grid-cols-2 gap-3 text-sm'>
                         <div>
-                          <p className='text-muted-foreground text-xs'>{t('Input Tokens')}</p>
+                          <p className='text-muted-foreground text-xs'>
+                            {t('Input Tokens')}
+                          </p>
                           <p>{record.prompt_tokens}</p>
                         </div>
                         <div>
-                          <p className='text-muted-foreground text-xs'>{t('Original Charge')}</p>
+                          <p className='text-muted-foreground text-xs'>
+                            {t('Original Charge')}
+                          </p>
                           <p>{formatQuota(record.quota)}</p>
                         </div>
                         <div>
-                          <p className='text-muted-foreground text-xs'>{t('Compensation')}</p>
+                          <p className='text-muted-foreground text-xs'>
+                            {t('Compensation')}
+                          </p>
                           <p>{formatQuota(record.refund_quota)}</p>
                         </div>
                         <div>
-                          <p className='text-muted-foreground text-xs'>{t('Rate')}</p>
+                          <p className='text-muted-foreground text-xs'>
+                            {t('Rate')}
+                          </p>
                           <p>{record.refund_percent}%</p>
                         </div>
                       </div>

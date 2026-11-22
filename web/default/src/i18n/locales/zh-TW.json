@@ -18,6 +18,8 @@
     "Reduces repeated wording": "減少重複用詞",
     "Seed": "隨機種子",
     "Temperature": "溫度",
+    "Time range": "時間範圍",
+    "Start ≤ end: within the day; start > end: across midnight": "開始 ≤ 結束為當日區間；開始 > 結束為跨零點區間",
     "Top P": "累積機率（Top P）",
     "请先填写 Turnstile Site Key 和 Secret Key": "請先填寫 Turnstile 網站金鑰與密鑰",
     "common.changeLanguage": "切換語言",

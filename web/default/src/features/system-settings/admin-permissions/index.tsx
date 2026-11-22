@@ -22,7 +22,6 @@ import { ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
-import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -41,29 +40,47 @@ import {
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
+import { SectionPageLayout } from '@/components/layout'
 import {
   SettingsControlGroup,
   SettingsSwitchContent,
   SettingsSwitchRow,
 } from '../components/settings-form-layout'
 import { SettingsSection } from '../components/settings-section'
-import { getAdminPermissions, getAdminPermissionSelf, updateAdminPermissions } from './api'
+import {
+  getAdminPermissions,
+  getAdminPermissionSelf,
+  updateAdminPermissions,
+} from './api'
 import type { AdminPermissionModule, AdminPermissionUser } from './types'
 
 const MODULE_LABELS: Record<string, { title: string; description: string }> = {
   channel: { title: '渠道管理', description: '配置上游服务商和路由。' },
-  models: { title: '模型管理', description: '管理模型可见性、定价、分组、供应商和部署。' },
+  models: {
+    title: '模型管理',
+    description: '管理模型可见性、定价、分组、供应商和部署。',
+  },
   user: { title: '用户管理', description: '管理用户账号和角色。' },
-  redemption: { title: '兑换码管理', description: '创建和查看邀请码或额度兑换码。' },
+  redemption: {
+    title: '兑换码管理',
+    description: '创建和查看邀请码或额度兑换码。',
+  },
   subscription: { title: '订阅管理', description: '管理订阅套餐和用户订阅。' },
   ticket: { title: '工单管理', description: '查看并回复用户支持工单。' },
 }
 
-function moduleEnabled(permissions: Record<string, boolean>, module: AdminPermissionModule) {
+function moduleEnabled(
+  permissions: Record<string, boolean>,
+  module: AdminPermissionModule
+) {
   return permissions[module.key] ?? module.enabled
 }
 
-function actionAllowed(permissions: Record<string, boolean>, module: AdminPermissionModule, action: 'read' | 'write') {
+function actionAllowed(
+  permissions: Record<string, boolean>,
+  module: AdminPermissionModule,
+  action: 'read' | 'write'
+) {
   const enabled = moduleEnabled(permissions, module)
   return enabled && (permissions[`${module.key}:${action}`] ?? enabled)
 }
@@ -76,9 +93,10 @@ function getEnabledPermissionCount(
   admin: AdminPermissionUser,
   modules: AdminPermissionModule[]
 ) {
-  return modules.filter((module) =>
-    actionAllowed(admin.permissions, module, 'read') ||
-    actionAllowed(admin.permissions, module, 'write')
+  return modules.filter(
+    (module) =>
+      actionAllowed(admin.permissions, module, 'read') ||
+      actionAllowed(admin.permissions, module, 'write')
   ).length
 }
 
@@ -96,10 +114,15 @@ function AdminPermissionsContent({ owner }: { owner: number | undefined }) {
   useEffect(() => {
     const controller = new AbortController()
     lifetime.current = controller
-    return () => { controller.abort() }
+    return () => {
+      controller.abort()
+    }
   }, [])
-  const isCurrent = () => !!owner && !lifetime.current?.signal.aborted &&
-    useAuthStore.getState().auth.user?.id === owner && localStorage.getItem('uid') === String(owner)
+  const isCurrent = () =>
+    !!owner &&
+    !lifetime.current?.signal.aborted &&
+    useAuthStore.getState().auth.user?.id === owner &&
+    localStorage.getItem('uid') === String(owner)
   const setUser = useAuthStore((s) => s.auth.setUser)
   const [selectedAdminId, setSelectedAdminId] = useState<number | null>(null)
 
@@ -123,20 +146,37 @@ function AdminPermissionsContent({ owner }: { owner: number | undefined }) {
     }: {
       admin: AdminPermissionUser
       permissions: Record<string, boolean>
-    }) => updateAdminPermissions(admin.id, permissions, lifetime.current!.signal, owner!),
+    }) =>
+      updateAdminPermissions(
+        admin.id,
+        permissions,
+        lifetime.current!.signal,
+        owner!
+      ),
     onSuccess: async (response) => {
       if (!isCurrent()) return
       if (!response.success) {
         toast.error(response.message || t('保存失败'))
         return
       }
-      await queryClient.invalidateQueries({ queryKey: adminPermissionsQueryKey, exact: true })
+      await queryClient.invalidateQueries({
+        queryKey: adminPermissionsQueryKey,
+        exact: true,
+      })
       if (!isCurrent()) return
       toast.success(t('保存成功'))
 
       if (response.data?.id === owner) {
-        const selfResponse = await getAdminPermissionSelf(lifetime.current!.signal, owner!)
-        if (isCurrent() && selfResponse.success && selfResponse.data?.id === owner) {
+        const selfResponse = await getAdminPermissionSelf(
+          lifetime.current!.signal,
+          owner!
+        )
+        if (
+          isCurrent() &&
+          selfResponse.success &&
+          selfResponse.data &&
+          selfResponse.data.id === owner
+        ) {
           setUser(selfResponse.data)
         }
       }
@@ -144,7 +184,9 @@ function AdminPermissionsContent({ owner }: { owner: number | undefined }) {
     onError: (error: Error) => {
       if (isCurrent()) toast.error(error.message || t('保存失败，请重试'))
     },
-    onSettled: () => { locked.current = false },
+    onSettled: () => {
+      locked.current = false
+    },
   })
 
   const handleToggle = (
@@ -152,7 +194,8 @@ function AdminPermissionsContent({ owner }: { owner: number | undefined }) {
     moduleKey: string,
     checked: boolean
   ) => {
-    if (!isCurrent() || !lifetime.current || locked.current || isFetching) return
+    if (!isCurrent() || !lifetime.current || locked.current || isFetching)
+      return
     const permissions = { ...admin.permissions, [moduleKey]: checked }
     if (getEnabledPermissionCount({ ...admin, permissions }, modules) === 0) {
       toast.error(t('至少需要保留一个管理员权限'))
@@ -164,13 +207,15 @@ function AdminPermissionsContent({ owner }: { owner: number | undefined }) {
 
   return (
     <SectionPageLayout>
-      <SectionPageLayout.Title>
-        {t('管理员权限设置')}
-      </SectionPageLayout.Title>
+      <SectionPageLayout.Title>{t('管理员权限设置')}</SectionPageLayout.Title>
       <SectionPageLayout.Content>
         <div className='flex w-full flex-col gap-4'>
           <SettingsSection title={t('管理员权限设置')}>
-            {(error || data?.success === false) && <p role='alert' className='text-destructive text-sm'>{error?.message || data?.message || t('加载失败，请重试')}</p>}
+            {(error || data?.success === false) && (
+              <p role='alert' className='text-destructive text-sm'>
+                {error?.message || data?.message || t('加载失败，请重试')}
+              </p>
+            )}
             {isLoading ? (
               <div className='grid gap-4'>
                 <Skeleton className='h-32 w-full' />
@@ -301,12 +346,23 @@ function AdminPermissionDialog({
         </DialogHeader>
 
         <div className='min-h-0 space-y-3 overflow-y-auto pr-1'>
-          <p className='text-muted-foreground text-xs'>{t('模块关闭时读写均不可用；未单独配置的读写权限继承模块开关，写入不包含读取。')}</p>
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              '模块关闭时读写均不可用；未单独配置的读写权限继承模块开关，写入不包含读取。'
+            )}
+          </p>
           <div className='grid gap-2 lg:grid-cols-2 xl:grid-cols-3'>
             {modules.map((module) => {
               const checked = moduleEnabled(admin.permissions, module)
               const labels = MODULE_LABELS[module.key]
-              const wouldDisableLastModule = getEnabledPermissionCount({ ...admin, permissions: { ...admin.permissions, [module.key]: false } }, modules) === 0
+              const wouldDisableLastModule =
+                getEnabledPermissionCount(
+                  {
+                    ...admin,
+                    permissions: { ...admin.permissions, [module.key]: false },
+                  },
+                  modules
+                ) === 0
               return (
                 <SettingsSwitchRow
                   key={`${admin.id}.${module.key}`}
@@ -325,23 +381,51 @@ function AdminPermissionDialog({
                     <Switch
                       aria-label={t('模块开关')}
                       checked={checked}
-                      onCheckedChange={(nextChecked) => onToggle(admin, module.key, nextChecked)}
+                      onCheckedChange={(nextChecked) =>
+                        onToggle(admin, module.key, nextChecked)
+                      }
                       disabled={saving || (checked && wouldDisableLastModule)}
                     />
                   </div>
                   {(['read', 'write'] as const).map((action) => {
                     const key = `${module.key}:${action}`
-                    const allowed = actionAllowed(admin.permissions, module, action)
-                    const wouldDisableLastAction = getEnabledPermissionCount({ ...admin, permissions: { ...admin.permissions, [key]: false } }, modules) === 0
-                    return <div key={key} className='flex items-center justify-between gap-2'>
-                      <span className='text-xs'>{action === 'read' ? t('读取权限') : t('写入权限')}</span>
-                      <Switch
-                        aria-label={action === 'read' ? t('读取权限') : t('写入权限')}
-                        checked={allowed}
-                        disabled={saving || !checked || (allowed && wouldDisableLastAction)}
-                        onCheckedChange={(nextChecked) => onToggle(admin, key, nextChecked)}
-                      />
-                    </div>
+                    const allowed = actionAllowed(
+                      admin.permissions,
+                      module,
+                      action
+                    )
+                    const wouldDisableLastAction =
+                      getEnabledPermissionCount(
+                        {
+                          ...admin,
+                          permissions: { ...admin.permissions, [key]: false },
+                        },
+                        modules
+                      ) === 0
+                    return (
+                      <div
+                        key={key}
+                        className='flex items-center justify-between gap-2'
+                      >
+                        <span className='text-xs'>
+                          {action === 'read' ? t('读取权限') : t('写入权限')}
+                        </span>
+                        <Switch
+                          aria-label={
+                            action === 'read' ? t('读取权限') : t('写入权限')
+                          }
+                          checked={allowed}
+                          disabled={
+                            saving ||
+                            !checked ||
+                            (allowed && wouldDisableLastAction)
+                          }
+                          onCheckedChange={(nextChecked) =>
+                            onToggle(admin, key, nextChecked)
+                          }
+                        />
+                      </div>
+                    )
                   })}
                 </SettingsSwitchRow>
               )

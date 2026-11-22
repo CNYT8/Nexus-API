@@ -1,19 +1,19 @@
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-
 import { api } from '@/lib/api'
-import { SettingsSection } from '../components/settings-section'
-import { SettingsPageFormActions } from '../components/settings-page-context'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import type { ApiResponse } from '@/features/empty-response/types'
 import {
   SettingsForm,
   SettingsSwitchContent,
   SettingsSwitchItem,
 } from '../components/settings-form-layout'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
+import { SettingsPageFormActions } from '../components/settings-page-context'
+import { SettingsSection } from '../components/settings-section'
 
 type EmptyResponseSettings = {
   enabled: boolean
@@ -35,18 +35,23 @@ export function EmptyResponseSettingsSection() {
   const settingsQuery = useQuery({
     queryKey: ['empty-response-settings'],
     queryFn: async () =>
-      api.get<ApiResponse<EmptyResponseSettings>>('/api/empty-responses/settings'),
+      api.get<ApiResponse<EmptyResponseSettings>>(
+        '/api/empty-responses/settings'
+      ),
   })
-
-  useEffect(() => {
+  const [previousResponse, setPreviousResponse] =
+    useState<typeof settingsQuery.data>(undefined)
+  if (settingsQuery.data !== previousResponse) {
+    setPreviousResponse(settingsQuery.data)
     const data = settingsQuery.data?.data.data
-    if (!data) return
-    setSettings({
-      enabled: Boolean(data.enabled),
-      period_days: Number(data.period_days) || 3,
-      refund_percent: Number(data.refund_percent) || 70,
-    })
-  }, [settingsQuery.data])
+    if (data) {
+      setSettings({
+        enabled: Boolean(data.enabled),
+        period_days: Number(data.period_days) || 3,
+        refund_percent: Number(data.refund_percent) || 70,
+      })
+    }
+  }
 
   const saveMutation = useMutation({
     mutationFn: async () =>
@@ -59,7 +64,9 @@ export function EmptyResponseSettingsSection() {
         toast.error(result.data.message || t('Failed to save settings'))
         return
       }
-      await queryClient.invalidateQueries({ queryKey: ['empty-response-settings'] })
+      await queryClient.invalidateQueries({
+        queryKey: ['empty-response-settings'],
+      })
       toast.success(t('Setting updated successfully'))
     },
     onError: () => toast.error(t('Failed to save settings')),
@@ -99,7 +106,9 @@ export function EmptyResponseSettingsSection() {
         </SettingsSwitchItem>
         <div className='grid gap-4 md:grid-cols-2'>
           <div className='space-y-2'>
-            <Label htmlFor='empty-response-period-days'>{t('Detection period')}</Label>
+            <Label htmlFor='empty-response-period-days'>
+              {t('Detection period')}
+            </Label>
             <Input
               id='empty-response-period-days'
               type='number'

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Gift, ExternalLink, Loader2, Receipt, WalletCards } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatNumber } from '@/lib/format'
@@ -108,16 +108,17 @@ export function RechargeFormCard({
   waffoPayMethods,
   waffoMinTopup,
   onWaffoMethodSelect,
-  enableWaffoPancakeTopup,
 }: RechargeFormCardProps) {
   const { t } = useTranslation()
   const [localAmount, setLocalAmount] = useState(topupAmount.toString())
+  const [previousTopupAmount, setPreviousTopupAmount] = useState(topupAmount)
 
-  useEffect(() => {
+  if (!Object.is(previousTopupAmount, topupAmount)) {
+    setPreviousTopupAmount(topupAmount)
     setLocalAmount((previous) =>
       previous === '' && topupAmount === 0 ? previous : topupAmount.toString()
     )
-  }, [topupAmount])
+  }
 
   const handleAmountChange = (value: string) => {
     setLocalAmount(value)

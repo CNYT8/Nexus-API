@@ -168,7 +168,9 @@ type PaymentFormValues = z.infer<typeof paymentSchema>
 type WaffoFormFieldValues = Omit<WaffoSettingsValues, 'WaffoPayMethods'>
 type PaymentBaseFormValues = Omit<
   PaymentFormValues,
-  keyof WaffoSettingsValues | keyof WaffoPancakeSettingsValues | 'waffoPancakeBinding'
+  | keyof WaffoSettingsValues
+  | keyof WaffoPancakeSettingsValues
+  | 'waffoPancakeBinding'
 >
 
 const CURRENT_COMPLIANCE_TERMS_VERSION = 'v1'
@@ -219,8 +221,13 @@ export function PaymentSettingsSection({
         productID: waffoPancakeProvisionedProductID ?? '',
       },
     }),
-    [defaultValues, waffoDefaultValues, waffoPancakeDefaultValues,
-      waffoPancakeProvisionedStoreID, waffoPancakeProvisionedProductID]
+    [
+      defaultValues,
+      waffoDefaultValues,
+      waffoPancakeDefaultValues,
+      waffoPancakeProvisionedStoreID,
+      waffoPancakeProvisionedProductID,
+    ]
   )
 
   const [payMethodsVisualMode, setPayMethodsVisualMode] = React.useState(true)
@@ -323,7 +330,11 @@ export function PaymentSettingsSection({
       return normalizeSettingValue(value)
     }
     if (path === 'WaffoCurrency') return value.trim() || 'USD'
-    if (path === 'PayAddress' || path === 'CustomCallbackAddress' || path === 'WaffoPancakeReturnURL') {
+    if (
+      path === 'PayAddress' ||
+      path === 'CustomCallbackAddress' ||
+      path === 'WaffoPancakeReturnURL'
+    ) {
       return removeTrailingSlash(value.trim())
     }
     return normalizeSettingValue(value.trim())
@@ -331,12 +342,28 @@ export function PaymentSettingsSection({
   const { isSubmitting } = form.formState
   const waffoPayMethods = parseWaffoPayMethods(form.watch('WaffoPayMethods'))
   const waffoPancakeSelection = form.watch('waffoPancakeBinding')
-  const setWaffoPayMethods = (methods: PayMethod[]) => {
-    form.setValue('WaffoPayMethods', JSON.stringify(methods), { shouldDirty: true })
-  }
-  const setWaffoPancakeSelection = (binding: WaffoPancakeBinding) => {
-    form.setValue('waffoPancakeBinding', binding, { shouldDirty: true })
-  }
+  const setWaffoPayMethods = React.useCallback(
+    (value: React.SetStateAction<PayMethod[]>) => {
+      const methods =
+        typeof value === 'function'
+          ? value(parseWaffoPayMethods(form.getValues('WaffoPayMethods')))
+          : value
+      form.setValue('WaffoPayMethods', JSON.stringify(methods), {
+        shouldDirty: true,
+      })
+    },
+    [form]
+  )
+  const setWaffoPancakeSelection = React.useCallback(
+    (value: React.SetStateAction<WaffoPancakeBinding>) => {
+      const binding =
+        typeof value === 'function'
+          ? value(form.getValues('waffoPancakeBinding'))
+          : value
+      form.setValue('waffoPancakeBinding', binding, { shouldDirty: true })
+    },
+    [form]
+  )
 
   const setPaymentValue = React.useCallback(
     (
@@ -1487,7 +1514,7 @@ export function PaymentSettingsSection({
             values={waffoPancakeValues}
             onValueChange={setWaffoPancakeValue}
             selectedBinding={waffoPancakeSelection}
-            savedBinding={waffoPancakeSavedBinding}
+            savedBinding={initialFormValues.waffoPancakeBinding}
             onSelectedBindingChange={setWaffoPancakeSelection}
           />
 

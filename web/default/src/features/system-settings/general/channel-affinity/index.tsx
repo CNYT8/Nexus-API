@@ -98,30 +98,50 @@ export function ChannelAffinitySection(props: Props) {
 
   const formDefaults = {
     enabled: props.defaultValues['channel_affinity_setting.enabled'],
-    switchOnSuccess: props.defaultValues['channel_affinity_setting.switch_on_success'],
-    keepOnChannelDisabled: props.defaultValues['channel_affinity_setting.keep_on_channel_disabled'],
+    switchOnSuccess:
+      props.defaultValues['channel_affinity_setting.switch_on_success'],
+    keepOnChannelDisabled:
+      props.defaultValues['channel_affinity_setting.keep_on_channel_disabled'],
     maxEntries: props.defaultValues['channel_affinity_setting.max_entries'],
-    defaultTtl: props.defaultValues['channel_affinity_setting.default_ttl_seconds'],
+    defaultTtl:
+      props.defaultValues['channel_affinity_setting.default_ttl_seconds'],
     jsonText: JSON.stringify(
-      JSON.parse(serializeRules(parseRules(props.defaultValues['channel_affinity_setting.rules']))),
-      null, 2
+      JSON.parse(
+        serializeRules(
+          parseRules(props.defaultValues['channel_affinity_setting.rules'])
+        )
+      ),
+      null,
+      2
     ),
   }
   const form = useForm({ defaultValues: formDefaults })
   const submitForm = useResetForm(form, formDefaults)
-  const { enabled, switchOnSuccess, keepOnChannelDisabled, maxEntries, defaultTtl, jsonText } = form.watch()
-  const setField = <K extends keyof typeof formDefaults>(key: K, value: (typeof formDefaults)[K]) => {
+  const {
+    enabled,
+    switchOnSuccess,
+    keepOnChannelDisabled,
+    maxEntries,
+    defaultTtl,
+    jsonText,
+  } = form.watch()
+  const setField: typeof form.setValue = (key, value) => {
     form.setValue(key, value, { shouldDirty: true })
   }
   const setEnabled = (value: boolean) => setField('enabled', value)
-  const setSwitchOnSuccess = (value: boolean) => setField('switchOnSuccess', value)
-  const setKeepOnChannelDisabled = (value: boolean) => setField('keepOnChannelDisabled', value)
+  const setSwitchOnSuccess = (value: boolean) =>
+    setField('switchOnSuccess', value)
+  const setKeepOnChannelDisabled = (value: boolean) =>
+    setField('keepOnChannelDisabled', value)
   const setMaxEntries = (value: number) => setField('maxEntries', value)
   const setDefaultTtl = (value: number) => setField('defaultTtl', value)
   const setJsonText = (value: string) => setField('jsonText', value)
   const rules = parseRules(jsonText)
   const setRules = (next: SetStateAction<AffinityRule[]>) => {
-    const updated = typeof next === 'function' ? next(parseRules(form.getValues('jsonText'))) : next
+    const updated =
+      typeof next === 'function'
+        ? next(parseRules(form.getValues('jsonText')))
+        : next
     setJsonText(JSON.stringify(JSON.parse(serializeRules(updated)), null, 2))
   }
 
@@ -180,88 +200,97 @@ export function ChannelAffinitySection(props: Props) {
     }
   }
 
-  const handleSave = submitForm(async ({ enabled, switchOnSuccess, keepOnChannelDisabled, maxEntries, defaultTtl, jsonText }) => {
-    let rulesJson: string
-    {
-      try {
-        const parsed = JSON.parse(jsonText)
-        if (!Array.isArray(parsed)) {
-          toast.error(t('Rules JSON must be an array'))
+  const handleSave = submitForm(
+    async ({
+      enabled,
+      switchOnSuccess,
+      keepOnChannelDisabled,
+      maxEntries,
+      defaultTtl,
+      jsonText,
+    }) => {
+      let rulesJson: string
+      {
+        try {
+          const parsed = JSON.parse(jsonText)
+          if (!Array.isArray(parsed)) {
+            toast.error(t('Rules JSON must be an array'))
+            return
+          }
+          rulesJson = JSON.stringify(parsed)
+        } catch {
+          toast.error(t('Invalid rules JSON format'))
           return
         }
-        rulesJson = JSON.stringify(parsed)
-      } catch {
-        toast.error(t('Invalid rules JSON format'))
-        return
       }
-    }
 
-    {
-      const updates: { key: string; value: string }[] = []
+      {
+        const updates: { key: string; value: string }[] = []
 
-      if (enabled !== props.defaultValues['channel_affinity_setting.enabled'])
-        updates.push({
-          key: 'channel_affinity_setting.enabled',
-          value: String(enabled),
-        })
-      if (
-        switchOnSuccess !==
-        props.defaultValues['channel_affinity_setting.switch_on_success']
-      )
-        updates.push({
-          key: 'channel_affinity_setting.switch_on_success',
-          value: String(switchOnSuccess),
-        })
-      if (
-        keepOnChannelDisabled !==
-        props.defaultValues[
-          'channel_affinity_setting.keep_on_channel_disabled'
-        ]
-      )
-        updates.push({
-          key: 'channel_affinity_setting.keep_on_channel_disabled',
-          value: String(keepOnChannelDisabled),
-        })
-      if (
-        maxEntries !==
-        props.defaultValues['channel_affinity_setting.max_entries']
-      )
-        updates.push({
-          key: 'channel_affinity_setting.max_entries',
-          value: String(maxEntries),
-        })
-      if (
-        defaultTtl !==
-        props.defaultValues['channel_affinity_setting.default_ttl_seconds']
-      )
-        updates.push({
-          key: 'channel_affinity_setting.default_ttl_seconds',
-          value: String(defaultTtl),
-        })
+        if (enabled !== props.defaultValues['channel_affinity_setting.enabled'])
+          updates.push({
+            key: 'channel_affinity_setting.enabled',
+            value: String(enabled),
+          })
+        if (
+          switchOnSuccess !==
+          props.defaultValues['channel_affinity_setting.switch_on_success']
+        )
+          updates.push({
+            key: 'channel_affinity_setting.switch_on_success',
+            value: String(switchOnSuccess),
+          })
+        if (
+          keepOnChannelDisabled !==
+          props.defaultValues[
+            'channel_affinity_setting.keep_on_channel_disabled'
+          ]
+        )
+          updates.push({
+            key: 'channel_affinity_setting.keep_on_channel_disabled',
+            value: String(keepOnChannelDisabled),
+          })
+        if (
+          maxEntries !==
+          props.defaultValues['channel_affinity_setting.max_entries']
+        )
+          updates.push({
+            key: 'channel_affinity_setting.max_entries',
+            value: String(maxEntries),
+          })
+        if (
+          defaultTtl !==
+          props.defaultValues['channel_affinity_setting.default_ttl_seconds']
+        )
+          updates.push({
+            key: 'channel_affinity_setting.default_ttl_seconds',
+            value: String(defaultTtl),
+          })
 
-      const origRules = props.defaultValues['channel_affinity_setting.rules']
-      const origSerialized = (() => {
-        try {
-          return JSON.stringify(JSON.parse(origRules || '[]'))
-        } catch {
-          return '[]'
+        const origRules = props.defaultValues['channel_affinity_setting.rules']
+        const origSerialized = (() => {
+          try {
+            return JSON.stringify(JSON.parse(origRules || '[]'))
+          } catch {
+            return '[]'
+          }
+        })()
+        if (rulesJson !== origSerialized) {
+          updates.push({
+            key: 'channel_affinity_setting.rules',
+            value: rulesJson,
+          })
         }
-      })()
-      if (rulesJson !== origSerialized) {
-        updates.push({
-          key: 'channel_affinity_setting.rules',
-          value: rulesJson,
-        })
-      }
 
-      if (updates.length === 0) {
-        toast.info(t('No changes'))
-        return
-      }
+        if (updates.length === 0) {
+          toast.info(t('No changes'))
+          return
+        }
 
-      await updateOption.saveOptions(updates)
+        await updateOption.saveOptions(updates)
+      }
     }
-  })
+  )
 
   const handleRuleSave = (rule: AffinityRule) => {
     setRules((prev) => {

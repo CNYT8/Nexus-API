@@ -20,14 +20,17 @@ import { useCallback, useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/auth-store'
 import { api, type ApiRequestConfig } from '@/lib/api'
-import { useAccountSession, type AccountSession } from '@/features/playground/hooks/use-account-session'
-import { useScriptPluginRequest } from './use-script-plugin-request'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  useAccountSession,
+  type AccountSession,
+} from '@/features/playground/hooks/use-account-session'
 import { SettingsSection } from '../components/settings-section'
 import { ScriptPluginsPanel } from './script-plugins-panel'
+import { useScriptPluginRequest } from './use-script-plugin-request'
 
 type Plugin = {
   id: number
@@ -73,18 +76,41 @@ function parseObject(value: string): Record<string, unknown> {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
 const validDraft = (value: unknown): value is Draft =>
-  isRecord(value) && ['name', 'version', 'schema', 'expression'].every((key) => typeof value[key] === 'string')
+  isRecord(value) &&
+  ['name', 'version', 'schema', 'expression'].every(
+    (key) => typeof value[key] === 'string'
+  )
 const validPlugin = (value: unknown): value is Plugin =>
-  isRecord(value) && validDraft(value) && Number.isSafeInteger(value.id) && Number(value.id) > 0
+  isRecord(value) &&
+  Number.isSafeInteger(value.id) &&
+  Number(value.id) > 0 &&
+  validDraft(value)
 const validBindings = (value: unknown): value is Record<string, number> =>
-  isRecord(value) && Object.entries(value).every(([model, id]) =>
-    model.trim() !== '' && model === model.trim() && !/[\r\n\t\0]/.test(model) &&
-    typeof id === 'number' && Number.isSafeInteger(id) && id >= 0)
+  isRecord(value) &&
+  Object.entries(value).every(
+    ([model, id]) =>
+      model.trim() !== '' &&
+      model === model.trim() &&
+      !/[\r\n\t\0]/.test(model) &&
+      typeof id === 'number' &&
+      Number.isSafeInteger(id) &&
+      id >= 0
+  )
 
-function readPlugins(body: { success: boolean; data: unknown }, before = Infinity): Plugin[] {
+function readPlugins(
+  body: { success: boolean; data: unknown },
+  before = Infinity
+): Plugin[] {
   const value = unwrap(body) ?? []
-  if (!Array.isArray(value) || value.length > 100 || value.some((item, index) =>
-    !validPlugin(item) || item.id >= (index ? value[index - 1].id : before))) throw null
+  if (
+    !Array.isArray(value) ||
+    value.length > 100 ||
+    value.some(
+      (item, index) =>
+        !validPlugin(item) || item.id >= (index ? value[index - 1].id : before)
+    )
+  )
+    throw null
   return value
 }
 function readBindings(body: { success: boolean; data: unknown }) {
@@ -96,14 +122,27 @@ function readBindings(body: { success: boolean; data: unknown }) {
 }
 function readContract(body: { success: boolean; data: Contract }) {
   const value = unwrap(body)
-  if (!isRecord(value) || value.kind !== 'declarative_usage_billing' || value.api_version !== 1 ||
-    !validDraft(value.example_create) || !isRecord(value.example_response) ||
-    !Number.isFinite(value.example_group_ratio) || value.example_group_ratio < 0 ||
-    !isRecord(value.example_other_ratios) || Object.values(value.example_other_ratios).some((ratio) =>
-      typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio < 0) ||
-    !isRecord(value.capabilities) || typeof value.capabilities.preview !== 'boolean' ||
-    typeof value.capabilities.usage_billing !== 'boolean' || !isRecord(value.limits) ||
-    !Array.isArray(value.expression_operators) || value.expression_operators.some((item) => typeof item !== 'string')) throw null
+  if (
+    !isRecord(value) ||
+    value.kind !== 'declarative_usage_billing' ||
+    value.api_version !== 1 ||
+    !validDraft(value.example_create) ||
+    !isRecord(value.example_response) ||
+    !Number.isFinite(value.example_group_ratio) ||
+    value.example_group_ratio < 0 ||
+    !isRecord(value.example_other_ratios) ||
+    Object.values(value.example_other_ratios).some(
+      (ratio) =>
+        typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio < 0
+    ) ||
+    !isRecord(value.capabilities) ||
+    typeof value.capabilities.preview !== 'boolean' ||
+    typeof value.capabilities.usage_billing !== 'boolean' ||
+    !isRecord(value.limits) ||
+    !Array.isArray(value.expression_operators) ||
+    value.expression_operators.some((item) => typeof item !== 'string')
+  )
+    throw null
   return value
 }
 
@@ -111,7 +150,11 @@ export function TaskUsagePluginsSection() {
   const { t } = useTranslation()
   const user = useAuthStore((state) => state.auth.user)
   const session = useAccountSession()
-  if (user?.role !== 100 || !session.userId || String(user.id) !== session.userId) {
+  if (
+    user?.role !== 100 ||
+    !session.userId ||
+    String(user.id) !== session.userId
+  ) {
     return <p>{t('Root access is required to manage task usage plugins')}</p>
   }
   return <TaskUsagePluginsContent key={session.revision} session={session} />
@@ -130,35 +173,56 @@ function TaskUsagePluginsContent({ session }: { session: AccountSession }) {
   const [bindings, setBindings] = useState<string | null>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [notice, setNotice] = useState('')
-  const { run: read, cancel, busy: reading, error: readError, clearError } = useScriptPluginRequest(session)
-  const { run: write, busy: writing, error: writeError, clearError: clearWriteError } = useScriptPluginRequest(session, false)
+  const {
+    run: read,
+    cancel,
+    busy: reading,
+    error: readError,
+    clearError,
+  } = useScriptPluginRequest(session)
+  const {
+    run: write,
+    busy: writing,
+    error: writeError,
+    clearError: clearWriteError,
+  } = useScriptPluginRequest(session, false)
   const busy = reading || writing
   const error = writeError || readError
 
   const load = useCallback(() => {
     if (!session.isCurrent()) return
-    setNotice('')
-    clearWriteError()
-    return read(async (config) => {
-      const [schemaResult, listResult, bindingsResult] = await Promise.all([
-        api.get('/api/task/plugin/schema', config),
-        api.get('/api/task/plugin', config),
-        api.get('/api/task/plugin/bindings', config),
-      ])
-      return { schema: readContract(schemaResult.data), list: readPlugins(listResult.data), saved: readBindings(bindingsResult.data) }
-    }, ({ schema, list, saved }) => {
-      setContract(schema)
-      setPlugins(list)
-      setMore(list.length === 100)
-      setBindings((current) => current ?? format(saved))
-    }, t('Failed to load task plugins'))
-  }, [read, session, clearWriteError, t])
+    return read(
+      async (config) => {
+        const [schemaResult, listResult, bindingsResult] = await Promise.all([
+          api.get('/api/task/plugin/schema', config),
+          api.get('/api/task/plugin', config),
+          api.get('/api/task/plugin/bindings', config),
+        ])
+        return {
+          schema: readContract(schemaResult.data),
+          list: readPlugins(listResult.data),
+          saved: readBindings(bindingsResult.data),
+        }
+      },
+      ({ schema, list, saved }) => {
+        setContract(schema)
+        setPlugins(list)
+        setMore(list.length === 100)
+        setBindings((current) => current ?? format(saved))
+      },
+      t('Failed to load task plugins')
+    )
+  }, [read, session, t])
 
   useEffect(() => {
     void load()
-  }, [load])
+    return cancel
+  }, [cancel, load])
 
-  const run = <T,>(action: (config: ApiRequestConfig) => Promise<T>, apply: (value: T) => void) => {
+  const run = <T,>(
+    action: (config: ApiRequestConfig) => Promise<T>,
+    apply: (value: T) => void
+  ) => {
     if (!session.isCurrent() || busy || !contract) return
     cancel()
     clearError()
@@ -208,71 +272,86 @@ function TaskUsagePluginsContent({ session }: { session: AccountSession }) {
         config
       )
       const value = unwrap<Preview>(result.data)
-      if (!value || value.dry_run !== true || value.currency !== 'USD' ||
-        !Number.isFinite(value.quota) || value.quota < 0 ||
-        !Number.isFinite(value.quota_per_unit) || value.quota_per_unit <= 0) {
+      if (
+        !value ||
+        value.dry_run !== true ||
+        value.currency !== 'USD' ||
+        !Number.isFinite(value.quota) ||
+        value.quota < 0 ||
+        !Number.isFinite(value.quota_per_unit) ||
+        value.quota_per_unit <= 0
+      ) {
         throw new Error(t('Invalid preview response'))
       }
       return value
     }, setPreview)
   const create = () =>
-    run(async (config) => {
-      const result = await api.post(
-        '/api/task/plugin',
-        validatedDraft(),
-        config
-      )
-      const saved = unwrap<Plugin>(result.data)
-      if (!validPlugin(saved)) throw null
-      return saved
-    }, (saved) => {
-      setPlugins((current) => [
-        saved,
-        ...current.filter((item) => item.id !== saved.id),
-      ])
-      setPreview(null)
-      setNotice(
-        t('Created immutable revision #{{id}}. Bind a model to enable it.', {
-          id: saved.id,
-        })
-      )
-    })
-  const saveBindings = () =>
-    run(async (config) => {
-      const mapping = parseObject(bindings ?? '{}')
-      if (!validBindings(mapping)) {
-        throw new Error(
-          t(
-            'Bindings require exact model names and non-negative integer revision IDs'
-          )
+    run(
+      async (config) => {
+        const result = await api.post(
+          '/api/task/plugin',
+          validatedDraft(),
+          config
+        )
+        const saved = unwrap<Plugin>(result.data)
+        if (!validPlugin(saved)) throw null
+        return saved
+      },
+      (saved) => {
+        setPlugins((current) => [
+          saved,
+          ...current.filter((item) => item.id !== saved.id),
+        ])
+        setPreview(null)
+        setNotice(
+          t('Created immutable revision #{{id}}. Bind a model to enable it.', {
+            id: saved.id,
+          })
         )
       }
-      const result = await api.put(
-        '/api/task/plugin/bindings',
-        { bindings: mapping },
-        config
-      )
-      return readBindings(result.data)
-    }, (saved) => {
-      setBindings(format(saved))
-      setNotice(t('Model bindings saved'))
-    })
+    )
+  const saveBindings = () =>
+    run(
+      async (config) => {
+        const mapping = parseObject(bindings ?? '{}')
+        if (!validBindings(mapping)) {
+          throw new Error(
+            t(
+              'Bindings require exact model names and non-negative integer revision IDs'
+            )
+          )
+        }
+        const result = await api.put(
+          '/api/task/plugin/bindings',
+          { bindings: mapping },
+          config
+        )
+        return readBindings(result.data)
+      },
+      (saved) => {
+        setBindings(format(saved))
+        setNotice(t('Model bindings saved'))
+      }
+    )
   const loadMore = () =>
-    run(async (config) => {
-      const before = plugins[plugins.length - 1]?.id
-      if (!before) throw null
-      const result = await api.get('/api/task/plugin', {
-        ...config,
-        params: { before_id: before },
-      })
-      return readPlugins(result.data, before)
-    }, (list) => {
-      setPlugins((current) => [
-        ...current,
-        ...list.filter((item) => !current.some((old) => old.id === item.id)),
-      ])
-      setMore(list.length === 100)
-    })
+    run(
+      async (config) => {
+        const before = plugins[plugins.length - 1]?.id
+        if (!before) throw null
+        const result = await api.get('/api/task/plugin', {
+          ...config,
+          params: { before_id: before },
+        })
+        return readPlugins(result.data, before)
+      },
+      (list) => {
+        setPlugins((current) => [
+          ...current,
+          ...list.filter((item) => !current.some((old) => old.id === item.id)),
+        ])
+        setMore(list.length === 100)
+      }
+    )
 
   return (
     <SettingsSection title={t('Task usage plugins')}>
@@ -285,7 +364,12 @@ function TaskUsagePluginsContent({ session }: { session: AccountSession }) {
         <Button
           variant='outline'
           disabled={busy}
-          onClick={() => void load()}
+          onClick={() => {
+            if (!session.isCurrent()) return
+            setNotice('')
+            clearWriteError()
+            void load()
+          }}
         >
           {t('Refresh')}
         </Button>
