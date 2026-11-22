@@ -281,6 +281,9 @@ func (a *TaskAdaptor) validateDescriptor(descriptor requestDescriptor, baseURL s
 	if descriptor.ResponseType != "" && descriptor.ResponseType != "json" && descriptor.ResponseType != "sse" {
 		return errors.New("unsupported script responseType")
 	}
+	if len(descriptor.Parts) != 0 && descriptor.BodyType != "multipart" {
+		return errors.New("parts require multipart bodyType")
+	}
 	if err := pluginruntime.ValidateRequestURL(descriptor.URL, baseURL, a.plugin.Meta.AllowedHosts); err != nil {
 		return err
 	}

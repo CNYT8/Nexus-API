@@ -92,6 +92,11 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			return
 		}
 		started = true
+		if streamResponse.Response != nil {
+			// Usage snapshots can arrive before the terminal response. Merge them
+			// without letting a later partial or zero snapshot erase known usage.
+			applyResponsesStreamUsage(usage, streamResponse.Response.Usage)
+		}
 
 		// Preserve the distinction between explicit rejection and an empty or
 		// interrupted success. Record a soft error even if the scanner already
@@ -108,7 +113,6 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		switch streamResponse.Type {
 		case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
 			if streamResponse.Response != nil {
-				applyResponsesStreamUsage(usage, streamResponse.Response.Usage)
 				// A full terminal snapshot may contain more than the deltas we saw.
 				// Compare estimates rather than concatenating duplicate output.
 				outputs := gjson.Get(data, "response.output").Array()

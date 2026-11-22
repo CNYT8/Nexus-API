@@ -23,6 +23,12 @@ import (
 func setupWebRiskControllerTest(t *testing.T) *gorm.DB {
 	t.Helper()
 
+	previousDB, previousLog := model.DB, model.LOG_DB
+	previousSQLite, previousMySQL, previousPostgres, previousRedis := common.UsingSQLite, common.UsingMySQL, common.UsingPostgreSQL, common.RedisEnabled
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB = previousDB, previousLog
+		common.UsingSQLite, common.UsingMySQL, common.UsingPostgreSQL, common.RedisEnabled = previousSQLite, previousMySQL, previousPostgres, previousRedis
+	})
 	gin.SetMode(gin.TestMode)
 	common.UsingSQLite = true
 	common.UsingMySQL = false
@@ -32,8 +38,9 @@ func setupWebRiskControllerTest(t *testing.T) *gorm.DB {
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	model.DB = db
+	model.DB, model.LOG_DB = db, db
 	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.User{}, &model.WebRiskState{}))
+	require.NoError(t, model.MigrateAuthenticationSchema(db))
 	require.NoError(t, db.Create(&model.User{
 		Id:       7,
 		Username: "web-risk-user",
@@ -69,7 +76,11 @@ func setupWebRiskControllerTest(t *testing.T) *gorm.DB {
 }
 
 func TestGetWebRiskStatusImmediatelyBlocksFollowingSessionRequest(t *testing.T) {
-	setupWebRiskControllerTest(t)
+	db := setupWebRiskControllerTest(t)
+	var user model.User
+	require.NoError(t, db.First(&user, 7).Error)
+	secret, err := model.CreateUserSession(&user, "password", "", "")
+	require.NoError(t, err)
 
 	router := gin.New()
 	router.Use(sessions.Sessions("session", cookie.NewStore([]byte("web-risk-controller-session"))))
@@ -78,6 +89,7 @@ func TestGetWebRiskStatusImmediatelyBlocksFollowingSessionRequest(t *testing.T) 
 		session.Set("username", "web-risk-user")
 		session.Set("role", common.RoleCommonUser)
 		session.Set("id", 7)
+		session.Set(service.AuthSessionKey, secret)
 		session.Set("status", common.UserStatusEnabled)
 		session.Set("group", "default")
 		require.NoError(t, session.Save())

@@ -134,8 +134,10 @@ func TestCache12hResponsePaths(t *testing.T) {
 }
 
 func TestCache12hStreamSnapshotMerge(t *testing.T) {
-	first := `{"type":"response.completed","response":{"usage":{"input_tokens":12000,"output_tokens":500,"total_tokens":12500,"input_tokens_details":{"cached_tokens":4000,"cache_write_tokens":7000,"cache_write_tokens_details":{"ttl_30m_tokens":3000}}}}}`
-	partial := `{"type":"response.completed","response":{"usage":{"input_tokens_details":{"cache_write_tokens_details":{"ttl_12h_tokens":4000}}}}}`
+	// Partial snapshots precede the terminal event; response.completed ends
+	// scanning and cannot be used as an intermediate usage update.
+	first := `{"type":"response.in_progress","response":{"status":"in_progress","usage":{"input_tokens":12000,"output_tokens":500,"total_tokens":12500,"input_tokens_details":{"cached_tokens":4000,"cache_write_tokens":7000,"cache_write_tokens_details":{"ttl_30m_tokens":3000}}}}}`
+	partial := `{"type":"response.in_progress","response":{"status":"in_progress","usage":{"input_tokens_details":{"cache_write_tokens_details":{"ttl_12h_tokens":4000}}}}}`
 	zero := `{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"cache_write_tokens_details":{"ttl_30m_tokens":0,"ttl_12h_tokens":0}}}}}`
 	for _, path := range []string{"sse", "chat_sse"} {
 		t.Run(path, func(t *testing.T) {

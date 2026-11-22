@@ -118,7 +118,7 @@ func TestAuthenticationControllerPATPageEditAndCreationContracts(t *testing.T) {
 		recorder := accessTokenControllerRequest(t, user, secret, http.MethodPut, target, body, user.Id, false)
 		require.Equal(t, http.StatusBadRequest, recorder.Code)
 	}
-	other := &model.User{Username: "pat-other", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1}
+	other := &model.User{Username: "pat-other", AffCode: "pat-other", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1}
 	require.NoError(t, db.Create(other).Error)
 	_, foreign, err := model.CreateDashboardAccessToken(other, "foreign", []string{"self:read"}, expires)
 	require.NoError(t, err)

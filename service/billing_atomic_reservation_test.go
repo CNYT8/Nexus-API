@@ -29,13 +29,7 @@ func TestBillingSessionWalletTokenFailureRecoversAtomically(t *testing.T) {
 	for _, legacy := range []bool{false, true} {
 		t.Run(fmt.Sprintf("legacy=%v", legacy), func(t *testing.T) {
 			db, task := setupTaskLedgerTest(t)
-			// Accounting reads the persisted configuration inside its transaction;
-			// the shared fixture's process-local setting alone cannot enable rebates.
-			require.NoError(t, db.Create(&[]model.Option{
-				{Key: "rebate_setting.enabled", Value: "true"},
-				{Key: "rebate_setting.rate_basis_points", Value: "250"},
-				{Key: "rebate_setting.payout_mode", Value: "immediate"},
-			}).Error)
+			// setupTaskLedgerTest persists the rebate configuration before funding.
 			if legacy {
 				require.NoError(t, db.Where(map[string]interface{}{"key": "wallet_credit_baseline_v1"}).Delete(&model.RebateSystemState{}).Error)
 				require.NoError(t, db.Where("user_id = ?", task.UserId).Delete(&model.WalletCreditLot{}).Error)

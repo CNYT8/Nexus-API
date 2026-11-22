@@ -107,7 +107,7 @@ func TestAuthenticationLimitsSummaryRequiresOwnedActiveSession(t *testing.T) {
 	limits, err := GetUserSessionLimits(user.Id, record.Id)
 	require.NoError(t, err)
 	require.Equal(t, &UserSessionLimits{ActiveCount: 1, ActiveLimit: 50, IssuanceCount: 1, IssuanceLimit: 100, WindowSeconds: 86400}, limits)
-	other := &User{Username: "summary-other", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1}
+	other := &User{Username: "summary-other", AffCode: "summary-other", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1}
 	require.NoError(t, db.Create(other).Error)
 	_, err = GetUserSessionLimits(other.Id, record.Id)
 	require.ErrorIs(t, err, ErrAuthStateInvalid)

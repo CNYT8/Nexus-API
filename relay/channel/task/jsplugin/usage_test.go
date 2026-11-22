@@ -3,6 +3,8 @@ package jsplugin
 import (
 	"context"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,7 +27,7 @@ export function parseTaskResult(ctx,input,response) {
   return {taskId:ctx.taskId,status:"SUCCESS",completionTokens:17,totalTokens:19};
 }
 export function parseSubmitResponse(ctx,response) {
-  if (response.statusCode !== 202 || response.headers["X-Fixture"][0] !== "submit") throw new Error("submit response contract");
+  if (response.statusCode !== 202 || response.headers["X-Fixture"] !== "submit") throw new Error("submit response contract");
   const result = {taskId:"upstream-fixture",taskData:response.body,state:{cursor:"private-state"}};
   if (response.body.immediate) result.immediate = {taskId:result.taskId,status:"SUCCESS",completionTokens:17,totalTokens:19};
   return result;
@@ -138,10 +140,46 @@ func TestScriptInvalidEstimateBlocksDispatchBilling(t *testing.T) {
 	require.Equal(t, "estimate_usage_invalid", a.usageError)
 }
 
+func TestScriptSupportedRequestDescriptorsKeepEncodingConstraints(t *testing.T) {
+	a, _, _ := newUsageFixture(t)
+	descriptor := requestDescriptor{
+		URL: "https://fixture.invalid/task", ResponseType: "sse", BodyType: "multipart",
+		Parts: []any{map[string]any{"name": "prompt", "value": "hello"}},
+	}
+	require.NoError(t, a.validateDescriptor(descriptor, a.info.ChannelBaseUrl))
+	body, err := a.encodeDescriptor(&descriptor)
+	require.NoError(t, err)
+	mediaType, parameters, err := mime.ParseMediaType(descriptor.Headers["Content-Type"])
+	require.NoError(t, err)
+	require.Equal(t, "multipart/form-data", mediaType)
+	reader := multipart.NewReader(body, parameters["boundary"])
+	part, err := reader.NextPart()
+	require.NoError(t, err)
+	require.Equal(t, "prompt", part.FormName())
+	value, err := io.ReadAll(part)
+	require.NoError(t, err)
+	require.Equal(t, "hello", string(value))
+	require.NoError(t, part.Close())
+	_, err = reader.NextPart()
+	require.ErrorIs(t, err, io.EOF)
+
+	for _, invalid := range []requestDescriptor{
+		{BodyType: "multipart", Body: map[string]any{"prompt": "hello"}},
+		{BodyType: "multipart", Parts: []any{"part"}},
+		{BodyType: "multipart", Parts: []any{map[string]any{"name": "file", "fileRef": "request_file:missing"}}},
+		{BodyType: "multipart", Parts: []any{map[string]any{"name": "prompt\r\nInjected", "value": "hello"}}},
+		{BodyType: "multipart", Parts: []any{map[string]any{"name": "prompt", "value": "hello", "unexpected": true}}},
+	} {
+		_, err := a.encodeDescriptor(&invalid)
+		require.Error(t, err)
+	}
+}
+
 func TestScriptRejectsUnsupportedRequestDescriptors(t *testing.T) {
 	a, _, _ := newUsageFixture(t)
 	for _, descriptor := range []requestDescriptor{
-		{ResponseType: "sse"}, {BodyType: "multipart"}, {Parts: []any{"part"}},
+		{ResponseType: "xml"}, {BodyType: "raw"}, {Parts: []any{"part"}},
+		{BodyType: "json", Parts: []any{map[string]any{"name": "prompt", "value": "hello"}}},
 		{Credentialless: true}, {ContentPath: []any{"output"}}, {MimeType: "video/mp4"},
 	} {
 		descriptor.URL = "https://fixture.invalid/task"

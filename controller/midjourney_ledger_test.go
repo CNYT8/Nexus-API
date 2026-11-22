@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -34,6 +35,12 @@ func setupMidjourneyLedgerTest(t *testing.T) (*gorm.DB, *model.User, *model.Toke
 		InviterLimitPeriod: operation_setting.RebateLimitPeriodMonthly,
 		SiteTimezone:       "UTC",
 	}))
+	// Settlement reads its configuration from the transaction's database.
+	fields, err := config.ConfigToMap(operation_setting.GetRebateSetting())
+	require.NoError(t, err)
+	for key, value := range fields {
+		require.NoError(t, db.Create(&model.Option{Key: "rebate_setting." + key, Value: value}).Error)
+	}
 	t.Cleanup(func() {
 		common.BatchUpdateEnabled = originalBatch
 		require.NoError(t, operation_setting.UpdateRebateSetting(originalSetting))

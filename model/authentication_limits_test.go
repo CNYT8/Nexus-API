@@ -223,7 +223,7 @@ func TestAuthenticationLimitsPATEditOwnershipAndImmutableIdentity(t *testing.T) 
 	require.Equal(t, want, *updated)
 	_, err = UpdateDashboardAccessToken(user, original.Id, nil, []string{})
 	require.ErrorIs(t, err, ErrAccessTokenInvalid)
-	other := &User{Username: "another-owner", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1}
+	other := &User{Username: "another-owner", AffCode: "another-owner", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1}
 	require.NoError(t, db.Create(other).Error)
 	_, err = UpdateDashboardAccessToken(other, original.Id, &name, nil)
 	require.ErrorIs(t, err, gorm.ErrRecordNotFound)

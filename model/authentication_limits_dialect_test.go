@@ -70,7 +70,7 @@ func TestAuthenticationLimitsExternalDialectConcurrency(t *testing.T) {
 						active, issued = 50, 3
 					}
 					authenticationLimits(t, 3, active, issued)
-					user := &User{Username: kind, Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1}
+					user := &User{Username: kind, AffCode: kind, Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1}
 					require.NoError(t, db.Create(user).Error)
 					authenticationConcurrentIssuance(t, db, user, kind)
 				})

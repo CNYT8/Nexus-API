@@ -38,7 +38,7 @@ func TestManifestRejectsUnsupportedExecutionContracts(t *testing.T) {
 func TestUsageFactsRejectInvalidAndPreserveZero(t *testing.T) {
 	schema := map[string]UsageFieldSchema{"seconds": {Unit: "second"}, "credits": {Unit: "credit"}}
 	facts, err := ValidateUsageFacts(map[string]any{"seconds": float64(0), "credits": 3.5}, schema)
-	if err != nil || facts["seconds"] != 0 || facts["credits"] != 3.5 {
+	if err != nil || facts["seconds"] != float64(0) || facts["credits"] != 3.5 {
 		t.Fatalf("facts = %v, error = %v", facts, err)
 	}
 	for _, value := range []any{-1.0, math.NaN(), math.Inf(1), 3601.0, "5", nil} {

@@ -794,7 +794,7 @@ func (user *User) HardDelete() error {
 	var tokens []Token
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		if redisAvailable() {
-			if err := tx.Unscoped().Select("id", commonKeyCol).Where("user_id = ?", user.Id).Find(&tokens).Error; err != nil {
+			if err := tx.Unscoped().Select("id", "key").Where("user_id = ?", user.Id).Find(&tokens).Error; err != nil {
 				return err
 			}
 		}

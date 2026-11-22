@@ -61,6 +61,9 @@ func (*submitRetryAdaptor) DoResponse(_ *gin.Context, resp *http.Response, _ *re
 	_ = resp.Body.Close()
 	return "upstream-retry", []byte(`{"id":"upstream-retry"}`), nil
 }
+func (*submitRetryAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskInfo, error) {
+	return &relaycommon.TaskInfo{Status: string(model.TaskStatusSubmitted)}, nil
+}
 func (a *submitRetryAdaptor) factory(constant.TaskPlatform) channel.TaskAdaptor { return a }
 
 func setupSubmitRetryTest(t *testing.T, tokenQuota int, perCall bool) (*gorm.DB, *gin.Context, *relaycommon.RelayInfo) {

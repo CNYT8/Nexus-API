@@ -31,13 +31,12 @@ func responsesStreamIndexKey(itemID string, idx *int) string {
 }
 
 func stringDeltaFromPrefix(prev string, next string) string {
-	if next == "" {
+	// A snapshot is cumulative, not another delta. Once text has been sent,
+	// an older or conflicting snapshot cannot replace it on the wire.
+	if !strings.HasPrefix(next, prev) {
 		return ""
 	}
-	if prev != "" && strings.HasPrefix(next, prev) {
-		return next[len(prev):]
-	}
-	return next
+	return next[len(prev):]
 }
 
 func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
@@ -335,7 +334,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			toolCallCanonicalIDByItemID[item.ID] = callID
 			next := item.ArgumentsString()
 			delta := stringDeltaFromPrefix(toolCallArgsByID[callID], next)
-			if next != "" {
+			if strings.HasPrefix(next, toolCallArgsByID[callID]) {
 				toolCallArgsByID[callID] = next
 			}
 			return sendToolCallDelta(callID, item.Name, delta)
@@ -351,7 +350,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			for i, part := range parts {
 				partKey := reasoningKey(item.ID, index, &i, isSummary)
 				delta := stringDeltaFromPrefix(reasoningByKey[partKey], part.Text)
-				if part.Text != "" {
+				if strings.HasPrefix(part.Text, reasoningByKey[partKey]) {
 					reasoningByKey[partKey] = part.Text
 				}
 				if !sendReasoningSummaryDelta(partKey, delta) {
@@ -374,7 +373,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			}
 			if part.Type == "output_text" {
 				delta := stringDeltaFromPrefix(textByKey[partKey], part.Text)
-				if part.Text != "" {
+				if strings.HasPrefix(part.Text, textByKey[partKey]) {
 					textByKey[partKey] = part.Text
 				}
 				textDelta.WriteString(delta)
@@ -391,7 +390,9 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			}
 			if part.Refusal != "" {
 				delta := stringDeltaFromPrefix(refusalByKey[partKey], part.Refusal)
-				refusalByKey[partKey] = part.Refusal
+				if strings.HasPrefix(part.Refusal, refusalByKey[partKey]) {
+					refusalByKey[partKey] = part.Refusal
+				}
 				refusalDelta.WriteString(delta)
 				usageText.WriteString(delta)
 			}
@@ -486,7 +487,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				next = streamResp.Part.Text
 			}
 			delta := stringDeltaFromPrefix(reasoningByKey[key], next)
-			if next != "" {
+			if strings.HasPrefix(next, reasoningByKey[key]) {
 				reasoningByKey[key] = next
 			}
 			if !sendReasoningSummaryDelta(key, delta) {
@@ -557,7 +558,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			}
 			next := dto.ResponsesArgumentsString(streamResp.Arguments)
 			delta := stringDeltaFromPrefix(toolCallArgsByID[callID], next)
-			if next != "" {
+			if strings.HasPrefix(next, toolCallArgsByID[callID]) {
 				toolCallArgsByID[callID] = next
 			}
 			if !sendToolCallDelta(callID, "", delta) {

@@ -395,10 +395,12 @@ func TestTopUpQuoteOrderSettlementUnits(t *testing.T) {
 	require.NoError(t, env.db.AutoMigrate(&model.Log{}))
 	// Only the payment providers are stubbed. Real controller binding, quote,
 	// stored order and model settlement/capacity code run against SQLite.
+	checkoutSequence := 0
 	transport := topUpRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		body := `{"id":"cs_test","url":"https://checkout.example.com"}`
+		checkoutSequence++
+		body := fmt.Sprintf(`{"id":"cs_test_%d","url":"https://checkout.example.com"}`, checkoutSequence)
 		if strings.Contains(req.URL.Host, "creem") {
-			body = `{"id":"creem_test","checkout_url":"https://checkout.example.com"}`
+			body = fmt.Sprintf(`{"id":"creem_test_%d","checkout_url":"https://checkout.example.com"}`, checkoutSequence)
 		}
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})
@@ -465,7 +467,12 @@ func TestTopUpQuoteOrderSettlementUnits(t *testing.T) {
 					case "epay":
 						return model.RechargeEpay(order.TradeNo, "alipay", "127.0.0.1", confirmation)
 					case "stripe":
-						return model.Recharge(order.TradeNo, "cus_test", "127.0.0.1")
+						var binding model.TopUpPaymentBinding
+						require.NoError(t, env.db.Where("trade_no = ?", order.TradeNo).First(&binding).Error)
+						paidMinor, err := model.TopUpProviderMinorAmount(confirmation.Amount, 2)
+						require.NoError(t, err)
+						identity := model.TopUpPaymentIdentity{Provider: provider.provider, CheckoutID: binding.CheckoutID, PaymentID: "pi_" + order.TradeNo, Currency: "USD", PaidMinor: paidMinor}
+						return model.Recharge(order.TradeNo, "cus_test", "127.0.0.1", identity)
 					case "waffo":
 						return model.RechargeWaffo(order.TradeNo, "127.0.0.1", confirmation)
 					default:
@@ -501,8 +508,11 @@ func TestTopUpQuoteOrderSettlementUnits(t *testing.T) {
 	require.EqualValues(t, math.MaxInt32, order.Amount)
 	require.Equal(t, 9.99, order.Money)
 	confirmation := model.PaymentConfirmation{Amount: "9.99", Currency: "USD", ExpectedCurrency: "USD", DecimalPlaces: 2}
-	require.NoError(t, model.RechargeCreem(order.TradeNo, "127.0.0.1", confirmation))
-	require.NoError(t, model.RechargeCreem(order.TradeNo, "127.0.0.1", confirmation))
+	var binding model.TopUpPaymentBinding
+	require.NoError(t, env.db.Where("trade_no = ?", order.TradeNo).First(&binding).Error)
+	identity := model.TopUpPaymentIdentity{Provider: model.PaymentProviderCreem, CheckoutID: binding.CheckoutID, PaymentID: "order_" + order.TradeNo, Currency: "USD", PaidMinor: 999}
+	require.NoError(t, model.RechargeCreem(order.TradeNo, "127.0.0.1", confirmation, identity))
+	require.NoError(t, model.RechargeCreem(order.TradeNo, "127.0.0.1", confirmation, identity))
 	var user model.User
 	require.NoError(t, env.db.First(&user, userID).Error)
 	require.Equal(t, math.MaxInt32, user.Quota)
